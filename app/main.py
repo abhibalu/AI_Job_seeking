@@ -334,6 +334,18 @@ def ui_create_variant(name: str):
     return RedirectResponse(url=f"/ui/variant/{name}", status_code=303)
 
 
+# Lightweight API for n8n
+@app.get("/approved")
+def list_approved():
+    statuses = get_approvals()
+    return [v for v, st in statuses.items() if st.status == "approved"]
+
+
+@app.get("/status/{variant}")
+def get_status(variant: str):
+    st = get_approvals().get(variant)
+    return {"variant": variant, "status": (st.status if st else "draft"), "updated_at": (st.updated_at if st else None)}
+
 @app.get("/")
 def root():
     return {"ok": True}

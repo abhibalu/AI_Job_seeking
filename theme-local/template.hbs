@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{#if basics.name}}{{basics.name}}{{/if}}{{#if basics.label}} - {{basics.label}}{{/if}}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.4; color: #111; margin: 24px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px; }
+    h3 { font-size: 14px; margin: 12px 0 4px; }
+    p, li { font-size: 13px; }
+    ul { margin: 6px 0 10px 18px; }
+    a { color: #0366d6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .muted { color: #555; }
+    .header { text-align: center; }
+    .header p { margin: 2px 0; }
+    .split { display: inline; }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>{{basics.name}}</h1>
+    <p>
+      {{#if basics.location}}
+        {{#if basics.location.city}}{{basics.location.city}}{{/if}}{{#if basics.location.region}}, {{basics.location.region}}{{/if}}{{#if basics.location.countryCode}}, {{basics.location.countryCode}}{{/if}}
+      {{/if}}
+      {{#if basics.xStatus}} • <strong>{{basics.xStatus}}</strong>{{/if}}
+      {{#if basics.phone}} • <strong>{{basics.phone}}</strong>{{/if}}
+      {{#if basics.email}} • <strong>{{basics.email}}</strong>{{/if}}
+      {{#with basics.profiles}}
+        {{#if (linkedinUrl this)}} • <a href="{{linkedinUrl this}}" target="_blank">LinkedIn</a>{{/if}}
+      {{/with}}
+    </p>
+  </header>
+
+  {{#if basics.summary}}
+  <h2>Professional Summary</h2>
+  <p>{{basics.summary}}</p>
+  {{/if}}
+
+
+  {{#if work}}
+  <h2>Professional Experience</h2>
+  {{#each work}}
+    <h3>
+      {{#if position}}{{position}}{{/if}}
+      {{#if name}} | {{name}}{{/if}}
+      {{#if location}} | {{location}}{{/if}}
+      {{#if startDate}} | {{dateRange startDate endDate}}{{/if}}
+    </h3>
+    {{#if summary}}<p class="muted">{{summary}}</p>{{/if}}
+    {{#if highlights}}
+      <ul>
+        {{#each highlights}}
+          <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    {{/if}}
+  {{/each}}
+  {{/if}}
+
+  {{#if projects}}
+  <h2>Projects</h2>
+  {{#each projects}}
+    <h3>{{name}}</h3>
+    {{#if description}}<p class="muted">{{description}}</p>{{/if}}
+    {{#if highlights}}
+      <ul>
+        {{#each highlights}}
+          <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    {{/if}}
+  {{/each}}
+  {{/if}}
+
+  {{#if education}}
+  <h2>Education</h2>
+  <ul>
+    {{#each education}}
+      <li>
+        {{#if studyType}}<strong>{{studyType}}</strong>{{/if}}{{#if area}}, {{area}}{{/if}} | {{institution}}
+        {{#if endDate}} | {{endDate}}{{/if}}
+      </li>
+    {{/each}}
+  </ul>
+  {{/if}}
+
+  {{#if skills}}
+  <h2>Skills</h2>
+  <ul>
+    {{#each skills}}
+      <li>
+        <strong>{{name}}</strong>
+        {{#if keywords}}: {{join keywords ", "}}{{/if}}
+      </li>
+    {{/each}}
+  </ul>
+  {{/if}}
+</body>
+</html>

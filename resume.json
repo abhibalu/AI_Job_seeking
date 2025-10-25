@@ -1,0 +1,154 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
+  "basics": {
+    "name": "Abhijith Sivadas Moothedath",
+    "label": "Data Engineer",
+    "email": "abhijith.sivadas.moothedath@gmail.com",
+    "phone": "+353892704877",
+    "location": {
+      "city": "Dublin",
+      "countryCode": "IE",
+      "postalCode": "D16V5N8"
+    },
+    "profiles": [
+      {
+        "network": "LinkedIn",
+        "username": "abhijithsivadas",
+        "url": "https://www.linkedin.com/in/abhijithsivadas"
+      },
+      {
+        "network": "GitHub",
+        "username": "abhibalu",
+        "url": "https://github.com/abhibalu/web2warehouse"
+      }
+    ]
+  },
+  "work": [
+    {
+      "id": "metro",
+      "name": "METRO Global Solution Center",
+      "position": "Data Engineer",
+      "location": "Bangalore, India",
+      "startDate": "2024-07",
+      "endDate": "2025-02",
+      "highlights": [
+        "Designed and maintained scalable ETL pipelines using Apache Airflow and dbt, ensuring high data quality during ingestion and transformation.",
+        "Migrated over 45 TB of data across Salesforce, GCP BigQuery, and Odoo, achieving 96–100% accuracy.",
+        "Developed over 20 automated DAGs to orchestrate data workflows, improving performance by 40% and reducing failures by 15%.",
+        "Built scalable APIs using Apigee/API Gateway and Cloud Functions to securely deliver processed BigQuery data.",
+        "Drove agile teamwork to deliver reliable data products aligned with business goals, ensuring timely Jira delivery.",
+        "Contributed to proof-of-concept initiatives evaluating modern data tools for pipeline optimization and processing.",
+        "Mentored new hires on Airflow, dbt, and core data engineering practices."
+      ]
+    },
+    {
+      "id": "eviden",
+      "name": "Eviden (an Atos Company)",
+      "position": "Data Engineer",
+      "location": "Bangalore, India",
+      "startDate": "2022-02",
+      "endDate": "2024-07",
+      "highlights": [
+        "Orchestrated scalable batch workflows with Azure Data Factory, enabling efficient data movement between sources, ADLS Gen2, and Databricks.",
+        "Executed PySpark transformations in Databricks for five critical daily reports.",
+        "Optimized ADLS Gen2 data storage through partitioning, reducing retrieval times by 40%.",
+        "Managed and built Apache Airflow DAGs to orchestrate data workflows across two business lines.",
+        "Migrated data from Teradata to BigQuery, ensuring seamless transitions.",
+        "Used SQL to debug and validate data in BigQuery against legacy systems.",
+        "Optimized BigQuery query performance for faster execution.",
+        "Leveraged Dataflow for data extraction from SQL Server using full and incremental loads."
+      ]
+    },
+    {
+      "id": "playo",
+      "name": "Playo",
+      "position": "Business Development Head",
+      "location": "Kerala, India",
+      "startDate": "2018-12",
+      "endDate": "2022-02",
+      "highlights": [
+        "Launched Buy-Now-Pay-Later feature, driving regional revenue growth of 130% in 12 months.",
+        "Developed lightweight ETL pipelines using Google Cloud Functions to automate data integration into BigQuery.",
+        "Designed and deployed interactive Power BI dashboards to track KPIs, influencing P&L strategy and retention initiatives.",
+        "Trained junior staff on business development and client management best practices."
+      ]
+    },
+    {
+      "id": "dairy",
+      "name": "Family-Run Dairy Business",
+      "position": "Co-Founder / Entrepreneur",
+      "location": "India",
+      "startDate": "2016-02",
+      "endDate": "2018-12",
+      "highlights": [
+        "Managed daily operations and P&L for the family-run dairy business, strengthening stakeholder management skills.",
+        "Accelerated lead generation and supplier onboarding, improving partner alignment.",
+        "Led sales and inventory management initiatives, enhancing brand presence."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "The University of Texas at Austin",
+      "area": "Data Science and Business Analytics",
+      "studyType": "Postgraduate Degree (Executive PG, Online)",
+      "endDate": "2022-04"
+    },
+    {
+      "institution": "Mahatma Gandhi University",
+      "area": "Computer Science",
+      "studyType": "Bachelor of Technology",
+      "endDate": "2015-06"
+    }
+  ],
+  "skills": [
+  {
+    "name": "Languages & Frameworks",
+    "keywords": [
+      "Python",
+      "SQL",
+      "Shell Scripting",
+      "PySpark"
+    ]
+  },
+  {
+    "name": "Data Engineering & Cloud Tools",
+    "keywords": [
+      "Apache Airflow",
+      "dbt",
+      "Databricks",
+      "Azure Data Factory",
+      "Dagster"
+    ]
+  },
+  {
+    "name": "Data Storage & Warehousing",
+    "keywords": [
+      "PostgreSQL",
+      "MySQL",
+      "MongoDB",
+      "BigQuery",
+      "Teradata",
+      "Snowflake",
+      "ADLS Gen2",
+      "GCS"
+    ]
+  },
+  {
+    "name": "Infrastructure & DevOps",
+    "keywords": [
+      "Docker",
+      "Terraform",
+      "Git"
+    ]
+  },
+  {
+    "name": "Analytics & Visualization",
+    "keywords": [
+      "Power BI",
+      "Excel"
+    ]
+  }
+],
+"meta": { "theme": "elegant" }
+}

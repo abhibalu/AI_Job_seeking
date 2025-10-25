@@ -1,0 +1,23 @@
+# Node
+node_modules/
+package-lock.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Builds/outputs
+out/
+*.pdf
+*.html
+
+# OS
+.DS_Store
+
+# Env
+.env
+.env.local
+
+# VCS
+.git-credentials

@@ -221,7 +221,7 @@ def export_resume(variant_name: str, fmt: str = "pdf", theme: Optional[str] = No
         if val == "elegant":
             return "elegant"
         if val == "local":
-            return str(ROOT / "theme-local")
+            return "local"  # installed as jsonresume-theme-local in node_modules
         return val  # allow custom theme name/path
 
     def run_export(theme_arg: str):

@@ -12,6 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "handlebars": "^4.7.8",
-    "jsonresume-theme-elegant": "^1.16.1"
+    "jsonresume-theme-elegant": "^1.16.1",
+    "jsonresume-theme-local": "file:theme-local"
   }
 }

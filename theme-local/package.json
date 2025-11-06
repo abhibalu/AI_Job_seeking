@@ -1,0 +1,9 @@
+{
+  "name": "jsonresume-theme-local",
+  "version": "1.0.0",
+  "description": "Custom clean JSON Resume theme",
+  "main": "index.js",
+  "dependencies": {
+    "handlebars": "^4.7.8"
+  }
+}

@@ -19,9 +19,6 @@ APPROVALS_PATH = ROOT / "approvals.json"
 
 app = FastAPI(title="Resume API")
 
-# Mount output dir to serve generated previews/downloads
-app.mount("/out", StaticFiles(directory=str(OUT_DIR)), name="out")
-
 VARIANTS_DIR.mkdir(exist_ok=True)
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -298,3 +295,7 @@ def get_status(variant: str):
 def root():
     """Health check endpoint."""
     return {"ok": True}
+
+
+# Mount static files LAST to avoid blocking routes
+app.mount("/out", StaticFiles(directory=str(OUT_DIR)), name="out")

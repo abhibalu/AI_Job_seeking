@@ -186,37 +186,62 @@ def get_variant_pdf(variant_name: str):
 
 
 @app.post("/export")
-def export_resume(variant_name: str, fmt: str = "pdf"):
-    """Export a variant resume as HTML or PDF with custom naming."""
+def export_resume(variant_name: str, fmt: str = "pdf", theme: Optional[str] = None):
+    """Export a variant resume as HTML or PDF with custom naming.
+
+    Params:
+    - variant_name: name of stored variant (required)
+    - fmt: 'html' or 'pdf' (default 'pdf')
+    - theme: optional; 'elegant' to use jsonresume-theme-elegant, 'local' (default) for theme-local, or any theme name/path.
+      If the chosen theme fails and it's 'local' (or unset), we automatically fallback to 'elegant'.
+    """
     variant_data = get_variant(variant_name)
     resume_json = variant_data.get("resume")
     company = variant_data.get("company_name", "unknown")
-    
+
     # Write to temp file for resume-cli
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
         json.dump(resume_json, tf, ensure_ascii=False, indent=2)
         tmp_path = tf.name
-    
+
     OUT_DIR.mkdir(exist_ok=True)
     variant_dir = OUT_DIR / variant_name
     variant_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Custom filename: Abhijith_sivadas_moothedath_{company_name}.{fmt}
     filename = f"Abhijith_sivadas_moothedath_{company}.{fmt}"
     out_file = variant_dir / filename
 
-    if fmt in ("html", "pdf"):
+    if fmt not in ("html", "pdf"):
+        raise HTTPException(400, "unsupported fmt; use html or pdf")
+
+    # Resolve theme argument
+    chosen = theme or "local"
+    def theme_value(val: str) -> str:
+        if val == "elegant":
+            return "elegant"
+        if val == "local":
+            return str(ROOT / "theme-local")
+        return val  # allow custom theme name/path
+
+    def run_export(theme_arg: str):
         cmd = [
             "resume", "export", str(out_file),
-            "--theme", str(ROOT / "theme-local"),
+            "--theme", theme_arg,
             "--resume", tmp_path,
         ]
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            raise HTTPException(500, f"export failed: {e}")
-    else:
-        raise HTTPException(400, "unsupported fmt; use html or pdf")
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    # First attempt
+    res = run_export(theme_value(chosen))
+
+    # Fallback to elegant if local failed
+    if res.returncode != 0 and chosen in (None, "local"):
+        fallback = run_export("elegant")
+        if fallback.returncode != 0:
+            raise HTTPException(500, f"export failed. local stderr: {res.stderr or res.stdout} | elegant stderr: {fallback.stderr or fallback.stdout}")
+    elif res.returncode != 0:
+        raise HTTPException(500, f"export failed. stderr: {res.stderr or res.stdout}")
 
     return FileResponse(path=str(out_file), filename=filename)
 

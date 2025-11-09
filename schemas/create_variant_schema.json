@@ -1,0 +1,258 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CreateVariantRequest",
+  "description": "Schema for creating a new resume variant via POST /variants",
+  "type": "object",
+  "required": ["variant_name", "company_name", "tailored_resume"],
+  "properties": {
+    "variant_name": {
+      "type": "string",
+      "description": "Unique identifier for the variant. Format: abhijith_sivadas_moothedath_{company_slug}",
+      "pattern": "^abhijith_sivadas_moothedath_[a-z0-9_]+$",
+      "examples": [
+        "abhijith_sivadas_moothedath_sosafe",
+        "abhijith_sivadas_moothedath_salesforce"
+      ]
+    },
+    "company_name": {
+      "type": "string",
+      "description": "Company name for this job application (used in PDF filename)",
+      "minLength": 1,
+      "examples": ["SoSafe", "Salesforce", "Pfizer"]
+    },
+    "tailored_resume": {
+      "type": "object",
+      "description": "JSON Resume format with AI-tailored work experience and skills, plus optional meta.modifications for change tracking",
+      "required": ["basics", "work", "education", "skills"],
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "const": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json"
+        },
+        "basics": {
+          "type": "object",
+          "required": ["name", "label", "email", "phone", "location", "profiles"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "const": "Abhijith Sivadas Moothedath"
+            },
+            "label": {
+              "type": "string",
+              "description": "Job title from the job posting",
+              "examples": ["Senior Data Engineer", "Data Engineer - AI and Automation"]
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            },
+            "phone": {
+              "type": "string"
+            },
+            "location": {
+              "type": "object",
+              "properties": {
+                "city": {"type": "string"},
+                "countryCode": {"type": "string"},
+                "postalCode": {"type": "string"}
+              }
+            },
+            "profiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "network": {"type": "string"},
+                  "username": {"type": "string"},
+                  "url": {"type": "string", "format": "uri"}
+                }
+              }
+            }
+          }
+        },
+        "work": {
+          "type": "array",
+          "description": "Work experience with AI-tailored highlights",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "position", "location", "startDate", "highlights"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier (metro, eviden, playo, dairy)",
+                "enum": ["metro", "eviden", "playo", "dairy"]
+              },
+              "name": {"type": "string"},
+              "position": {"type": "string"},
+              "location": {"type": "string"},
+              "startDate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$"
+              },
+              "endDate": {
+                "type": ["string", "null"],
+                "pattern": "^\\d{4}-\\d{2}$"
+              },
+              "highlights": {
+                "type": "array",
+                "description": "AI-rewritten bullet points emphasizing job description keywords",
+                "items": {"type": "string"},
+                "minItems": 1
+              }
+            }
+          }
+        },
+        "education": {
+          "type": "array",
+          "description": "Education history (keep unchanged from base resume)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "institution": {"type": "string"},
+              "area": {"type": "string"},
+              "studyType": {"type": "string"},
+              "endDate": {"type": "string"}
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "description": "Skills grouped by category, reordered to prioritize JD keywords",
+          "items": {
+            "type": "object",
+            "required": ["name", "keywords"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Skill category name",
+                "examples": [
+                  "Languages & Frameworks",
+                  "Data Engineering & Cloud Tools",
+                  "Data Storage & Warehousing"
+                ]
+              },
+              "keywords": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "description": "Optional metadata for tracking AI modifications (used for review highlighting)",
+          "properties": {
+            "modifications": {
+              "type": "object",
+              "properties": {
+                "work": {
+                  "type": "object",
+                  "description": "Map of work item IDs to their modifications",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "edited_bullets": {
+                        "type": "array",
+                        "description": "Zero-indexed array of modified bullet indices",
+                        "items": {"type": "integer", "minimum": 0},
+                        "examples": [[0, 2, 3], [1, 4]]
+                      }
+                    }
+                  }
+                },
+                "skills": {
+                  "type": "object",
+                  "properties": {
+                    "added_keywords": {
+                      "type": "array",
+                      "description": "List of newly added skill keywords",
+                      "items": {"type": "string"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "variant_name": "abhijith_sivadas_moothedath_sosafe",
+      "company_name": "SoSafe",
+      "tailored_resume": {
+        "$schema": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
+        "basics": {
+          "name": "Abhijith Sivadas Moothedath",
+          "label": "Senior Data Engineer (m/f/d) Remote",
+          "email": "abhijith.sivadas.moothedath@gmail.com",
+          "phone": "+353892704877",
+          "location": {
+            "city": "Dublin",
+            "countryCode": "IE",
+            "postalCode": "D16V5N8"
+          },
+          "profiles": [
+            {
+              "network": "LinkedIn",
+              "username": "abhijithsivadas",
+              "url": "https://www.linkedin.com/in/abhijithsivadas"
+            },
+            {
+              "network": "GitHub",
+              "username": "abhibalu",
+              "url": "https://github.com/abhibalu/web2warehouse"
+            }
+          ]
+        },
+        "work": [
+          {
+            "id": "metro",
+            "name": "METRO Global Solution Center",
+            "position": "Data Engineer",
+            "location": "Bangalore, India",
+            "startDate": "2024-07",
+            "endDate": "2025-02",
+            "highlights": [
+              "Designed and maintained scalable ETL pipelines using Apache Airflow and dbt on AWS.",
+              "Migrated over 45 TB of data with 96-100% accuracy using AWS DMS and event-driven architectures.",
+              "Developed 20+ automated DAGs with CI/CD integration, improving performance by 40%."
+            ]
+          }
+        ],
+        "education": [
+          {
+            "institution": "The University of Texas at Austin",
+            "area": "Data Science and Business Analytics",
+            "studyType": "Postgraduate Degree (Executive PG, Online)",
+            "endDate": "2022-04"
+          }
+        ],
+        "skills": [
+          {
+            "name": "Languages & Frameworks",
+            "keywords": ["Python", "SQL", "PySpark"]
+          },
+          {
+            "name": "Data Engineering & Cloud Tools",
+            "keywords": ["Apache Airflow", "dbt", "AWS Glue", "Databricks"]
+          }
+        ],
+        "meta": {
+          "modifications": {
+            "work": {
+              "metro": {
+                "edited_bullets": [0, 1, 2]
+              }
+            },
+            "skills": {
+              "added_keywords": []
+            }
+          }
+        }
+      }
+    }
+  ]
+}

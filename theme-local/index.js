@@ -22,6 +22,11 @@ Handlebars.registerHelper('dateRange', function(start, end) {
   return `${s} – ${e}`;
 });
 
+Handlebars.registerHelper('isEdited', function(index, editedArray) {
+  if (!Array.isArray(editedArray)) return false;
+  return editedArray.includes(index);
+});
+
 module.exports = {
   render: function(resume) {
     const templatePath = path.join(__dirname, 'template.hbs');

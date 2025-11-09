@@ -17,6 +17,22 @@
     .header { text-align: center; }
     .header p { margin: 2px 0; }
     .split { display: inline; }
+    
+    /* AI-edited highlight */
+    .ai-edited {
+      background: linear-gradient(to right, #fffbf0 0%, transparent 100%);
+      border-left: 3px solid #ffd700;
+      padding-left: 8px;
+      margin-left: -8px;
+      position: relative;
+    }
+    .ai-edited::before {
+      content: '✏️';
+      position: absolute;
+      left: -18px;
+      font-size: 11px;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
@@ -54,7 +70,7 @@
     {{#if highlights}}
       <ul>
         {{#each highlights}}
-          <li>{{this}}</li>
+          <li class="{{#if @root.meta.modifications.work.[../id].edited_bullets}}{{#if (isEdited @index @root.meta.modifications.work.[../id].edited_bullets)}}ai-edited{{/if}}{{/if}}">{{this}}</li>
         {{/each}}
       </ul>
     {{/if}}

@@ -70,7 +70,11 @@
     {{#if highlights}}
       <ul>
         {{#each highlights}}
-          <li class="{{#if @root.meta.modifications.work.[../id].edited_bullets}}{{#if (isEdited @index @root.meta.modifications.work.[../id].edited_bullets)}}ai-edited{{/if}}{{/if}}">{{this}}</li>
+          {{#if (isEdited @index (getEditedBullets ../id @root))}}
+          <li class="ai-edited">{{this}}</li>
+          {{else}}
+          <li>{{this}}</li>
+          {{/if}}
         {{/each}}
       </ul>
     {{/if}}

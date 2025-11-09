@@ -1,0 +1,17 @@
+{
+  "abhijith_sivadas_moothedath_sosafe": {
+    "variant": "abhijith_sivadas_moothedath_sosafe",
+    "status": "approved",
+    "updated_at": "2025-11-09T14:12:03.661555"
+  },
+  "test": {
+    "variant": "test",
+    "status": "approved",
+    "updated_at": "2025-11-09T14:10:46.270633"
+  },
+  "abhijith_sivadas_moothedath_test_highlights": {
+    "variant": "abhijith_sivadas_moothedath_test_highlights",
+    "status": "approved",
+    "updated_at": "2025-11-09T14:20:10.988273"
+  }
+}

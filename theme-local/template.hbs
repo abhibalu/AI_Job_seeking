@@ -18,20 +18,38 @@
     .header p { margin: 2px 0; }
     .split { display: inline; }
     
-    /* AI-edited highlight */
+    /* AI-edited highlight (review mode only) */
     .ai-edited {
-      background: linear-gradient(to right, #fffbf0 0%, transparent 100%);
-      border-left: 3px solid #ffd700;
-      padding-left: 8px;
-      margin-left: -8px;
+      background: linear-gradient(to right, #fffacd 0%, transparent 100%);
+      border-left: 2px solid #ffa500;
+      padding-left: 6px;
+      margin-left: -6px;
+      cursor: help;
       position: relative;
     }
-    .ai-edited::before {
-      content: '✏️';
+    .ai-edited:hover {
+      background: #fffacd;
+    }
+    /* Tooltip with original text */
+    .ai-edited[data-original]::after {
+      content: "Original: " attr(data-original);
       position: absolute;
-      left: -18px;
-      font-size: 11px;
-      opacity: 0.7;
+      left: 0;
+      top: 100%;
+      background: #333;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: normal;
+      max-width: 400px;
+      z-index: 10;
+      display: none;
+      margin-top: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .ai-edited[data-original]:hover::after {
+      display: block;
     }
   </style>
 </head>
@@ -70,8 +88,12 @@
     {{#if highlights}}
       <ul>
         {{#each highlights}}
-          {{#if (isEdited @index (getEditedBullets ../id @root))}}
-          <li class="ai-edited">{{this}}</li>
+          {{#if @root._review_mode}}
+            {{#if (isEdited @index (getEditedBullets ../id @root))}}
+          <li class="ai-edited" data-original="{{getOriginalBullet ../id @index @root}}">{{this}}</li>
+            {{else}}
+          <li>{{this}}</li>
+            {{/if}}
           {{else}}
           <li>{{this}}</li>
           {{/if}}

@@ -186,7 +186,7 @@ def get_variant_pdf(variant_name: str):
 
 
 @app.post("/export")
-def export_resume(variant_name: str, fmt: str = "pdf", theme: Optional[str] = None):
+def export_resume(variant_name: str, fmt: str = "pdf", theme: Optional[str] = None, review: bool = False):
     """Export a variant resume as HTML or PDF with custom naming.
 
     Params:
@@ -194,14 +194,29 @@ def export_resume(variant_name: str, fmt: str = "pdf", theme: Optional[str] = No
     - fmt: 'html' or 'pdf' (default 'pdf')
     - theme: optional; 'elegant' to use jsonresume-theme-elegant, 'local' (default) for theme-local, or any theme name/path.
       If the chosen theme fails and it's 'local' (or unset), we automatically fallback to 'elegant'.
+    - review: if True (HTML only), enables highlighting of AI-edited bullets for review; False = clean final output
     """
     variant_data = get_variant(variant_name)
     resume_json = variant_data.get("resume")
     company = variant_data.get("company_name", "unknown")
 
+    # For review mode (HTML only), inject a flag; for final PDF/HTML, strip meta
+    output_json = json.loads(json.dumps(resume_json))  # deep copy
+    if review and fmt == "html":
+        # Keep meta for highlighting, add review flag
+        output_json["_review_mode"] = True
+        # Also fetch base resume to show original text
+        base = read_json(BASE_PATH)
+        output_json["_base_resume"] = base
+    else:
+        # Clean final output: remove meta
+        output_json.pop("meta", None)
+        output_json.pop("_review_mode", None)
+        output_json.pop("_base_resume", None)
+
     # Write to temp file for resume-cli
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
-        json.dump(resume_json, tf, ensure_ascii=False, indent=2)
+        json.dump(output_json, tf, ensure_ascii=False, indent=2)
         tmp_path = tf.name
 
     OUT_DIR.mkdir(exist_ok=True)
@@ -287,12 +302,12 @@ def ui_reject(variant: str):
 
 
 @app.post("/ui/export/{variant_name}/{fmt}")
-def ui_export(variant_name: str, fmt: str):
+def ui_export(variant_name: str, fmt: str, review: bool = False):
     """Trigger export of variant and redirect browser to the output file."""
     if fmt not in ("html", "pdf"):
         raise HTTPException(400, "fmt must be html or pdf")
-    # Trigger export
-    export_resume(variant_name=variant_name, fmt=fmt)
+    # Trigger export (review mode for HTML preview, clean for PDF)
+    export_resume(variant_name=variant_name, fmt=fmt, review=review)
     # Compute output path and redirect
     variant_data = get_variant(variant_name)
     company = variant_data.get("company_name", "unknown")

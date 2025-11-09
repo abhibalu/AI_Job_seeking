@@ -35,6 +35,15 @@ Handlebars.registerHelper('getEditedBullets', function(workId, resume) {
   return Array.isArray(edits?.edited_bullets) ? edits.edited_bullets : [];
 });
 
+Handlebars.registerHelper('getOriginalBullet', function(workId, bulletIndex, resume) {
+  // Retrieve the original bullet text from _base_resume
+  const base = resume?._base_resume;
+  if (!base || !workId) return '';
+  const workItem = (base.work || []).find(w => w.id === workId);
+  if (!workItem || !Array.isArray(workItem.highlights)) return '';
+  return workItem.highlights[bulletIndex] || '';
+});
+
 module.exports = {
   render: function(resume) {
     const templatePath = path.join(__dirname, 'template.hbs');

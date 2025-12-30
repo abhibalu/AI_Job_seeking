@@ -1,0 +1,5 @@
+{
+  "name": "GlassResuMatch AI",
+  "description": "A modern, glassmorphic AI resume tailoring dashboard that analyzes job descriptions, identifying gaps and providing match scores.",
+  "requestFramePermissions": []
+}

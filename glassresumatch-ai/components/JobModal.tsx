@@ -4,7 +4,7 @@ import { parseJobDescription, getParsedJD } from '../services/jobService';
 import {
   X, CheckCircle, AlertTriangle, XCircle, User, FileText,
   Lightbulb, Target, MessageSquare, Sparkles, ChevronDown, ChevronUp,
-  BookOpen, Zap, HelpCircle
+  BookOpen, Zap, HelpCircle, ExternalLink
 } from 'lucide-react';
 import { GlassCard } from './GlassCard';
 
@@ -97,8 +97,8 @@ export const JobModal: React.FC<JobModalProps> = ({ evaluation, onClose, onEvalu
               </div>
               <div className="mt-2 flex items-center space-x-2">
                 <span className={`text-sm font-medium px-2 py-1 rounded ${evaluation.verdict === 'Strong Match' ? 'bg-emerald-100 text-emerald-700' :
-                    evaluation.verdict === 'Moderate Match' ? 'bg-amber-100 text-amber-700' :
-                      'bg-rose-100 text-rose-700'
+                  evaluation.verdict === 'Moderate Match' ? 'bg-amber-100 text-amber-700' :
+                    'bg-rose-100 text-rose-700'
                   }`}>
                   {evaluation.verdict || 'Unknown'}
                 </span>
@@ -128,6 +128,21 @@ export const JobModal: React.FC<JobModalProps> = ({ evaluation, onClose, onEvalu
                 </div>
               )}
             </div>
+
+            {/* Job URL/Link */}
+            {evaluation.job_url && (
+              <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Job Link</h3>
+                <a
+                  href={evaluation.job_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                >
+                  View Posting <ExternalLink className="w-4 h-4 ml-2" />
+                </a>
+              </div>
+            )}
 
             {/* Parse JD Button */}
             <button

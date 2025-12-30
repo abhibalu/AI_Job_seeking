@@ -438,6 +438,21 @@ def save_jd_parsed(result: dict):
 # TASK FUNCTIONS
 # ============================================
 
+def list_tasks(limit: int = 20) -> list[dict]:
+    """List recent tasks."""
+    if _use_supabase():
+        client = _get_supabase()
+        result = client.table("tasks").select("*").order("created_at", desc=True).limit(limit).execute()
+        return result.data
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
 def save_task_status(task_id: str, status: str, progress: dict | None = None, error: str | None = None):
     """Save or update task status."""
     if _use_supabase():

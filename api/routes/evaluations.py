@@ -96,36 +96,6 @@ def get_evaluation_result(job_id: str):
     return evaluation
 
 
-@router.post("/{job_id}", response_model=MessageResponse)
-def evaluate_job(job_id: str, force: bool = False):
-    """Evaluate a single job (synchronous)."""
-    # Check if already evaluated
-    if is_job_evaluated(job_id) and not force:
-        return {"message": "Job already evaluated", "job_id": job_id}
-    
-    # Get job from Gold table
-    job = get_job_by_id(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Gold table")
-    
-    # Run evaluation
-    try:
-        agent = JobEvaluatorAgent()
-        result = agent.run(
-            job_id=job_id,
-            description_text=job.get("description_text", ""),
-            company_name=job.get("company_name", "Unknown"),
-            title=job.get("title", "Unknown"),
-            job_url=job.get("link", "Unknown"),
-        )
-        save_evaluation(result)
-        
-        return {
-            "message": f"Evaluation complete: {result.get('Verdict')} (Score: {result.get('job_match_score')})",
-            "job_id": job_id,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
 
 
 def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, company_filter: str | None):
@@ -192,3 +162,38 @@ def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
         "message": f"Batch evaluation started for up to {request.max_jobs} jobs",
         "task_id": task_id,
     }
+
+
+@router.post("/{job_id}", response_model=MessageResponse)
+def evaluate_job(job_id: str, force: bool = False):
+    """Evaluate a single job (synchronous)."""
+    # Check if already evaluated
+    if is_job_evaluated(job_id) and not force:
+        return {"message": "Job already evaluated", "job_id": job_id}
+    
+    # Get job from Gold table
+    job = get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Gold table")
+    
+    # Run evaluation
+    try:
+        agent = JobEvaluatorAgent()
+        result = agent.run(
+            job_id=job_id,
+            description_text=job.get("description_text", ""),
+            company_name=job.get("company_name", "Unknown"),
+            title=job.get("title", "Unknown"),
+            job_url=job.get("link", "Unknown"),
+        )
+        save_evaluation(result)
+        
+        return {
+            "message": f"Evaluation complete: {result.get('Verdict')} (Score: {result.get('job_match_score')})",
+            "job_id": job_id,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+
+
+

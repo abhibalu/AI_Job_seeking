@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Evaluation settings
     EVAL_DELAY_SECONDS: float = Field(1.0, env="EVAL_DELAY_SECONDS")
     EVAL_DB_PATH: str = Field("data/evaluations.db", env="EVAL_DB_PATH")
+    
+    # Supabase Configuration
+    SUPABASE_URL: str = Field(default="", env="SUPABASE_URL")
+    SUPABASE_SERVICE_KEY: str = Field(default="", env="SUPABASE_SERVICE_KEY")
+    USE_SUPABASE: bool = Field(default=False, env="USE_SUPABASE")
+
 
     model_config = {
         "env_file": str(ENV_FILE),

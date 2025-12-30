@@ -14,6 +14,8 @@ from agents.database import (
     is_job_evaluated,
     save_evaluation,
     get_evaluation,
+    list_evaluations as list_evaluations_db,
+    get_evaluation_statistics,
 )
 from agents.job_evaluator import JobEvaluatorAgent
 
@@ -52,29 +54,13 @@ def list_evaluations(
     action: str | None = None,
 ):
     """List all evaluations."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    query = "SELECT * FROM job_evaluations"
-    params = []
-    
-    if action:
-        query += " WHERE recommended_action = ?"
-        params.append(action)
-    
-    query += " ORDER BY evaluated_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, skip])
-    
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
+    rows = list_evaluations_db(skip, limit, action)
     
     results = []
-    for row in rows:
-        row_dict = dict(row)
+    for row_dict in rows:
         # Parse JSON fields
         for field in ["gaps", "improvement_suggestions", "interview_tips", "jd_keywords", "matched_keywords", "missing_keywords"]:
-            if row_dict.get(field):
+            if row_dict.get(field) and isinstance(row_dict[field], str):
                 try:
                     row_dict[field] = json.loads(row_dict[field])
                 except:
@@ -87,29 +73,8 @@ def list_evaluations(
 @router.get("/stats", response_model=EvaluationStats)
 def get_evaluation_stats():
     """Get evaluation statistics."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT COUNT(*) FROM job_evaluations")
-    total = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT AVG(job_match_score) FROM job_evaluations")
-    avg_score = cursor.fetchone()[0] or 0
-    
-    cursor.execute("SELECT recommended_action, COUNT(*) FROM job_evaluations GROUP BY recommended_action")
-    by_action = dict(cursor.fetchall())
-    
-    cursor.execute("SELECT verdict, COUNT(*) FROM job_evaluations GROUP BY verdict")
-    by_verdict = dict(cursor.fetchall())
-    
-    conn.close()
-    
-    return {
-        "total_evaluated": total,
-        "average_score": round(avg_score, 1),
-        "by_action": by_action,
-        "by_verdict": by_verdict,
-    }
+    """Get evaluation statistics."""
+    return get_evaluation_statistics()
 
 
 @router.get("/{job_id}", response_model=EvaluationResult)

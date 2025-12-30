@@ -1,11 +1,30 @@
 """
-SQLite database for storing agent evaluation results.
+Database module for storing agent evaluation results.
+
+Supports both SQLite (local) and Supabase (cloud) backends.
+Toggle with USE_SUPABASE environment variable.
 """
+import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from backend.settings import settings
 
+
+# ============================================
+# BACKEND SELECTION
+# ============================================
+
+def _use_supabase() -> bool:
+    """Check if Supabase should be used."""
+    return settings.USE_SUPABASE and settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY
+
+
+# ============================================
+# SQLITE FUNCTIONS (Original)
+# ============================================
 
 def get_db_path() -> Path:
     """Get the database path, creating parent directories if needed."""
@@ -15,18 +34,22 @@ def get_db_path() -> Path:
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Get a database connection."""
+    """Get a SQLite database connection."""
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_database():
-    """Initialize the database schema."""
+    """Initialize the SQLite database schema."""
+    if _use_supabase():
+        print("Using Supabase - SQLite init skipped")
+        return
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Job evaluations table (Agent 1)
+    # Job evaluations table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS job_evaluations (
             job_id TEXT PRIMARY KEY,
@@ -53,7 +76,7 @@ def init_database():
         )
     """)
     
-    # JD parsed signals table (Agent 2)
+    # JD parsed signals table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS jd_parsed (
             job_id TEXT PRIMARY KEY,
@@ -73,7 +96,7 @@ def init_database():
         )
     """)
     
-    # Tasks table for async operations
+    # Tasks table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             task_id TEXT PRIMARY KEY,
@@ -85,7 +108,7 @@ def init_database():
         )
     """)
     
-    # Create indexes
+    # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_verdict ON job_evaluations(verdict)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_score ON job_evaluations(job_match_score)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_action ON job_evaluations(recommended_action)")
@@ -94,11 +117,47 @@ def init_database():
     conn.commit()
     conn.close()
     
-    print(f"Database initialized at: {get_db_path()}")
+    print(f"SQLite database initialized at: {get_db_path()}")
 
+
+# ============================================
+# SUPABASE FUNCTIONS
+# ============================================
+
+def _get_supabase():
+    """Get Supabase client (lazy import to avoid circular deps)."""
+    from agents.supabase_client import get_supabase_client
+    return get_supabase_client()
+
+
+def _ensure_job_exists(job_id: str, company_name: str = "", title: str = "", job_url: str = ""):
+    """Ensure a job record exists in the jobs table (for foreign key)."""
+    client = _get_supabase()
+    
+    # Check if job exists
+    result = client.table("jobs").select("id").eq("id", job_id).execute()
+    
+    if not result.data:
+        # Insert minimal job record
+        client.table("jobs").insert({
+            "id": job_id,
+            "company_name": company_name,
+            "title": title,
+            "job_url": job_url,
+        }).execute()
+
+
+# ============================================
+# EVALUATION FUNCTIONS
+# ============================================
 
 def is_job_evaluated(job_id: str) -> bool:
     """Check if a job has already been evaluated."""
+    if _use_supabase():
+        client = _get_supabase()
+        result = client.table("job_evaluations").select("id").eq("job_id", job_id).execute()
+        return len(result.data) > 0
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM job_evaluations WHERE job_id = ?", (job_id,))
@@ -107,18 +166,15 @@ def is_job_evaluated(job_id: str) -> bool:
     return result
 
 
-def is_job_parsed(job_id: str) -> bool:
-    """Check if a job's JD has been parsed."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM jd_parsed WHERE job_id = ?", (job_id,))
-    result = cursor.fetchone() is not None
-    conn.close()
-    return result
-
-
 def get_evaluation(job_id: str) -> dict | None:
     """Get evaluation for a job."""
+    if _use_supabase():
+        client = _get_supabase()
+        result = client.table("job_evaluations").select("*").eq("job_id", job_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM job_evaluations WHERE job_id = ?", (job_id,))
@@ -127,10 +183,146 @@ def get_evaluation(job_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None) -> list[dict]:
+    """List evaluations with pagination and filtering."""
+    if _use_supabase():
+        client = _get_supabase()
+        query = client.table("job_evaluations").select("*")
+        
+        if action:
+            query = query.eq("recommended_action", action)
+            
+        # Supabase range is inclusive
+        result = query.order("evaluated_at", desc=True).range(skip, skip + limit - 1).execute()
+        return result.data
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    query = "SELECT * FROM job_evaluations"
+    params = []
+    
+    if action:
+        query += " WHERE recommended_action = ?"
+        params.append(action)
+    
+    query += " ORDER BY evaluated_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, skip])
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+
+def get_evaluation_statistics() -> dict:
+    """Get evaluation statistics."""
+    if _use_supabase():
+        client = _get_supabase()
+        
+        # Total count
+        # HEAD request for count is efficient
+        total = client.table("job_evaluations").select("*", count="exact", head=True).execute().count or 0
+        
+        # Average score
+        # Supabase doesn't support AVG directly in JS client easily without Rcp, 
+        # but we can fetch scores if dataset is small, or use a customized query / view.
+        # For now, fetching scores is acceptable for small scale. 
+        # Better: create a view in SQL.
+        # Fallback: fetch just scores.
+        scores = client.table("job_evaluations").select("job_match_score").execute()
+        score_list = [r["job_match_score"] for r in scores.data if r["job_match_score"] is not None]
+        avg_score = sum(score_list) / len(score_list) if score_list else 0
+        
+        # Group by action
+        actions = client.table("job_evaluations").select("recommended_action").execute()
+        by_action = {}
+        for r in actions.data:
+            act = r.get("recommended_action") or "unknown"
+            by_action[act] = by_action.get(act, 0) + 1
+            
+        # Group by verdict
+        # Group by verdict
+        verdicts = client.table("job_evaluations").select("verdict").execute()
+        by_verdict = {}
+        for r in verdicts.data:
+            v = r.get("verdict") or "unknown"
+            by_verdict[v] = by_verdict.get(v, 0) + 1
+            
+        return {
+            "total_evaluated": total,
+            "average_score": round(avg_score, 1),
+            "by_action": by_action,
+            "by_verdict": by_verdict,
+        }
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM job_evaluations")
+    total = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT AVG(job_match_score) FROM job_evaluations")
+    avg_score = cursor.fetchone()[0] or 0
+    
+    cursor.execute("SELECT recommended_action, COUNT(*) FROM job_evaluations GROUP BY recommended_action")
+    by_action = dict(cursor.fetchall())
+    
+    cursor.execute("SELECT verdict, COUNT(*) FROM job_evaluations GROUP BY verdict")
+    by_verdict = dict(cursor.fetchall())
+    
+    conn.close()
+    
+    return {
+        "total_evaluated": total,
+        "average_score": round(avg_score, 1),
+        "by_action": by_action,
+        "by_verdict": by_verdict,
+    }
+
+
 def save_evaluation(result: dict):
     """Save job evaluation to database."""
-    import json
+    job_id = str(result.get("job_id", ""))
+    company_name = result.get("company_name", "")
+    title_role = result.get("title_role", "")
+    job_url = result.get("job_url", "")
     
+    if _use_supabase():
+        client = _get_supabase()
+        
+        # Ensure job exists for FK
+        _ensure_job_exists(job_id, company_name, title_role, job_url)
+        
+        data = {
+            "job_id": job_id,
+            "company_name": company_name,
+            "title_role": title_role,
+            "job_url": job_url,
+            "verdict": result.get("Verdict", result.get("verdict", "")),
+            "job_match_score": result.get("job_match_score", 0),
+            "summary": result.get("summary", ""),
+            "required_exp": result.get("required_exp", ""),
+            "recommended_action": result.get("recommended_action", ""),
+            "gaps": result.get("gaps", {}),
+            "improvement_suggestions": result.get("improvement_suggestions", {}),
+            "interview_tips": result.get("interview_tips", {}),
+            "jd_keywords": result.get("jd_keywords", []),
+            "matched_keywords": result.get("matched_keywords", []),
+            "missing_keywords": result.get("missing_keywords", []),
+            "model_used": result.get("_model_used", ""),
+            "raw_response": result,
+        }
+        
+        # Upsert (insert or update on conflict)
+        client.table("job_evaluations").upsert(
+            data,
+            on_conflict="job_id"
+        ).execute()
+        return
+    
+    # SQLite fallback
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -143,10 +335,10 @@ def save_evaluation(result: dict):
             model_used, raw_response
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        str(result.get("job_id", "")),
-        result.get("company_name", ""),
-        result.get("title_role", ""),
-        result.get("job_url", ""),
+        job_id,
+        company_name,
+        title_role,
+        job_url,
         result.get("Verdict", result.get("verdict", "")),
         result.get("job_match_score", 0),
         result.get("summary", ""),
@@ -166,10 +358,56 @@ def save_evaluation(result: dict):
     conn.close()
 
 
+# ============================================
+# JD PARSED FUNCTIONS
+# ============================================
+
+def is_job_parsed(job_id: str) -> bool:
+    """Check if a job's JD has been parsed."""
+    if _use_supabase():
+        client = _get_supabase()
+        result = client.table("jd_parsed").select("id").eq("job_id", job_id).execute()
+        return len(result.data) > 0
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM jd_parsed WHERE job_id = ?", (job_id,))
+    result = cursor.fetchone() is not None
+    conn.close()
+    return result
+
+
 def save_jd_parsed(result: dict):
     """Save JD parsed signals to database."""
-    import json
+    job_id = str(result.get("job_id", ""))
     
+    if _use_supabase():
+        client = _get_supabase()
+        
+        # Ensure job exists for FK
+        _ensure_job_exists(job_id)
+        
+        data = {
+            "job_id": job_id,
+            "must_haves": result.get("must_haves", []),
+            "nice_to_haves": result.get("nice_to_haves", []),
+            "domain": result.get("domain", ""),
+            "seniority": result.get("seniority") if result.get("seniority") in ('junior', 'mid', 'senior', 'lead', 'unspecified') else None,
+            "location_constraints": result.get("location_constraints", []),
+            "ats_keywords": result.get("ats_keywords", []),
+            "normalized_skills": result.get("normalized_skills", {}),
+            "model_used": result.get("_model_used", ""),
+            "raw_response": result,
+        }
+        
+        # Upsert
+        client.table("jd_parsed").upsert(
+            data,
+            on_conflict="job_id"
+        ).execute()
+        return
+    
+    # SQLite fallback
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -180,7 +418,7 @@ def save_jd_parsed(result: dict):
             model_used, raw_response
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        str(result.get("job_id", "")),
+        job_id,
         json.dumps(result.get("must_haves", [])),
         json.dumps(result.get("nice_to_haves", [])),
         result.get("domain", ""),
@@ -196,21 +434,45 @@ def save_jd_parsed(result: dict):
     conn.close()
 
 
+# ============================================
+# TASK FUNCTIONS
+# ============================================
+
 def save_task_status(task_id: str, status: str, progress: dict | None = None, error: str | None = None):
     """Save or update task status."""
-    import json
-    from datetime import datetime
+    if _use_supabase():
+        client = _get_supabase()
+        
+        # Check if task exists
+        result = client.table("tasks").select("id").eq("task_id", task_id).execute()
+        
+        data = {
+            "task_id": task_id,
+            "status": status,
+            "progress": progress or {},
+            "error": error,
+        }
+        
+        if status in ("completed", "failed"):
+            data["completed_at"] = datetime.now().isoformat()
+        
+        if result.data:
+            # Update
+            client.table("tasks").update(data).eq("task_id", task_id).execute()
+        else:
+            # Insert
+            client.table("tasks").insert(data).execute()
+        return
     
+    # SQLite fallback
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Check if task exists
     cursor.execute("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,))
     exists = cursor.fetchone() is not None
     
     if exists:
-        # Update existing task
-        if status == "completed" or status == "failed":
+        if status in ("completed", "failed"):
             cursor.execute("""
                 UPDATE tasks 
                 SET status = ?, progress = ?, error = ?, completed_at = ?
@@ -223,7 +485,6 @@ def save_task_status(task_id: str, status: str, progress: dict | None = None, er
                 WHERE task_id = ?
             """, (status, json.dumps(progress) if progress else None, error, task_id))
     else:
-        # Insert new task
         cursor.execute("""
             INSERT INTO tasks (task_id, status, progress, error)
             VALUES (?, ?, ?, ?)
@@ -231,3 +492,29 @@ def save_task_status(task_id: str, status: str, progress: dict | None = None, er
     
     conn.commit()
     conn.close()
+
+
+def get_task_status(task_id: str) -> dict | None:
+    """Get task status by ID."""
+    if _use_supabase():
+        client = _get_supabase()
+        result = client.table("tasks").select("*").eq("task_id", task_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        result = dict(row)
+        if result.get("progress"):
+            try:
+                result["progress"] = json.loads(result["progress"])
+            except:
+                pass
+        return result
+    return None

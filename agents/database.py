@@ -107,6 +107,18 @@ def init_database():
             completed_at TIMESTAMP
         )
     """)
+
+    # Resumes table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resumes (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            content TEXT,
+            is_master BOOLEAN,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_verdict ON job_evaluations(verdict)")
@@ -532,4 +544,74 @@ def get_task_status(task_id: str) -> dict | None:
             except:
                 pass
         return result
+    return None
+
+
+# ============================================
+# RESUME FUNCTIONS
+# ============================================
+
+def save_resume(content: dict, name: str = "Master Resume", is_master: bool = False):
+    """Save parsed resume to database."""
+    if _use_supabase():
+        client = _get_supabase()
+        
+        data = {
+            "name": name,
+            "content": content,
+            "is_master": is_master,
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        client.table("resumes").insert(data).execute()
+        return
+
+    # SQLite fallback
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    import uuid
+    
+    cursor.execute("""
+        INSERT INTO resumes (id, name, content, is_master, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        str(uuid.uuid4()),
+        name,
+        json.dumps(content),
+        is_master,
+        datetime.now()
+    ))
+    
+    conn.commit()
+    conn.close()
+
+
+def get_master_resume() -> dict | None:
+    """Get the latest master resume."""
+    if _use_supabase():
+        client = _get_supabase()
+        # Get latest is_master=true
+        result = client.table("resumes").select("content").eq("is_master", True).order("created_at", desc=True).limit(1).execute()
+        if result.data:
+            return result.data[0]["content"]
+        return None
+        
+    # SQLite fallback
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT content FROM resumes 
+        WHERE is_master = 1 
+        ORDER BY created_at DESC 
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and row[0]:
+        try:
+            return json.loads(row[0])
+        except:
+            return None
     return None

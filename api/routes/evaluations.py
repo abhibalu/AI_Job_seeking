@@ -101,6 +101,7 @@ def get_evaluation_result(job_id: str):
 def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, company_filter: str | None):
     """Background task for batch evaluation."""
     from agents.database import save_task_status
+    import concurrent.futures
     
     df = load_gold_jobs()
     
@@ -108,15 +109,27 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
     if company_filter:
         df = df.filter(pl.col("company_name").str.contains(company_filter, literal=False))
     
-    processed = 0
+    # Collect jobs to process first
+    jobs_to_process = []
+    processed_count = 0
+    
     for row in df.iter_rows(named=True):
-        if processed >= max_jobs:
+        if len(jobs_to_process) >= max_jobs:
             break
-        
+            
         job_id = str(row.get("id", ""))
         if only_unevaluated and is_job_evaluated(job_id):
             continue
-        
+            
+        jobs_to_process.append(row)
+    
+    total_jobs = len(jobs_to_process)
+    
+    # Save initial count
+    save_task_status(task_id, "running", {"completed": 0, "total": total_jobs})
+    
+    def process_singe_job(row):
+        job_id = str(row.get("id", ""))
         try:
             agent = JobEvaluatorAgent()
             result = agent.run(
@@ -126,16 +139,27 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
                 title=row.get("title", "Unknown"),
                 job_url=row.get("link", "Unknown"),
             )
-            save_evaluation(result)
-            processed += 1
-            
-            # Update task progress
-            save_task_status(task_id, "running", {"completed": processed, "total": max_jobs})
+            return result
         except Exception as e:
             print(f"Error evaluating {job_id}: {e}")
+            return None
+
+    # Run concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_singe_job, row): row for row in jobs_to_process}
+        
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            processed_count += 1
+            
+            if result:
+                save_evaluation(result)
+            
+            # Update task progress
+            save_task_status(task_id, "running", {"completed": processed_count, "total": total_jobs})
     
     # Mark complete
-    save_task_status(task_id, "completed", {"completed": processed, "total": max_jobs})
+    save_task_status(task_id, "completed", {"completed": processed_count, "total": total_jobs})
 
 
 @router.post("/batch", response_model=MessageResponse)

@@ -16,7 +16,7 @@ export {
 export { type JobWithEvaluation } from './services/jobService';
 
 // View mode for the app
-export type ViewMode = 'all' | 'evaluated' | 'pending';
+export type ViewMode = 'all' | 'evaluated' | 'pending' | 'resume';
 
 // Filter options
 export interface FilterOptions {

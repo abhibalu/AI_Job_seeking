@@ -26,8 +26,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                             key={mode}
                             onClick={() => onViewModeChange(mode)}
                             className={`px-4 py-2 rounded-md text-sm font-medium transition-all capitalize ${viewMode === mode
-                                    ? 'bg-white text-slate-900 shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-700'
+                                ? 'bg-white text-slate-900 shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700'
                                 }`}
                         >
                             {mode === 'pending' ? 'To Evaluate' : mode}

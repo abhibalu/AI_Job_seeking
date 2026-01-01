@@ -23,16 +23,16 @@ class ApiClient {
     ): Promise<T> {
         const url = `${this.baseUrl}${endpoint}`;
 
-        const defaultHeaders: HeadersInit = {
-            'Content-Type': 'application/json',
-        };
+        const headers = { ...options.headers } as Record<string, string>;
+
+        // Set Content-Type to application/json only if not FormData and not already set
+        if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+            headers['Content-Type'] = 'application/json';
+        }
 
         const response = await fetch(url, {
             ...options,
-            headers: {
-                ...defaultHeaders,
-                ...options.headers,
-            },
+            headers,
         });
 
         if (!response.ok) {
@@ -102,6 +102,20 @@ class ApiClient {
     // Tasks endpoints
     async getTaskStatus(taskId: string) {
         return this.request<TaskStatus>(`/api/tasks/${taskId}`);
+    }
+
+    // Resume endpoints
+    async getMasterResume() {
+        return this.request<any>('/api/resumes/master');
+    }
+
+    async uploadResume(file: File) {
+        const formData = new FormData();
+        formData.append('file', file);
+        return this.request<any>('/api/resumes/upload', {
+            method: 'POST',
+            body: formData,
+        });
     }
 }
 

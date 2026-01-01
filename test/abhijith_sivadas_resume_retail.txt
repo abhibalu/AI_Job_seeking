@@ -1,0 +1,63 @@
+ABHIJITH SIVADAS MOOTHEDATH
+Dublin, Ireland • Stamp 1G (Spouse) • +353 892 704 877 • abhij001@gmail.com • LinkedIn
+Stamp 1G (Spouse) visa holder and data professional with exper9se across B2B and B2C business domains, including pharma,
+ERP, retail, and e-commerce. Skilled in building scalable data solu9ons to support business opera9ons, repor9ng, and decision-
+making. Strong analy9cal mindset with experience in streamlining repor9ng processes and managing opera9onal workflows
+across sales, inventory, and customer data.
+Skills
+•Retail OperaTons:
+Sales tracking, inventory management, customer service, product merchandising, in-store promo9on planning
+•Customer & Business Management:
+Customer engagement, issue resolu9on, rela9onship building, cross-func9onal coordina9on
+•ReporTng & AnalyTcs:
+Sales and inventory repor9ng, Power BI dashboards, data structuring for insights
+•AutomaTon & Tools:
+Excel automa9on, Python scrip9ng, process streamlining
+Professional Experience
+FEB 2022 – FEB 2025
+DATA ENGINEER| METRO Global SoluTon Center/Eviden, an Atos company | Bangalore, India
+•Built automated data systems to support business repor9ng and dashboard updates, reducing manual work and improving
+data accuracy.
+•Streamlined Excel report genera9on using Python, cuPng down repor9ng 9me by over 50% and ensuring consistent, error-free
+outputs.
+•Organized and structured large sets of business data to make it easier for teams to analyze trends and make informed
+decisions.
+•Improved the reliability of daily reports by automa9ng data checks and ensuring smooth data flow across systems.
+DEC 2018 – FEB 2022
+BUSINESS DEVELOPMENT HEAD | Playo | Kerala, India
+• Launched Buy-Now-Pay-Later feature that grew regional revenue 130 % within 12 months.
+• Built lightweight ETL pipelines with Google Cloud Func9ons to automate sales and engagement data into BigQuery, laying the
+founda9on for data-driven decision-making.
+• Designed and deployed interac9ve Power BI dashboards tracking KPIs; insights shaped P&L strategy and reten9on ini9a9ves.
+•Implemented RFM-based customer segmenta9on, driving double-digit (≈20 %) improvement in marke9ng ROI
+2018 FEB - 2018 DEC
+Entrepreneurship | Family Business
+•Managed end-to-end farm opera9ons including livestock care, milk produc9on, and supply chain coordina9on.
+•Led business development ac9vi9es such as local marke9ng, customer outreach, and product distribu9on.
+•Oversaw financial planning, inventory management, and regulatory compliance to ensure sustainable and profitable
+opera9ons.
+FEB 2016 – DEC 2018
+Sales & OperaTons Specialist |Wandertrails Service Pvt Limited | Bangalore, India
+•Led lead genera9on, content digi9za9on, and e-commerce support.
+•Managed post-sale supplier performance using metrics, improving supplier quality and alignment.
+
+2016 FEB - 2017 APR
+Sales Manager | Decathlon Sports India Pvt Ltd
+•Managed sales, stock, and merchandising for the Badminton department, ensuring product availability and an appealing layout
+to boost performance.
+•Organized badminton demos, tournaments, and community events to drive customer engagement and promote the sport.
+•Provided expert advice on badminton gear and accessories to enhance customer sa9sfac9on and build las9ng rela9onships
+with sport users.
+Projects
+Customer SegmentaTon & RetenTon Insights
+• Drew on CSV exports and lightweight Python scripts to define customer cohorts by recency, frequency and spend; surfaced
+high-value segments and guided targeted outreach that lifed marke9ng ROI by ~20%.
+Buy-Now-Pay-Later Launch & AnalyTcs Plaeorm
+• Built a daily Cloud Func9ons pipeline to ingest and enrich BNPL transac9on data—standardizing records and delivering reports
+that drove a 130% regional revenue increase.
+EducaTon
+APR 2022
+Postgraduate Degree, Data Science and Business AnalyTcs | The University of Texas at AusTn | ExecuTve PG, Online
+JUN 2015
+Bachelor of Technology, Computer Science | Mahatma Gandhi University | Kofayam, India
+

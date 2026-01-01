@@ -15,6 +15,7 @@ import { Pagination } from './components/Pagination';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { StatsCard } from './components/StatsCard';
+import { ResumePreview } from './components/ResumePreview';
 import { BatchEvaluate } from './components/BatchEvaluate';
 import { GlassCard } from './components/GlassCard';
 import { Loader2, Sparkles, AlertCircle } from 'lucide-react';
@@ -199,6 +200,8 @@ const App: React.FC = () => {
         onBatchEvaluate={() => setIsBatchModalOpen(true)}
         totalJobs={totalJobs}
         evaluatedCount={stats?.total_evaluated || 0}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -207,12 +210,15 @@ const App: React.FC = () => {
         <StatsCard stats={stats} totalJobs={totalJobs} />
 
         {/* Filter Bar */}
-        <FilterBar
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          filters={filters}
-          onFiltersChange={setFilters}
-        />
+        {/* Filter Bar */}
+        {viewMode !== 'resume' && (
+          <FilterBar
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            filters={filters}
+            onFiltersChange={setFilters}
+          />
+        )}
 
         {/* Error Message */}
         {error && (
@@ -228,7 +234,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {loading ? (
+        {viewMode === 'resume' ? (
+          <ResumePreview />
+        ) : loading ? (
           <div className="flex flex-col items-center justify-center h-[60vh]">
             <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
             <p className="text-slate-500 animate-pulse font-medium">Loading jobs...</p>

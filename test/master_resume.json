@@ -1,0 +1,219 @@
+{
+  "basics": {
+    "name": "Abhijith Sivadas Moothedath",
+    "label": "Data Engineer",
+    "email": "abhijith.sivadas.moothedath@gmail.com",
+    "phone": "+353 892 704 877",
+    "url": "https://www.linkedin.com/in/abhijithsivadas",
+    "summary": "",
+    "location": {
+      "address": "",
+      "postalCode": "D16V5N8",
+      "city": "Dublin",
+      "countryCode": "IE",
+      "region": "Ireland"
+    },
+    "profiles": [
+      {
+        "network": "LinkedIn",
+        "username": "abhijithsivadas",
+        "url": "https://www.linkedin.com/in/abhijithsivadas"
+      },
+      {
+        "network": "GitHub",
+        "username": "abhibalu",
+        "url": "https://github.com/abhibalu/web2warehouse"
+      }
+    ]
+  },
+  "work": [
+    {
+      "name": "METRO Global Solution Center",
+      "position": "Data Engineer",
+      "url": "",
+      "startDate": "2024-07-01",
+      "endDate": "2025-02-28",
+      "summary": "",
+      "highlights": [
+        "Designed and maintained scalable ETL pipelines using Apache Airflow and DBT",
+        "Migrated over 45 TB of data with 96-100% accuracy",
+        "Developed 20 automated DAGs to orchestrate data workflows, improving performance by 40% and decreasing failures by 15%",
+        "Built scalable APIs using Apigee/API Gateway and Cloud Functions",
+        "Drove agile teamwork to deliver reliable data products aligned with business goals",
+        "Mentored new hires through training on Airflow, DBT, and core data engineering"
+      ]
+    },
+    {
+      "name": "Eviden, an ATOS Company",
+      "position": "Data Engineer",
+      "url": "",
+      "startDate": "2022-02-01",
+      "endDate": "2024-07-31",
+      "summary": "",
+      "highlights": [
+        "Orchestrated scalable batch workflows with Azure Data Factory",
+        "Executed PySpark code in Databricks to transform and cleanse data for critical daily reports",
+        "Optimized ADLS Gen2 data storage through partitioning, reducing retrieval times by 40%",
+        "Orchestrated data workflows for two business lines by managing and building DAGs in Apache Airflow",
+        "Migrated data from Teradata to BigQuery on GCP",
+        "Utilized SQL for debugging and validating data in BigQuery against legacy systems"
+      ]
+    },
+    {
+      "name": "Playo",
+      "position": "Business Development Head",
+      "url": "",
+      "startDate": "2018-12-01",
+      "endDate": "2022-02-28",
+      "summary": "",
+      "highlights": [
+        "Launched Buy-Now-Pay-Later feature, driving regional revenue growth of 130% in 12 months",
+        "Developed lightweight ETL pipelines using Google Cloud Functions",
+        "Designed and deployed interactive Power BI dashboards to track KPIs",
+        "Trained junior staff on business development and client management best practices"
+      ]
+    },
+    {
+      "name": "Family-run dairy business",
+      "position": "Co-Founder, Entrepreneur",
+      "url": "",
+      "startDate": "2016-02-01",
+      "endDate": "2018-12-31",
+      "summary": "",
+      "highlights": [
+        "Managed day-to-day operations and P&L",
+        "Accelerated lead generation and supplier onboarding",
+        "Led sales initiatives, managed inventory control, enhancing brand presence"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Great Lakes",
+      "url": "",
+      "area": "Data Science",
+      "studyType": "Post Graduate Program",
+      "startDate": "2022-04-01",
+      "endDate": "2022-04-30",
+      "score": "",
+      "courses": []
+    },
+    {
+      "institution": "Mahatma Gandhi University",
+      "url": "",
+      "area": "",
+      "studyType": "Bachelor of Technology",
+      "startDate": "2011-06-01",
+      "endDate": "2015-06-30",
+      "score": "",
+      "courses": []
+    }
+  ],
+  "awards": [],
+  "skills": [
+    {
+      "name": "Python",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "SQL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Shell scripting",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "PostgreSQL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "MySQL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "MongoDB",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "PySpark",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Databricks",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Airflow",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Dagster",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "dbt",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Azure",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "GCP",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "BigQuery",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Teradata",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Snowflake",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Power BI",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Docker",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Terraform",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Git",
+      "level": "",
+      "keywords": []
+    }
+  ],
+  "languages": [],
+  "projects": [],
+  "_model_used": "meta-llama/llama-3.3-70b-instruct:free",
+  "_agent": "ResumeParserAgent"
+}

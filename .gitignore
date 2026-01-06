@@ -50,3 +50,8 @@ htmlcov/
 
 # Ruff
 .ruff_cache/
+
+# Temporary Artifacts & Uploads
+glassresumatch-ai.zip
+uploads/
+test/ats-resume-builder/

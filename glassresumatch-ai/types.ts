@@ -26,3 +26,48 @@ export interface FilterOptions {
   sortBy: 'score' | 'company' | 'date';
   sortOrder: 'asc' | 'desc';
 }
+
+// --- Resume Builder Types ---
+
+export interface Experience {
+  id: string;
+  company: string;
+  role: string;
+  period: string;
+  location?: string;
+  achievements: string[];
+}
+
+export interface Education {
+  id: string;
+  institution: string;
+  degree: string;
+  period: string;
+  location: string;
+}
+
+export interface ResumeData {
+  fullName: string;
+  title?: string;
+  phone: string;
+  email: string;
+  location: string;
+  websites: string[];
+  summary?: string;
+  experience: Experience[];
+  education: Education[];
+  skills: string[];
+}
+
+export const INITIAL_DATA: ResumeData = {
+  fullName: "Your Name",
+  title: "Professional Title",
+  phone: "+1 234 567 890",
+  email: "email@example.com",
+  location: "City, Country",
+  websites: [],
+  summary: "Professional summary goes here...",
+  experience: [],
+  education: [],
+  skills: []
+};

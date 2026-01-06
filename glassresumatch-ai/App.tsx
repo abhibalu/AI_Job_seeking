@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Evaluation, EvaluationStats } from './services/apiClient';
 import {
   fetchJobsWithEvaluations,
@@ -8,32 +8,51 @@ import {
   getEvaluation,
   JobWithEvaluation
 } from './services/jobService';
-import { ViewMode, FilterOptions } from './types';
+import apiClient from './services/apiClient';
+import { ViewMode, FilterOptions, ResumeData, INITIAL_DATA } from './types';
 import { JobCard } from './components/JobCard';
 import { JobModal } from './components/JobModal';
 import { Pagination } from './components/Pagination';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { StatsCard } from './components/StatsCard';
-import { ResumePreview } from './components/ResumePreview';
+import { ResumePreview, TemplateType } from './components/ResumePreview';
 import { BatchEvaluate } from './components/BatchEvaluate';
 import { GlassCard } from './components/GlassCard';
-import { Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Editor } from './components/Editor';
+import {
+  Loader2,
+  Sparkles,
+  AlertCircle,
+  PenLine,
+  Printer,
+  Check,
+  ChevronRight,
+  User,
+  Eye
+} from 'lucide-react';
 
 const App: React.FC = () => {
-  // Data state
+  // --- Job Board Data state ---
   const [jobs, setJobs] = useState<JobWithEvaluation[]>([]);
   const [stats, setStats] = useState<EvaluationStats | null>(null);
   const [totalJobs, setTotalJobs] = useState(0);
 
-  // UI state
+  // --- Resume Builder State ---
+  const [resumeData, setResumeData] = useState<ResumeData>(INITIAL_DATA);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
+  const [isResumeLoading, setIsResumeLoading] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  // --- UI state ---
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedEvaluation, setSelectedEvaluation] = useState<Evaluation | null>(null);
   const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
 
-  // Filter state
+  // --- Filter state ---
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [filters, setFilters] = useState<FilterOptions>({
     searchQuery: '',
@@ -43,7 +62,7 @@ const App: React.FC = () => {
     sortOrder: 'desc',
   });
 
-  // Modals
+  // --- Modals ---
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [newJobText, setNewJobText] = useState('');
@@ -51,8 +70,12 @@ const App: React.FC = () => {
 
   const ITEMS_PER_PAGE = 9;
 
-  // Load jobs and stats based on view mode
+  // --- Fetch Jobs Data ---
   const loadData = useCallback(async () => {
+    // If we are in resume view, we technically don't need to refresh jobs, 
+    // but we'll stick to the original behavior to keep state fresh or handle it gracefully.
+    if (viewMode === 'resume') return;
+
     setLoading(true);
     setError(null);
     try {
@@ -60,11 +83,9 @@ const App: React.FC = () => {
       setStats(statsResult);
 
       if (viewMode === 'evaluated') {
-        // Fetch from evaluations endpoint directly
         const actionFilter = filters.action !== 'all' ? filters.action : undefined;
         const evaluationsResult = await fetchEvaluations(currentPage, ITEMS_PER_PAGE, actionFilter);
 
-        // Convert evaluations to JobWithEvaluation format
         const jobsWithEvals: JobWithEvaluation[] = evaluationsResult.data.map(e => ({
           id: e.job_id,
           title: e.title_role,
@@ -79,7 +100,6 @@ const App: React.FC = () => {
         setJobs(jobsWithEvals);
         setTotalJobs(evaluationsResult.total);
       } else {
-        // Fetch from jobs endpoint
         const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE);
         setJobs(jobsResult.data);
         setTotalJobs(jobsResult.total);
@@ -96,34 +116,92 @@ const App: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  // Filter and sort jobs
+  // --- Fetch Resume Data ---
+  useEffect(() => {
+    // Fetch resume data when app loads or when switching to resume view
+    const fetchResume = async () => {
+      try {
+        setIsResumeLoading(true);
+        const backendData = await apiClient.getMasterResume();
+        if (backendData && backendData.basics) {
+          // Map Nested JSON Resume to Flat ResumeData
+          const mappedData: ResumeData = {
+            fullName: backendData.basics.name || "Your Name",
+            title: backendData.basics.label || "Professional Title",
+            email: backendData.basics.email || "",
+            phone: backendData.basics.phone || "",
+            location: backendData.basics.location ?
+              `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
+              : "",
+            websites: [
+              backendData.basics.url || "",
+              ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
+            ].filter(Boolean),
+            summary: backendData.basics.summary || "",
+            experience: backendData.work?.map((w: any) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              company: w.name || "",
+              role: w.position || "",
+              period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
+              location: w.location || "",
+              achievements: w.highlights || []
+            })) || [],
+            education: backendData.education?.map((e: any) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              institution: e.institution || "",
+              degree: `${e.studyType || ''} ${e.area || ''}`,
+              period: `${e.startDate || ''} - ${e.endDate || ''}`,
+              location: ""
+            })) || [],
+            skills: backendData.skills?.map((s: any) =>
+              s.keywords && s.keywords.length > 0
+                ? `${s.name}: ${s.keywords.join(', ')}`
+                : s.name
+            ) || []
+          };
+          setResumeData(mappedData);
+        }
+      } catch (err) {
+        console.error("Failed to load resume", err);
+      } finally {
+        setIsResumeLoading(false);
+      }
+    };
+
+    fetchResume();
+  }, []);
+
+  // --- Resume Handlers ---
+  const handlePrint = () => {
+    window.focus();
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  const templates: { id: TemplateType, label: string, desc: string }[] = [
+    { id: 'modern', label: 'Modern', desc: 'Clean, balanced, standard' },
+    { id: 'classic', label: 'Classic', desc: 'Serif, traditional, formal' },
+    { id: 'compact', label: 'Compact', desc: 'Dense, single page optimized' },
+    { id: 'tech', label: 'Technical', desc: 'Monospaced, code-like' },
+    { id: 'minimal', label: 'Traditional', desc: 'Ivy League, ATS-Standard' },
+  ];
+
+  // --- Filter and sort jobs ---
   const filteredJobs = jobs.filter(job => {
-    // View mode filter
     if (viewMode === 'evaluated' && !job.isEvaluated) return false;
     if (viewMode === 'pending' && job.isEvaluated) return false;
-
-    // Search filter
     if (filters.searchQuery) {
       const query = filters.searchQuery.toLowerCase();
       const matchesCompany = job.company_name?.toLowerCase().includes(query);
       const matchesTitle = job.title?.toLowerCase().includes(query);
       if (!matchesCompany && !matchesTitle) return false;
     }
-
-    // Verdict filter
-    if (filters.verdict !== 'all' && job.evaluation?.verdict !== filters.verdict) {
-      return false;
-    }
-
-    // Action filter
-    if (filters.action !== 'all' && job.evaluation?.recommended_action !== filters.action) {
-      return false;
-    }
-
+    if (filters.verdict !== 'all' && job.evaluation?.verdict !== filters.verdict) return false;
+    if (filters.action !== 'all' && job.evaluation?.recommended_action !== filters.action) return false;
     return true;
   }).sort((a, b) => {
     const multiplier = filters.sortOrder === 'asc' ? 1 : -1;
-
     switch (filters.sortBy) {
       case 'score':
         return ((b.evaluation?.job_match_score || 0) - (a.evaluation?.job_match_score || 0)) * multiplier;
@@ -136,10 +214,8 @@ const App: React.FC = () => {
     }
   });
 
-  // Handle job card click
   const handleJobClick = async (job: JobWithEvaluation) => {
     if (job.isEvaluated && job.evaluation) {
-      // Fetch full evaluation details
       try {
         const fullEval = await getEvaluation(job.id);
         setSelectedEvaluation(fullEval);
@@ -147,19 +223,15 @@ const App: React.FC = () => {
         setSelectedEvaluation(job.evaluation);
       }
     } else {
-      // Show a toast or trigger evaluation
       handleEvaluateJob(job.id);
     }
   };
 
-  // Handle evaluate job
   const handleEvaluateJob = async (jobId: string) => {
     setEvaluatingJobId(jobId);
     try {
       await evaluateJob(jobId);
-      // Reload data to get updated evaluation
       await loadData();
-      // Open the modal with the new evaluation
       const evaluation = await getEvaluation(jobId);
       setSelectedEvaluation(evaluation);
     } catch (err) {
@@ -170,12 +242,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Handle analyze new JD (keep for future Gemini integration)
   const handleAnalyzeNewJob = async () => {
     if (!newJobText.trim()) return;
     setAnalyzing(true);
     try {
-      // For now, just close the modal - this would integrate with Gemini
       setIsAddModalOpen(false);
       setNewJobText('');
       alert('New JD analysis coming soon! This will integrate with your Gemini key.');
@@ -187,8 +257,8 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900">
-      {/* Abstract Background Blobs */}
+    <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900 font-sans">
+      {/* Abstract Background Blobs - Keep consistent look */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100/50 blur-[100px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-100/50 blur-[100px]" />
@@ -206,11 +276,12 @@ const App: React.FC = () => {
 
       <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        {/* Stats Card */}
-        <StatsCard stats={stats} totalJobs={totalJobs} />
+        {/* Stats Card - Show only in job views */}
+        {viewMode !== 'resume' && (
+          <StatsCard stats={stats} totalJobs={totalJobs} />
+        )}
 
-        {/* Filter Bar */}
-        {/* Filter Bar */}
+        {/* Filter Bar - Show only in job views */}
         {viewMode !== 'resume' && (
           <FilterBar
             viewMode={viewMode}
@@ -234,54 +305,132 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* --- MAIN CONTENT AREA --- */}
         {viewMode === 'resume' ? (
-          <ResumePreview />
-        ) : loading ? (
-          <div className="flex flex-col items-center justify-center h-[60vh]">
-            <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
-            <p className="text-slate-500 animate-pulse font-medium">Loading jobs...</p>
-          </div>
-        ) : filteredJobs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[40vh]">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-              <Sparkles className="w-8 h-8 text-slate-300" />
-            </div>
-            <p className="text-slate-500 font-medium">No jobs match your filters</p>
-            <button
-              onClick={() => {
-                setViewMode('all');
-                setFilters({
-                  searchQuery: '',
-                  verdict: 'all',
-                  action: 'all',
-                  sortBy: 'score',
-                  sortOrder: 'desc',
-                });
-              }}
-              className="mt-3 text-blue-600 hover:text-blue-700 text-sm font-medium"
-            >
-              Clear filters
-            </button>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredJobs.map((job) => (
-                <JobCard
-                  key={job.id}
-                  job={job}
-                  onClick={() => handleJobClick(job)}
-                  onEvaluate={() => handleEvaluateJob(job.id)}
-                  isEvaluating={evaluatingJobId === job.id}
-                />
-              ))}
+          <div>
+            {/* Resume Toolbar */}
+            <div className="mb-8 animate-in slide-in-from-top-2 relative z-40">
+              <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between p-6 rounded-2xl bg-white border border-slate-200 shadow-xl">
+
+                {/* Template Selector */}
+                <div className="flex-1 w-full lg:w-auto overflow-hidden">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select Template</h4>
+                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-200">
+                    {templates.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setSelectedTemplate(t.id)}
+                        className={`
+                              flex flex-col items-start min-w-[140px] p-3 rounded-xl border transition-all text-left group cursor-pointer shrink-0
+                              ${selectedTemplate === t.id
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-md transform scale-[1.02]'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}
+                            `}
+                      >
+                        <div className="flex justify-between w-full mb-1">
+                          <span className="font-bold text-sm">{t.label}</span>
+                          {selectedTemplate === t.id && <Check size={16} className="text-emerald-400" />}
+                        </div>
+                        <span className={`text-[10px] leading-tight ${selectedTemplate === t.id ? 'text-slate-300' : 'text-slate-400'}`}>
+                          {t.desc}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
+                  <button
+                    onClick={() => setIsEditorOpen(true)}
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-sm"
+                  >
+                    <PenLine size={18} />
+                    <span>Edit Data</span>
+                  </button>
+                  <button
+                    onClick={handlePrint}
+                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <Printer size={18} />
+                    <span>Print / PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 text-center">
+                <p className="text-slate-400 text-xs flex items-center justify-center gap-2 inline-block px-4 py-1 rounded-full bg-white/50 border border-slate-100">
+                  <AlertCircle size={12} />
+                  <span>Tip: Select <strong>"Save as PDF"</strong> in your print dialog.</span>
+                </p>
+              </div>
             </div>
 
-            <Pagination
-              currentPage={currentPage}
-              totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
-              onPageChange={setCurrentPage}
-            />
+            {/* Resume Preview */}
+            <div className="flex justify-center pb-12">
+              {isResumeLoading ? (
+                <div className="py-20 flex flex-col items-center">
+                  <Loader2 className="w-10 h-10 text-slate-300 animate-spin mb-4" />
+                  <p className="text-slate-500 font-medium animate-pulse">Loading resume data...</p>
+                </div>
+              ) : (
+                <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center">
+                  <ResumePreview data={resumeData} targetRef={printRef} template={selectedTemplate} />
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          // --- JOB BOARD CONTENT ---
+          <>
+            {loading ? (
+              <div className="flex flex-col items-center justify-center h-[60vh]">
+                <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
+                <p className="text-slate-500 animate-pulse font-medium">Loading jobs...</p>
+              </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[40vh]">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                  <Sparkles className="w-8 h-8 text-slate-300" />
+                </div>
+                <p className="text-slate-500 font-medium">No jobs match your filters</p>
+                <button
+                  onClick={() => {
+                    setViewMode('all');
+                    setFilters({
+                      searchQuery: '',
+                      verdict: 'all',
+                      action: 'all',
+                      sortBy: 'score',
+                      sortOrder: 'desc',
+                    });
+                  }}
+                  className="mt-3 text-blue-600 hover:text-blue-700 text-sm font-medium"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredJobs.map((job) => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      onClick={() => handleJobClick(job)}
+                      onEvaluate={() => handleEvaluateJob(job.id)}
+                      isEvaluating={evaluatingJobId === job.id}
+                    />
+                  ))}
+                </div>
+
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
+                  onPageChange={setCurrentPage}
+                />
+              </>
+            )}
           </>
         )}
       </main>
@@ -299,7 +448,7 @@ const App: React.FC = () => {
         onComplete={loadData}
       />
 
-      {/* Add New Job / AI Analysis Modal */}
+      {/* Add New Job Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
@@ -344,6 +493,31 @@ const App: React.FC = () => {
           </GlassCard>
         </div>
       )}
+
+      {/* Editor Slide-over */}
+      <div
+        className={`
+            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10
+            ${isEditorOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'}
+          `}
+      >
+        {isEditorOpen && (
+          <Editor
+            data={resumeData}
+            onChange={setResumeData}
+            onClose={() => setIsEditorOpen(false)}
+          />
+        )}
+      </div>
+
+      {/* Backdrop for Editor */}
+      {isEditorOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"
+          onClick={() => setIsEditorOpen(false)}
+        />
+      )}
+
     </div>
   );
 };

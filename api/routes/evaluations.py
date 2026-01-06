@@ -139,6 +139,15 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
                 title=row.get("title", "Unknown"),
                 job_url=row.get("link", "Unknown"),
             )
+            
+            # --- Smart Conditional Parsing Logic ---
+            from agents.jd_parser import run_jd_parser_task
+            action = result.get("recommended_action")
+            if action in ["tailor", "apply"]:
+                # Run synchronously in this thread since it's already a background worker
+                run_jd_parser_task(job_id, row.get("description_text", ""))
+            # ---------------------------------------
+
             return result
         except Exception as e:
             print(f"Error evaluating {job_id}: {e}")
@@ -189,7 +198,7 @@ def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
 
 
 @router.post("/{job_id}", response_model=MessageResponse)
-def evaluate_job(job_id: str, force: bool = False):
+def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = False):
     """Evaluate a single job (synchronous)."""
     # Check if already evaluated
     if is_job_evaluated(job_id) and not force:
@@ -211,6 +220,17 @@ def evaluate_job(job_id: str, force: bool = False):
             job_url=job.get("link", "Unknown"),
         )
         save_evaluation(result)
+        
+        # --- Smart Conditional Parsing Logic ---
+        from agents.jd_parser import run_jd_parser_task
+        action = result.get("recommended_action")
+        if action in ["tailor", "apply"]:
+            background_tasks.add_task(
+                run_jd_parser_task, 
+                job_id, 
+                job.get("description_text", "")
+            )
+        # ---------------------------------------
         
         return {
             "message": f"Evaluation complete: {result.get('Verdict')} (Score: {result.get('job_match_score')})",

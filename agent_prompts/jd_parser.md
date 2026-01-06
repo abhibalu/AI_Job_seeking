@@ -31,6 +31,10 @@ Return JSON ONLY with this shape:
   }
 }
 
+
+
+
+
 Rules:
 - Extract only what the JD states. If ambiguous, choose "unspecified" or [].
 - For seniority: infer only if JD states (e.g., “Senior”, “Lead”).

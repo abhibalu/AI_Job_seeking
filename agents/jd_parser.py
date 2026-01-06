@@ -68,3 +68,28 @@ Rules:
 - Use SKILL_BUCKET to populate normalized_skills.canonical; include synonym_hits for mapped terms.
 
 Return the JSON now."""
+
+
+def run_jd_parser_task(job_id: str, description_text: str):
+    """
+    Background task to run JD parsing and save results.
+    """
+    try:
+        from .database import save_jd_parsed, is_job_parsed
+        
+        # specific check to avoid re-parsing if already done (though API might have checked too)
+        if is_job_parsed(job_id):
+            print(f"Job {job_id} already parsed. Skipping.")
+            return
+
+        print(f"Starting background JD parsing for {job_id}...")
+        agent = JDParserAgent()
+        result = agent.run(job_id=job_id, description_text=description_text)
+        
+        # Save to DB
+        save_jd_parsed(result)
+        print(f"Successfully parsed and saved JD for {job_id}")
+        
+    except Exception as e:
+        print(f"Error in background JD parsing for {job_id}: {e}")
+

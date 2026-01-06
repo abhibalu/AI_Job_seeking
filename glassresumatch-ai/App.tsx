@@ -29,7 +29,8 @@ import {
   Check,
   ChevronRight,
   User,
-  Eye
+  Eye,
+  Upload
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -43,7 +44,9 @@ const App: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
   const [isResumeLoading, setIsResumeLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- UI state ---
   const [loading, setLoading] = useState(true);
@@ -117,59 +120,106 @@ const App: React.FC = () => {
   }, [loadData]);
 
   // --- Fetch Resume Data ---
-  useEffect(() => {
-    // Fetch resume data when app loads or when switching to resume view
-    const fetchResume = async () => {
-      try {
-        setIsResumeLoading(true);
-        const backendData = await apiClient.getMasterResume();
-        if (backendData && backendData.basics) {
-          // Map Nested JSON Resume to Flat ResumeData
-          const mappedData: ResumeData = {
-            fullName: backendData.basics.name || "Your Name",
-            title: backendData.basics.label || "Professional Title",
-            email: backendData.basics.email || "",
-            phone: backendData.basics.phone || "",
-            location: backendData.basics.location ?
-              `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
-              : "",
-            websites: [
-              backendData.basics.url || "",
-              ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
-            ].filter(Boolean),
-            summary: backendData.basics.summary || "",
-            experience: backendData.work?.map((w: any) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              company: w.name || "",
-              role: w.position || "",
-              period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
-              location: w.location || "",
-              achievements: w.highlights || []
-            })) || [],
-            education: backendData.education?.map((e: any) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              institution: e.institution || "",
-              degree: `${e.studyType || ''} ${e.area || ''}`,
-              period: `${e.startDate || ''} - ${e.endDate || ''}`,
-              location: ""
-            })) || [],
-            skills: backendData.skills?.map((s: any) =>
-              s.keywords && s.keywords.length > 0
-                ? `${s.name}: ${s.keywords.join(', ')}`
-                : s.name
-            ) || []
-          };
-          setResumeData(mappedData);
-        }
-      } catch (err) {
-        console.error("Failed to load resume", err);
-      } finally {
-        setIsResumeLoading(false);
-      }
-    };
+  const fetchResume = useCallback(async () => {
+    try {
+      setIsResumeLoading(true);
+      const backendData = await apiClient.getMasterResume();
 
-    fetchResume();
+      // Check if processing
+      if (backendData.status === 'processing') {
+        // Return true to indicate we should keep polling
+        return true;
+      }
+
+      if (backendData && backendData.basics) {
+        // Map Nested JSON Resume to Flat ResumeData
+        const mappedData: ResumeData = {
+          fullName: backendData.basics.name || "Your Name",
+          title: backendData.basics.label || "Professional Title",
+          email: backendData.basics.email || "",
+          phone: backendData.basics.phone || "",
+          location: backendData.basics.location ?
+            `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
+            : "",
+          websites: [
+            backendData.basics.url || "",
+            ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
+          ].filter(Boolean),
+          summary: backendData.basics.summary || "",
+          experience: backendData.work?.map((w: any) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            company: w.name || "",
+            role: w.position || "",
+            period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
+            location: w.location || "",
+            achievements: w.highlights || []
+          })) || [],
+          education: backendData.education?.map((e: any) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            institution: e.institution || "",
+            degree: `${e.studyType || ''} ${e.area || ''}`,
+            period: `${e.startDate || ''} - ${e.endDate || ''}`,
+            location: ""
+          })) || [],
+          skills: backendData.skills?.map((s: any) =>
+            s.keywords && s.keywords.length > 0
+              ? `${s.name}: ${s.keywords.join(', ')}`
+              : s.name
+          ) || []
+        };
+        setResumeData(mappedData);
+        setIsUploading(false); // Stop loading if we were uploading
+      }
+      return false; // Stop polling
+    } catch (err) {
+      console.error("Failed to load resume", err);
+      return false; // Stop polling on error
+    } finally {
+      setIsResumeLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchResume();
+  }, [fetchResume]);
+
+  // --- Resume Upload Handler ---
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setIsResumeLoading(true);
+
+    try {
+      await apiClient.uploadResume(file);
+
+      // Start polling for completion
+      const pollInterval = setInterval(async () => {
+        const serverStillProcessing = await fetchResume();
+        if (!serverStillProcessing) {
+          clearInterval(pollInterval);
+          setIsUploading(false);
+        }
+      }, 2000); // Check every 2 seconds
+
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setIsUploading(false);
+        setIsResumeLoading(false);
+      }, 60000);
+
+    } catch (error) {
+      console.error("Upload failed", error);
+      setIsUploading(false);
+      setIsResumeLoading(false);
+      alert("Failed to upload resume. Please try again.");
+    } finally {
+      // Clear input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   // --- Resume Handlers ---
   const handlePrint = () => {
@@ -348,6 +398,29 @@ const App: React.FC = () => {
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
+
+                  {/* File Upload Input */}
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    ref={fileInputRef}
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl bg-blue-50 border border-blue-100 hover:bg-blue-100 text-blue-700 font-semibold transition-all shadow-sm"
+                  >
+                    {isUploading ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Upload size={18} />
+                    )}
+                    <span>{isUploading ? 'Parsing...' : 'Upload PDF'}</span>
+                  </button>
+
                   <button
                     onClick={() => setIsEditorOpen(true)}
                     className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-sm"
@@ -378,7 +451,9 @@ const App: React.FC = () => {
               {isResumeLoading ? (
                 <div className="py-20 flex flex-col items-center">
                   <Loader2 className="w-10 h-10 text-slate-300 animate-spin mb-4" />
-                  <p className="text-slate-500 font-medium animate-pulse">Loading resume data...</p>
+                  <p className="text-slate-500 font-medium animate-pulse">
+                    {isUploading ? 'Analyzing resume with AI...' : 'Loading resume data...'}
+                  </p>
                 </div>
               ) : (
                 <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center print:absolute print:top-0 print:left-0 print:w-full print:m-0 print:block">

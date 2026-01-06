@@ -32,6 +32,7 @@ class JobStats(BaseModel):
 # Evaluation schemas
 class EvaluationResult(BaseModel):
     job_id: str
+    job_url: str | None = None
     company_name: str | None = None
     title_role: str | None = None
     verdict: str | None = None

@@ -14,6 +14,8 @@ from agents.database import (
     is_job_evaluated,
     save_evaluation,
     get_evaluation,
+    list_evaluations as list_evaluations_db,
+    get_evaluation_statistics,
 )
 from agents.job_evaluator import JobEvaluatorAgent
 
@@ -52,29 +54,13 @@ def list_evaluations(
     action: str | None = None,
 ):
     """List all evaluations."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    query = "SELECT * FROM job_evaluations"
-    params = []
-    
-    if action:
-        query += " WHERE recommended_action = ?"
-        params.append(action)
-    
-    query += " ORDER BY evaluated_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, skip])
-    
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
+    rows = list_evaluations_db(skip, limit, action)
     
     results = []
-    for row in rows:
-        row_dict = dict(row)
+    for row_dict in rows:
         # Parse JSON fields
         for field in ["gaps", "improvement_suggestions", "interview_tips", "jd_keywords", "matched_keywords", "missing_keywords"]:
-            if row_dict.get(field):
+            if row_dict.get(field) and isinstance(row_dict[field], str):
                 try:
                     row_dict[field] = json.loads(row_dict[field])
                 except:
@@ -87,29 +73,8 @@ def list_evaluations(
 @router.get("/stats", response_model=EvaluationStats)
 def get_evaluation_stats():
     """Get evaluation statistics."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT COUNT(*) FROM job_evaluations")
-    total = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT AVG(job_match_score) FROM job_evaluations")
-    avg_score = cursor.fetchone()[0] or 0
-    
-    cursor.execute("SELECT recommended_action, COUNT(*) FROM job_evaluations GROUP BY recommended_action")
-    by_action = dict(cursor.fetchall())
-    
-    cursor.execute("SELECT verdict, COUNT(*) FROM job_evaluations GROUP BY verdict")
-    by_verdict = dict(cursor.fetchall())
-    
-    conn.close()
-    
-    return {
-        "total_evaluated": total,
-        "average_score": round(avg_score, 1),
-        "by_action": by_action,
-        "by_verdict": by_verdict,
-    }
+    """Get evaluation statistics."""
+    return get_evaluation_statistics()
 
 
 @router.get("/{job_id}", response_model=EvaluationResult)
@@ -129,6 +94,98 @@ def get_evaluation_result(job_id: str):
                 pass
     
     return evaluation
+
+
+
+
+def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, company_filter: str | None):
+    """Background task for batch evaluation."""
+    from agents.database import save_task_status
+    import concurrent.futures
+    
+    df = load_gold_jobs()
+    
+    # Apply filters
+    if company_filter:
+        df = df.filter(pl.col("company_name").str.contains(company_filter, literal=False))
+    
+    # Collect jobs to process first
+    jobs_to_process = []
+    processed_count = 0
+    
+    for row in df.iter_rows(named=True):
+        if len(jobs_to_process) >= max_jobs:
+            break
+            
+        job_id = str(row.get("id", ""))
+        if only_unevaluated and is_job_evaluated(job_id):
+            continue
+            
+        jobs_to_process.append(row)
+    
+    total_jobs = len(jobs_to_process)
+    
+    # Save initial count
+    save_task_status(task_id, "running", {"completed": 0, "total": total_jobs})
+    
+    def process_singe_job(row):
+        job_id = str(row.get("id", ""))
+        try:
+            agent = JobEvaluatorAgent()
+            result = agent.run(
+                job_id=job_id,
+                description_text=row.get("description_text", ""),
+                company_name=row.get("company_name", "Unknown"),
+                title=row.get("title", "Unknown"),
+                job_url=row.get("link", "Unknown"),
+            )
+            return result
+        except Exception as e:
+            print(f"Error evaluating {job_id}: {e}")
+            return None
+
+    # Run concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_singe_job, row): row for row in jobs_to_process}
+        
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            processed_count += 1
+            
+            if result:
+                save_evaluation(result)
+            
+            # Update task progress
+            save_task_status(task_id, "running", {"completed": processed_count, "total": total_jobs})
+    
+    # Mark complete
+    save_task_status(task_id, "completed", {"completed": processed_count, "total": total_jobs})
+
+
+@router.post("/batch", response_model=MessageResponse)
+def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
+    """Start batch evaluation (async)."""
+    import uuid
+    from agents.database import save_task_status
+    
+    task_id = str(uuid.uuid4())
+    
+    # Save initial task status
+    save_task_status(task_id, "queued", {"completed": 0, "total": request.max_jobs})
+    
+    # Add background task
+    background_tasks.add_task(
+        run_batch_evaluation,
+        task_id,
+        request.max_jobs,
+        request.only_unevaluated,
+        request.company_filter,
+    )
+    
+    return {
+        "message": f"Batch evaluation started for up to {request.max_jobs} jobs",
+        "task_id": task_id,
+    }
 
 
 @router.post("/{job_id}", response_model=MessageResponse)
@@ -163,67 +220,4 @@ def evaluate_job(job_id: str, force: bool = False):
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
 
 
-def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, company_filter: str | None):
-    """Background task for batch evaluation."""
-    from agents.database import save_task_status
-    
-    df = load_gold_jobs()
-    
-    # Apply filters
-    if company_filter:
-        df = df.filter(pl.col("company_name").str.contains(company_filter, literal=False))
-    
-    processed = 0
-    for row in df.iter_rows(named=True):
-        if processed >= max_jobs:
-            break
-        
-        job_id = str(row.get("id", ""))
-        if only_unevaluated and is_job_evaluated(job_id):
-            continue
-        
-        try:
-            agent = JobEvaluatorAgent()
-            result = agent.run(
-                job_id=job_id,
-                description_text=row.get("description_text", ""),
-                company_name=row.get("company_name", "Unknown"),
-                title=row.get("title", "Unknown"),
-                job_url=row.get("link", "Unknown"),
-            )
-            save_evaluation(result)
-            processed += 1
-            
-            # Update task progress
-            save_task_status(task_id, "running", {"completed": processed, "total": max_jobs})
-        except Exception as e:
-            print(f"Error evaluating {job_id}: {e}")
-    
-    # Mark complete
-    save_task_status(task_id, "completed", {"completed": processed, "total": max_jobs})
 
-
-@router.post("/batch", response_model=MessageResponse)
-def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
-    """Start batch evaluation (async)."""
-    import uuid
-    from agents.database import save_task_status
-    
-    task_id = str(uuid.uuid4())
-    
-    # Save initial task status
-    save_task_status(task_id, "queued", {"completed": 0, "total": request.max_jobs})
-    
-    # Add background task
-    background_tasks.add_task(
-        run_batch_evaluation,
-        task_id,
-        request.max_jobs,
-        request.only_unevaluated,
-        request.company_filter,
-    )
-    
-    return {
-        "message": f"Batch evaluation started for up to {request.max_jobs} jobs",
-        "task_id": task_id,
-    }

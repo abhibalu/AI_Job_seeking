@@ -1,0 +1,525 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Evaluation, EvaluationStats } from './services/apiClient';
+import {
+  fetchJobsWithEvaluations,
+  fetchEvaluations,
+  evaluateJob,
+  getEvaluationStats,
+  getEvaluation,
+  JobWithEvaluation
+} from './services/jobService';
+import apiClient from './services/apiClient';
+import { ViewMode, FilterOptions, ResumeData, INITIAL_DATA } from './types';
+import { JobCard } from './components/JobCard';
+import { JobModal } from './components/JobModal';
+import { Pagination } from './components/Pagination';
+import { Header } from './components/Header';
+import { FilterBar } from './components/FilterBar';
+import { StatsCard } from './components/StatsCard';
+import { ResumePreview, TemplateType } from './components/ResumePreview';
+import { BatchEvaluate } from './components/BatchEvaluate';
+import { GlassCard } from './components/GlassCard';
+import { Editor } from './components/Editor';
+import {
+  Loader2,
+  Sparkles,
+  AlertCircle,
+  PenLine,
+  Printer,
+  Check,
+  ChevronRight,
+  User,
+  Eye
+} from 'lucide-react';
+
+const App: React.FC = () => {
+  // --- Job Board Data state ---
+  const [jobs, setJobs] = useState<JobWithEvaluation[]>([]);
+  const [stats, setStats] = useState<EvaluationStats | null>(null);
+  const [totalJobs, setTotalJobs] = useState(0);
+
+  // --- Resume Builder State ---
+  const [resumeData, setResumeData] = useState<ResumeData>(INITIAL_DATA);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
+  const [isResumeLoading, setIsResumeLoading] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  // --- UI state ---
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selectedEvaluation, setSelectedEvaluation] = useState<Evaluation | null>(null);
+  const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
+
+  // --- Filter state ---
+  const [viewMode, setViewMode] = useState<ViewMode>('all');
+  const [filters, setFilters] = useState<FilterOptions>({
+    searchQuery: '',
+    verdict: 'all',
+    action: 'all',
+    sortBy: 'score',
+    sortOrder: 'desc',
+  });
+
+  // --- Modals ---
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [newJobText, setNewJobText] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const ITEMS_PER_PAGE = 9;
+
+  // --- Fetch Jobs Data ---
+  const loadData = useCallback(async () => {
+    // If we are in resume view, we technically don't need to refresh jobs, 
+    // but we'll stick to the original behavior to keep state fresh or handle it gracefully.
+    if (viewMode === 'resume') return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const statsResult = await getEvaluationStats().catch(() => null);
+      setStats(statsResult);
+
+      if (viewMode === 'evaluated') {
+        const actionFilter = filters.action !== 'all' ? filters.action : undefined;
+        const evaluationsResult = await fetchEvaluations(currentPage, ITEMS_PER_PAGE, actionFilter);
+
+        const jobsWithEvals: JobWithEvaluation[] = evaluationsResult.data.map(e => ({
+          id: e.job_id,
+          title: e.title_role,
+          company_name: e.company_name,
+          location: null,
+          posted_at: null,
+          applicants_count: null,
+          evaluation: e,
+          isEvaluated: true,
+        }));
+
+        setJobs(jobsWithEvals);
+        setTotalJobs(evaluationsResult.total);
+      } else {
+        const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE);
+        setJobs(jobsResult.data);
+        setTotalJobs(jobsResult.total);
+      }
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('Failed to load jobs. Make sure the API server is running.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, viewMode, filters.action]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // --- Fetch Resume Data ---
+  useEffect(() => {
+    // Fetch resume data when app loads or when switching to resume view
+    const fetchResume = async () => {
+      try {
+        setIsResumeLoading(true);
+        const backendData = await apiClient.getMasterResume();
+        if (backendData && backendData.basics) {
+          // Map Nested JSON Resume to Flat ResumeData
+          const mappedData: ResumeData = {
+            fullName: backendData.basics.name || "Your Name",
+            title: backendData.basics.label || "Professional Title",
+            email: backendData.basics.email || "",
+            phone: backendData.basics.phone || "",
+            location: backendData.basics.location ?
+              `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
+              : "",
+            websites: [
+              backendData.basics.url || "",
+              ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
+            ].filter(Boolean),
+            summary: backendData.basics.summary || "",
+            experience: backendData.work?.map((w: any) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              company: w.name || "",
+              role: w.position || "",
+              period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
+              location: w.location || "",
+              achievements: w.highlights || []
+            })) || [],
+            education: backendData.education?.map((e: any) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              institution: e.institution || "",
+              degree: `${e.studyType || ''} ${e.area || ''}`,
+              period: `${e.startDate || ''} - ${e.endDate || ''}`,
+              location: ""
+            })) || [],
+            skills: backendData.skills?.map((s: any) =>
+              s.keywords && s.keywords.length > 0
+                ? `${s.name}: ${s.keywords.join(', ')}`
+                : s.name
+            ) || []
+          };
+          setResumeData(mappedData);
+        }
+      } catch (err) {
+        console.error("Failed to load resume", err);
+      } finally {
+        setIsResumeLoading(false);
+      }
+    };
+
+    fetchResume();
+  }, []);
+
+  // --- Resume Handlers ---
+  const handlePrint = () => {
+    window.focus();
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  const templates: { id: TemplateType, label: string, desc: string }[] = [
+    { id: 'modern', label: 'Modern', desc: 'Clean, balanced, standard' },
+    { id: 'classic', label: 'Classic', desc: 'Serif, traditional, formal' },
+    { id: 'compact', label: 'Compact', desc: 'Dense, single page optimized' },
+    { id: 'tech', label: 'Technical', desc: 'Monospaced, code-like' },
+    { id: 'minimal', label: 'Traditional', desc: 'Ivy League, ATS-Standard' },
+  ];
+
+  // --- Filter and sort jobs ---
+  const filteredJobs = jobs.filter(job => {
+    if (viewMode === 'evaluated' && !job.isEvaluated) return false;
+    if (viewMode === 'pending' && job.isEvaluated) return false;
+    if (filters.searchQuery) {
+      const query = filters.searchQuery.toLowerCase();
+      const matchesCompany = job.company_name?.toLowerCase().includes(query);
+      const matchesTitle = job.title?.toLowerCase().includes(query);
+      if (!matchesCompany && !matchesTitle) return false;
+    }
+    if (filters.verdict !== 'all' && job.evaluation?.verdict !== filters.verdict) return false;
+    if (filters.action !== 'all' && job.evaluation?.recommended_action !== filters.action) return false;
+    return true;
+  }).sort((a, b) => {
+    const multiplier = filters.sortOrder === 'asc' ? 1 : -1;
+    switch (filters.sortBy) {
+      case 'score':
+        return ((b.evaluation?.job_match_score || 0) - (a.evaluation?.job_match_score || 0)) * multiplier;
+      case 'company':
+        return ((a.company_name || '').localeCompare(b.company_name || '')) * multiplier;
+      case 'date':
+        return ((b.posted_at || '').localeCompare(a.posted_at || '')) * multiplier;
+      default:
+        return 0;
+    }
+  });
+
+  const handleJobClick = async (job: JobWithEvaluation) => {
+    if (job.isEvaluated && job.evaluation) {
+      try {
+        const fullEval = await getEvaluation(job.id);
+        setSelectedEvaluation(fullEval);
+      } catch {
+        setSelectedEvaluation(job.evaluation);
+      }
+    } else {
+      handleEvaluateJob(job.id);
+    }
+  };
+
+  const handleEvaluateJob = async (jobId: string) => {
+    setEvaluatingJobId(jobId);
+    try {
+      await evaluateJob(jobId);
+      await loadData();
+      const evaluation = await getEvaluation(jobId);
+      setSelectedEvaluation(evaluation);
+    } catch (err) {
+      console.error('Failed to evaluate job:', err);
+      setError('Failed to evaluate job. Please try again.');
+    } finally {
+      setEvaluatingJobId(null);
+    }
+  };
+
+  const handleAnalyzeNewJob = async () => {
+    if (!newJobText.trim()) return;
+    setAnalyzing(true);
+    try {
+      setIsAddModalOpen(false);
+      setNewJobText('');
+      alert('New JD analysis coming soon! This will integrate with your Gemini key.');
+    } catch (error) {
+      console.error('Analysis failed', error);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900 font-sans">
+      {/* Abstract Background Blobs - Keep consistent look */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100/50 blur-[100px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-100/50 blur-[100px]" />
+        <div className="absolute top-[30%] left-[60%] w-[20%] h-[20%] rounded-full bg-emerald-50/60 blur-[80px]" />
+      </div>
+
+      <Header
+        onAddJob={() => setIsAddModalOpen(true)}
+        onBatchEvaluate={() => setIsBatchModalOpen(true)}
+        totalJobs={totalJobs}
+        evaluatedCount={stats?.total_evaluated || 0}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
+
+      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* Stats Card - Show only in job views */}
+        {viewMode !== 'resume' && (
+          <StatsCard stats={stats} totalJobs={totalJobs} />
+        )}
+
+        {/* Filter Bar - Show only in job views */}
+        {viewMode !== 'resume' && (
+          <FilterBar
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            filters={filters}
+            onFiltersChange={setFilters}
+          />
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center">
+            <AlertCircle className="w-5 h-5 text-rose-500 mr-3" />
+            <p className="text-rose-700">{error}</p>
+            <button
+              onClick={loadData}
+              className="ml-auto px-3 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-sm font-medium"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* --- MAIN CONTENT AREA --- */}
+        {viewMode === 'resume' ? (
+          <div>
+            {/* Resume Toolbar */}
+            <div className="mb-8 animate-in slide-in-from-top-2 relative z-40">
+              <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between p-6 rounded-2xl bg-white border border-slate-200 shadow-xl">
+
+                {/* Template Selector */}
+                <div className="flex-1 w-full lg:w-auto overflow-hidden">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select Template</h4>
+                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-200">
+                    {templates.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setSelectedTemplate(t.id)}
+                        className={`
+                              flex flex-col items-start min-w-[140px] p-3 rounded-xl border transition-all text-left group cursor-pointer shrink-0
+                              ${selectedTemplate === t.id
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-md transform scale-[1.02]'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}
+                            `}
+                      >
+                        <div className="flex justify-between w-full mb-1">
+                          <span className="font-bold text-sm">{t.label}</span>
+                          {selectedTemplate === t.id && <Check size={16} className="text-emerald-400" />}
+                        </div>
+                        <span className={`text-[10px] leading-tight ${selectedTemplate === t.id ? 'text-slate-300' : 'text-slate-400'}`}>
+                          {t.desc}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
+                  <button
+                    onClick={() => setIsEditorOpen(true)}
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-sm"
+                  >
+                    <PenLine size={18} />
+                    <span>Edit Data</span>
+                  </button>
+                  <button
+                    onClick={handlePrint}
+                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <Printer size={18} />
+                    <span>Print / PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 text-center">
+                <p className="text-slate-400 text-xs flex items-center justify-center gap-2 inline-block px-4 py-1 rounded-full bg-white/50 border border-slate-100">
+                  <AlertCircle size={12} />
+                  <span>Tip: Select <strong>"Save as PDF"</strong> in your print dialog.</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Resume Preview */}
+            <div className="flex justify-center pb-12">
+              {isResumeLoading ? (
+                <div className="py-20 flex flex-col items-center">
+                  <Loader2 className="w-10 h-10 text-slate-300 animate-spin mb-4" />
+                  <p className="text-slate-500 font-medium animate-pulse">Loading resume data...</p>
+                </div>
+              ) : (
+                <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center">
+                  <ResumePreview data={resumeData} targetRef={printRef} template={selectedTemplate} />
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          // --- JOB BOARD CONTENT ---
+          <>
+            {loading ? (
+              <div className="flex flex-col items-center justify-center h-[60vh]">
+                <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
+                <p className="text-slate-500 animate-pulse font-medium">Loading jobs...</p>
+              </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-[40vh]">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                  <Sparkles className="w-8 h-8 text-slate-300" />
+                </div>
+                <p className="text-slate-500 font-medium">No jobs match your filters</p>
+                <button
+                  onClick={() => {
+                    setViewMode('all');
+                    setFilters({
+                      searchQuery: '',
+                      verdict: 'all',
+                      action: 'all',
+                      sortBy: 'score',
+                      sortOrder: 'desc',
+                    });
+                  }}
+                  className="mt-3 text-blue-600 hover:text-blue-700 text-sm font-medium"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredJobs.map((job) => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      onClick={() => handleJobClick(job)}
+                      onEvaluate={() => handleEvaluateJob(job.id)}
+                      isEvaluating={evaluatingJobId === job.id}
+                    />
+                  ))}
+                </div>
+
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
+                  onPageChange={setCurrentPage}
+                />
+              </>
+            )}
+          </>
+        )}
+      </main>
+
+      {/* Evaluation Detail Modal */}
+      <JobModal
+        evaluation={selectedEvaluation}
+        onClose={() => setSelectedEvaluation(null)}
+      />
+
+      {/* Batch Evaluate Modal */}
+      <BatchEvaluate
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        onComplete={loadData}
+      />
+
+      {/* Add New Job Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity"
+            onClick={() => !analyzing && setIsAddModalOpen(false)}
+          />
+          <GlassCard className="w-full max-w-2xl p-6 z-20 bg-white/95 shadow-2xl">
+            <h2 className="text-xl font-bold mb-4 flex items-center text-slate-900">
+              <Sparkles className="w-5 h-5 mr-2 text-blue-600" />
+              Analyze New Job Description
+            </h2>
+            <textarea
+              className="w-full h-48 bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all"
+              placeholder="Paste job description here..."
+              value={newJobText}
+              onChange={(e) => setNewJobText(e.target.value)}
+              disabled={analyzing}
+            />
+            <div className="flex justify-end mt-4 space-x-3">
+              <button
+                onClick={() => setIsAddModalOpen(false)}
+                disabled={analyzing}
+                className="px-4 py-2 rounded-lg hover:bg-slate-100 text-slate-500 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAnalyzeNewJob}
+                disabled={analyzing || !newJobText.trim()}
+                className="px-6 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center transition-all"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  'Analyze Match'
+                )}
+              </button>
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
+      {/* Editor Slide-over */}
+      <div
+        className={`
+            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10
+            ${isEditorOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'}
+          `}
+      >
+        {isEditorOpen && (
+          <Editor
+            data={resumeData}
+            onChange={setResumeData}
+            onClose={() => setIsEditorOpen(false)}
+          />
+        )}
+      </div>
+
+      {/* Backdrop for Editor */}
+      {isEditorOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"
+          onClick={() => setIsEditorOpen(false)}
+        />
+      )}
+
+    </div>
+  );
+};
+
+export default App;

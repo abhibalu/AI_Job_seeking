@@ -258,42 +258,49 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900 font-sans">
-      {/* Abstract Background Blobs - Keep consistent look */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+      {/* Abstract Background Blobs - Hide in print */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none print:hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100/50 blur-[100px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-100/50 blur-[100px]" />
         <div className="absolute top-[30%] left-[60%] w-[20%] h-[20%] rounded-full bg-emerald-50/60 blur-[80px]" />
       </div>
 
-      <Header
-        onAddJob={() => setIsAddModalOpen(true)}
-        onBatchEvaluate={() => setIsBatchModalOpen(true)}
-        totalJobs={totalJobs}
-        evaluatedCount={stats?.total_evaluated || 0}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-      />
+      <div className="print:hidden">
+        <Header
+          onAddJob={() => setIsAddModalOpen(true)}
+          onBatchEvaluate={() => setIsBatchModalOpen(true)}
+          totalJobs={totalJobs}
+          evaluatedCount={stats?.total_evaluated || 0}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
+      </div>
 
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Main Container - Reset padding/margins for print */}
+      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:m-0 print:max-w-none print:w-full">
 
         {/* Stats Card - Show only in job views */}
         {viewMode !== 'resume' && (
-          <StatsCard stats={stats} totalJobs={totalJobs} />
+          <div className="print:hidden">
+            <StatsCard stats={stats} totalJobs={totalJobs} />
+          </div>
         )}
 
         {/* Filter Bar - Show only in job views */}
         {viewMode !== 'resume' && (
-          <FilterBar
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-            filters={filters}
-            onFiltersChange={setFilters}
-          />
+          <div className="print:hidden">
+            <FilterBar
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              filters={filters}
+              onFiltersChange={setFilters}
+            />
+          </div>
         )}
 
         {/* Error Message */}
         {error && (
-          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center">
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center print:hidden">
             <AlertCircle className="w-5 h-5 text-rose-500 mr-3" />
             <p className="text-rose-700">{error}</p>
             <button
@@ -308,8 +315,8 @@ const App: React.FC = () => {
         {/* --- MAIN CONTENT AREA --- */}
         {viewMode === 'resume' ? (
           <div>
-            {/* Resume Toolbar */}
-            <div className="mb-8 animate-in slide-in-from-top-2 relative z-40">
+            {/* Resume Toolbar - Hide in print */}
+            <div className="mb-8 animate-in slide-in-from-top-2 relative z-40 print:hidden">
               <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between p-6 rounded-2xl bg-white border border-slate-200 shadow-xl">
 
                 {/* Template Selector */}
@@ -366,15 +373,15 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Resume Preview */}
-            <div className="flex justify-center pb-12">
+            {/* Resume Preview - Position absolutely for print */}
+            <div className="flex justify-center pb-12 print:pb-0 print:block">
               {isResumeLoading ? (
                 <div className="py-20 flex flex-col items-center">
                   <Loader2 className="w-10 h-10 text-slate-300 animate-spin mb-4" />
                   <p className="text-slate-500 font-medium animate-pulse">Loading resume data...</p>
                 </div>
               ) : (
-                <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center">
+                <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center print:absolute print:top-0 print:left-0 print:w-full print:m-0 print:block">
                   <ResumePreview data={resumeData} targetRef={printRef} template={selectedTemplate} />
                 </div>
               )}
@@ -382,7 +389,7 @@ const App: React.FC = () => {
           </div>
         ) : (
           // --- JOB BOARD CONTENT ---
-          <>
+          <div className="print:hidden">
             {loading ? (
               <div className="flex flex-col items-center justify-center h-[60vh]">
                 <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
@@ -431,26 +438,30 @@ const App: React.FC = () => {
                 />
               </>
             )}
-          </>
+          </div>
         )}
       </main>
 
       {/* Evaluation Detail Modal */}
-      <JobModal
-        evaluation={selectedEvaluation}
-        onClose={() => setSelectedEvaluation(null)}
-      />
+      <div className="print:hidden">
+        <JobModal
+          evaluation={selectedEvaluation}
+          onClose={() => setSelectedEvaluation(null)}
+        />
+      </div>
 
       {/* Batch Evaluate Modal */}
-      <BatchEvaluate
-        isOpen={isBatchModalOpen}
-        onClose={() => setIsBatchModalOpen(false)}
-        onComplete={loadData}
-      />
+      <div className="print:hidden">
+        <BatchEvaluate
+          isOpen={isBatchModalOpen}
+          onClose={() => setIsBatchModalOpen(false)}
+          onComplete={loadData}
+        />
+      </div>
 
       {/* Add New Job Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
           <div
             className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity"
             onClick={() => !analyzing && setIsAddModalOpen(false)}
@@ -497,7 +508,7 @@ const App: React.FC = () => {
       {/* Editor Slide-over */}
       <div
         className={`
-            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10
+            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10 print:hidden
             ${isEditorOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'}
           `}
       >
@@ -513,7 +524,7 @@ const App: React.FC = () => {
       {/* Backdrop for Editor */}
       {isEditorOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"
+          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity print:hidden"
           onClick={() => setIsEditorOpen(false)}
         />
       )}

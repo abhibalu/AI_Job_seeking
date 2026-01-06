@@ -49,7 +49,8 @@ class BaseAgent(ABC):
         
         with httpx.Client(timeout=120.0) as client:
             # Handle both cases: base URL with or without /chat/completions
-            url = self.base_url if self.base_url.endswith("/chat/completions") else f"{self.base_url}/chat/completions"
+            base_url = self.base_url.rstrip("/")
+            url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
             response = client.post(
                 url,
                 headers=headers,

@@ -1,0 +1,4 @@
+Testing ResumeParserAgent with forced model: google/gemini-2.0-flash-exp:free
+Running agent...
+Result Status: Success
+{'basics': {'name': 'John Doe', 'label': 'Software Engineer', 'email': 'john@example.com', 'summary': 'Software Engineer with experience in building resume parsers.', 'location': {}, 'profiles': []}, 'work': [], 'education': [], 'awards': [], 'skills': [], 'languages': [], 'projects': [{'name': 'Resume Parser', 'description': 'Built a resume parser', 'highlights': [], 'keywords': ['Python']}], '_model_used': 'google/gemini-2.0-flash-exp:free', '_agent': 'ResumeParserAgent'}

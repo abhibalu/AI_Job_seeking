@@ -1,7 +1,7 @@
 import React from 'react';
 import { ResumeData } from '../types';
 
-export type TemplateType = 'modern' | 'classic' | 'compact' | 'tech' | 'minimal';
+export type TemplateType = 'ats_friendly' | 'modern' | 'classic' | 'minimal' | 'tech' | 'compact';
 
 interface ResumePreviewProps {
     data: ResumeData;
@@ -70,7 +70,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
             skillsLayout: "flex flex-wrap gap-2",
         },
         minimal: {
-            // Replaced with "Traditional / Ivy League" style
+            // Traditional / Ivy League style
             container: "font-serif text-black p-10 sm:p-12 max-w-[210mm] mx-auto leading-normal",
             header: "text-center mb-6",
             name: "text-3xl font-bold text-black mb-2 uppercase tracking-wide font-serif",
@@ -83,10 +83,25 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
             expCompany: "italic text-black font-serif",
             expDate: "text-black font-serif",
             skillsLayout: "grid grid-cols-1 gap-y-1",
+        },
+        ats_friendly: {
+            // Same as minimal for preview purposes
+            container: "font-serif text-black p-10 sm:p-12 max-w-[210mm] mx-auto leading-normal",
+            header: "text-center mb-6",
+            name: "text-3xl font-bold text-black mb-2 uppercase tracking-wide font-serif",
+            title: "hidden",
+            contactBar: "text-sm text-black flex flex-wrap justify-center gap-x-2 font-serif",
+            separator: "hidden",
+            sectionTitle: "text-md font-bold text-black uppercase tracking-wider border-b border-black mb-3 mt-5 pb-0.5 font-serif",
+            expItem: "mb-4",
+            expRole: "font-bold text-black font-serif",
+            expCompany: "italic text-black font-serif",
+            expDate: "text-black font-serif",
+            skillsLayout: "grid grid-cols-1 gap-y-1",
         }
     };
 
-    const activeStyle = styles[template];
+    const activeStyle = styles[template] || styles.modern;
 
     return (
         <div className="relative group perspective-1000 print:perspective-none w-full flex justify-center print:block print:w-auto">
@@ -97,9 +112,9 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
             <div
                 ref={targetRef}
                 className={`
-          bg-white 
-          w-full max-w-[210mm] min-h-[297mm] 
-          shadow-2xl 
+          bg-white
+          w-full max-w-[210mm] min-h-[297mm]
+          shadow-2xl
           print:shadow-none print:w-full print:max-w-none print:min-h-0 print:p-0 print:overflow-visible
           relative
           z-10
@@ -131,7 +146,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                         <>
                             <h1 className={activeStyle.name}>{data.fullName}</h1>
                             {/* For Minimal/Traditional, we typically hide the job title in header to focus on Name + Contact */}
-                            {template !== 'minimal' && data.title && <p className={activeStyle.title}>{data.title}</p>}
+                            {template !== 'minimal' && template !== 'ats_friendly' && data.title && <p className={activeStyle.title}>{data.title}</p>}
 
                             <div className={activeStyle.contactBar}>
                                 <span>{data.phone}</span>
@@ -165,7 +180,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                 {data.summary && (
                     <section className={template === 'compact' ? "mb-4" : "mb-6"}>
                         <h3 className={activeStyle.sectionTitle}>
-                            {template === 'minimal' ? 'Personal Profile' : 'Professional Summary'}
+                            {(template === 'minimal' || template === 'ats_friendly') ? 'Personal Profile' : 'Professional Summary'}
                         </h3>
                         <p className="text-sm leading-relaxed text-justify opacity-90">
                             {data.summary}
@@ -180,7 +195,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                         {data.experience.map((exp) => {
 
                             // Minimal / Traditional Style (Strict Layout based on screenshot)
-                            if (template === 'minimal') {
+                            if (template === 'minimal' || template === 'ats_friendly') {
                                 return (
                                     <div key={exp.id} className="mb-4">
                                         <div className="flex justify-between items-baseline">
@@ -243,7 +258,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                         <div className="space-y-4">
                             {data.education.map((edu) => {
                                 // Minimal / Traditional Style
-                                if (template === 'minimal') {
+                                if (template === 'minimal' || template === 'ats_friendly') {
                                     return (
                                         <div key={edu.id} className="mb-2">
                                             <div className="flex justify-between items-baseline">
@@ -277,7 +292,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                 {/* --- SKILLS --- */}
                 <section>
                     <h3 className={activeStyle.sectionTitle}>
-                        {template === 'minimal' ? 'Technical Skills' : 'Skills'}
+                        {(template === 'minimal' || template === 'ats_friendly') ? 'Technical Skills' : 'Skills'}
                     </h3>
 
                     {template === 'compact' ? (
@@ -302,7 +317,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                                         {/* Check if skill has a label like "Language: Value" to split */}
                                         {skill.includes(':') ? (
                                             <>
-                                                <span className={`font-bold ${template === 'minimal' ? 'text-black' : 'text-gray-800'}`}>{skill.split(':')[0]}:</span>
+                                                <span className={`font-bold ${(template === 'minimal' || template === 'ats_friendly') ? 'text-black' : 'text-gray-800'}`}>{skill.split(':')[0]}:</span>
                                                 <span className="opacity-90 ml-2">{skill.substring(skill.indexOf(':') + 1)}</span>
                                             </>
                                         ) : (

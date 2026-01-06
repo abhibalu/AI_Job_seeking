@@ -464,7 +464,7 @@ const App: React.FC = () => {
                     ) : (
                       <Download size={18} />
                     )}
-                    <span>Typst PDF</span>
+                    <span>Download PDF</span>
                   </button>
 
                   <button
@@ -472,7 +472,7 @@ const App: React.FC = () => {
                     className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <Printer size={18} />
-                    <span>Print</span>
+                    <span>Print / Preview</span>
                   </button>
                 </div>
               </div>

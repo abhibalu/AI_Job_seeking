@@ -117,6 +117,22 @@ class ApiClient {
             body: formData,
         });
     }
+
+    async generatePdf(data: any, template: string) {
+        const response = await fetch(`${this.baseUrl}/api/pdf/generate?template=${template}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+            throw new Error(`PDF generation failed: ${response.statusText}`);
+        }
+
+        return response.blob();
+    }
 }
 
 // Types matching backend schemas

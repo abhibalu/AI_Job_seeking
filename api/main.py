@@ -36,6 +36,9 @@ app.include_router(parse.router, prefix="/api/parse", tags=["Parse"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(resumes.router, prefix="/api/resumes", tags=["Resumes"])
 
+from .routes import pdf
+app.include_router(pdf.router, prefix="/api/pdf", tags=["PDF Generation"])
+
 
 @app.get("/")
 def root():

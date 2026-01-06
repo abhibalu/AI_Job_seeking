@@ -30,7 +30,8 @@ import {
   ChevronRight,
   User,
   Eye,
-  Upload
+  Upload,
+  Download
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -45,6 +46,7 @@ const App: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
   const [isResumeLoading, setIsResumeLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -228,6 +230,29 @@ const App: React.FC = () => {
       window.print();
     }, 150);
   };
+
+  const handleDownloadPdf = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      const blob = await apiClient.generatePdf(resumeData, selectedTemplate);
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${resumeData.fullName.replace(/\s+/g, '_')}_Resume.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("PDF generation failed", error);
+      alert("Failed to generate PDF. Please ensure the backend server has 'typst' installed.");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
 
   const templates: { id: TemplateType, label: string, desc: string }[] = [
     { id: 'modern', label: 'Modern', desc: 'Clean, balanced, standard' },
@@ -428,12 +453,26 @@ const App: React.FC = () => {
                     <PenLine size={18} />
                     <span>Edit Data</span>
                   </button>
+
+                  <button
+                    onClick={handleDownloadPdf}
+                    disabled={isGeneratingPdf}
+                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    {isGeneratingPdf ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Download size={18} />
+                    )}
+                    <span>Typst PDF</span>
+                  </button>
+
                   <button
                     onClick={handlePrint}
-                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <Printer size={18} />
-                    <span>Print / PDF</span>
+                    <span>Print</span>
                   </button>
                 </div>
               </div>
@@ -441,7 +480,7 @@ const App: React.FC = () => {
               <div className="mt-4 text-center">
                 <p className="text-slate-400 text-xs flex items-center justify-center gap-2 inline-block px-4 py-1 rounded-full bg-white/50 border border-slate-100">
                   <AlertCircle size={12} />
-                  <span>Tip: Select <strong>"Save as PDF"</strong> in your print dialog.</span>
+                  <span>Tip: Use <strong>"Typst PDF"</strong> for high-quality generation, or <strong>"Print"</strong> for browser-based saving.</span>
                 </p>
               </div>
             </div>

@@ -113,7 +113,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
             // ATS Friendly - Strict Sans-Serif, Compact, Split Header
             container: "font-sans text-[#111] px-12 py-8 sm:px-14 sm:py-10 print:px-8 print:py-10 max-w-[210mm] mx-auto leading-[1.3] text-[12px]", // Fixed print margins
             header: "flex flex-col items-center text-center mb-4",
-            name: "text-2xl font-bold text-[#111] uppercase tracking-wide mb-1 mt-2", // Added mt-4 for top margin
+            name: "text-xl sm:text-2xl font-bold text-[#111] uppercase tracking-wide mb-1 mt-2 whitespace-nowrap", // Reduced base size to xl to prevent print wrapping
             title: "text-lg text-[#333] font-medium mb-2", // Reduced size and margin
             contactBar: "text-[12px] text-[#444] flex flex-wrap justify-center gap-x-3 gap-y-1 mb-1 font-medium",
             separator: "hidden", // Hide separator

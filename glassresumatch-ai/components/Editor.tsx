@@ -71,7 +71,8 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                     institution: e.institution || "",
                     degree: `${e.studyType || ''} ${e.area || ''}`.trim(),
                     period: `${formatDate(e.startDate)} - ${e.endDate ? formatDate(e.endDate) : 'Present'}`,
-                    location: ""
+                    location: "",
+                    score: e.score || ""
                 })) || [],
                 skills: parsed.skills?.map((s: any) => s.name) || []
             };
@@ -302,12 +303,12 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
                         {/* Websites */}
                         <div className="space-y-2 pt-2">
-                            <label className="block text-xs text-slate-500 mb-1">Links / Websites</label>
+                            <label className="block text-xs text-slate-500 mb-1">Links (LinkedIn, GitHub, Portfolio)</label>
                             {data.websites.map((site, idx) => (
                                 <div key={idx} className="flex gap-2">
                                     <input
                                         type="text"
-                                        placeholder="https://..."
+                                        placeholder="e.g. https://linkedin.com/in/yourname"
                                         className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                         value={site}
                                         onChange={(e) => handleWebsiteChange(idx, e.target.value)}
@@ -539,6 +540,16 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                                                             onChange={(e) => handleEducationChange(edu.id, 'location', e.target.value)}
                                                         />
                                                     </div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Grade / Score / CPA</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
+                                                        value={edu.score || ''}
+                                                        onChange={(e) => handleEducationChange(edu.id, 'score', e.target.value)}
+                                                        placeholder="e.g. GPA 3.8/4.0 or 85%"
+                                                    />
                                                 </div>
                                             </div>
                                         </div>

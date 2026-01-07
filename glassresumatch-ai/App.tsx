@@ -133,6 +133,13 @@ const App: React.FC = () => {
         return true;
       }
 
+      // Check if error
+      if (backendData.status === 'error') {
+        console.error("Resume parsing error:", backendData.error);
+        alert(`Resume parsing failed: ${backendData.error}\n\nPlease try again or check the backend logs.`);
+        return false;
+      }
+
       if (backendData && backendData.basics) {
         // Map Nested JSON Resume to Flat ResumeData
         const mappedData: ResumeData = {
@@ -161,7 +168,8 @@ const App: React.FC = () => {
             institution: e.institution || "",
             degree: `${e.studyType || ''} ${e.area || ''}`,
             period: `${e.startDate || ''} - ${e.endDate || ''}`,
-            location: ""
+            location: "",
+            score: e.score || ""
           })) || [],
           skills: backendData.skills?.map((s: any) =>
             s.keywords && s.keywords.length > 0
@@ -260,6 +268,7 @@ const App: React.FC = () => {
     { id: 'compact', label: 'Compact', desc: 'Dense, single page optimized' },
     { id: 'tech', label: 'Technical', desc: 'Monospaced, code-like' },
     { id: 'minimal', label: 'Traditional', desc: 'Ivy League, ATS-Standard' },
+    { id: 'ats_friendly', label: 'ATS Friendly', desc: ' optimized for ATS parsing' },
   ];
 
   // --- Filter and sort jobs ---

@@ -26,8 +26,9 @@ class BaseAgent(ABC):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = settings.OPENROUTER_BASE_URL
         
+    
     def _call_llm(self, user_prompt: str) -> str:
-        """Make a raw LLM call and return the response text."""
+        """Make a raw LLM call and return the response text. Retries with backup model on failure."""
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY not set in environment")
         
@@ -38,28 +39,51 @@ class BaseAgent(ABC):
             "X-Title": "TailorAI Job Evaluator",
         }
         
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": self.temperature,
-        }
-        
-        with httpx.Client(timeout=120.0) as client:
-            # Handle both cases: base URL with or without /chat/completions
-            base_url = self.base_url.rstrip("/")
-            url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
-            response = client.post(
-                url,
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
+        # Primary then Backup model strategy
+        models_to_try = [self.model]
+        if settings.OPENROUTER_MODEL_BACKUP and settings.OPENROUTER_MODEL_BACKUP != self.model:
+            models_to_try.append(settings.OPENROUTER_MODEL_BACKUP)
             
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        last_exception = None
+        
+        for current_model in models_to_try:
+            payload = {
+                "model": current_model,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": self.temperature,
+            }
+            
+            try:
+                if current_model != self.model:
+                    print(f"Retrying with BACKUP model: {current_model}")
+
+                with httpx.Client(timeout=120.0) as client:
+                    # Handle both cases: base URL with or without /chat/completions
+                    base_url = self.base_url.rstrip("/")
+                    url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+                    response = client.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+                
+            except Exception as e:
+                print(f"Model {current_model} failed: {e}")
+                last_exception = e
+                # Continue to next model if available
+                continue
+                
+        # If we get here, all models failed
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("LLM call failed with no exception captured")
     
     def _parse_json_response(self, response_text: str) -> dict:
         """Parse JSON from LLM response, handling markdown code blocks."""

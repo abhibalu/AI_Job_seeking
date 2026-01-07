@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # OpenRouter Configuration
     OPENROUTER_API_KEY: str = Field(default="", env="OPENROUTER_API_KEY")
     OPENROUTER_MODEL: str = Field("google/gemini-2.0-flash-exp:free", env="OPENROUTER_MODEL")
+    OPENROUTER_MODEL_BACKUP: str = Field(default="", env="OPENROUTER_MODEL_BACKUP")
     OPENROUTER_BASE_URL: str = Field("https://openrouter.ai/api/v1", env="OPENROUTER_BASE_URL")
     
     # Evaluation settings

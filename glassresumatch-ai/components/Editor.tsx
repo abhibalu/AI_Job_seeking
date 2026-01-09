@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ResumeData, Experience, Education } from '../types';
-import { Plus, Trash2, GripVertical, FileJson, X, ChevronDown, ChevronRight, Briefcase, GraduationCap } from 'lucide-react';
+import { Plus, Trash2, GripVertical, FileJson, X, ChevronDown, ChevronRight, Briefcase, GraduationCap, Save } from 'lucide-react';
+import apiClient from '../services/apiClient';
 
 interface EditorProps {
     data: ResumeData;
@@ -11,6 +12,7 @@ interface EditorProps {
 export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
     const [showImport, setShowImport] = useState(false);
     const [jsonInput, setJsonInput] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
 
     // State for collapsible items
     const [expandedExpIds, setExpandedExpIds] = useState<string[]>([]);
@@ -22,6 +24,19 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
     const toggleEdu = (id: string) => {
         setExpandedEduIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            await apiClient.updateMasterResume(data);
+            alert('Resume saved successfully!');
+        } catch (error) {
+            console.error('Failed to save resume:', error);
+            alert('Failed to save changes. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleInputChange = (field: keyof ResumeData, value: string) => {
@@ -50,38 +65,125 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                 }
             };
 
-            const newData: ResumeData = {
-                fullName: parsed.basics?.name || data.fullName,
-                title: parsed.basics?.label || data.title,
-                email: parsed.basics?.email || data.email,
-                phone: parsed.basics?.phone || data.phone,
-                location: formatLocation(parsed.basics?.location) || data.location,
-                websites: parsed.basics?.profiles?.map((p: any) => p.url) || [],
-                summary: parsed.basics?.summary || "",
-                experience: parsed.work?.map((w: any) => ({
-                    id: Math.random().toString(36).substr(2, 9),
-                    company: w.name || "",
-                    role: w.position || "",
-                    period: `${formatDate(w.startDate)} - ${w.endDate ? formatDate(w.endDate) : 'Present'}`,
-                    location: w.location || "",
-                    achievements: w.highlights || []
-                })) || [],
-                education: parsed.education?.map((e: any) => ({
-                    id: Math.random().toString(36).substr(2, 9),
-                    institution: e.institution || "",
-                    degree: `${e.studyType || ''} ${e.area || ''}`.trim(),
-                    period: `${formatDate(e.startDate)} - ${e.endDate ? formatDate(e.endDate) : 'Present'}`,
-                    location: "",
-                    score: e.score || ""
-                })) || [],
-                skills: parsed.skills?.map((s: any) => s.name) || []
+            // Start with current data to allow partial updates (Merge strategy)
+            const newData: ResumeData = { ...data };
+
+            // Helper to map Work Experience
+            const mapWork = (workData: any[]) => workData.map((w: any) => ({
+                id: Math.random().toString(36).substr(2, 9),
+                company: w.name || w.company || "",
+                role: w.position || w.role || "",
+                period: w.period || `${formatDate(w.startDate)} - ${w.endDate ? formatDate(w.endDate) : 'Present'}`,
+                location: w.location || "",
+                achievements: w.highlights || w.achievements || []
+            }));
+
+            // Helper to map Education
+            const mapEducation = (eduData: any[]) => eduData.map((e: any) => ({
+                id: Math.random().toString(36).substr(2, 9),
+                institution: e.institution || "",
+                degree: e.degree || `${e.studyType || ''} ${e.area || ''}`.trim(),
+                period: e.period || `${formatDate(e.startDate)} - ${e.endDate ? formatDate(e.endDate) : 'Present'}`,
+                location: e.location || "",
+                score: e.score || ""
+            }));
+
+            // Helper to map Skills
+            const mapSkills = (skillData: any[]) => skillData.map((s: any) =>
+                typeof s === 'string' ? s : (s.name || "")
+            );
+
+            // 1. Direct Array Detection (Smart Import)
+            if (Array.isArray(parsed)) {
+                if (parsed.length > 0) {
+                    const first = parsed[0];
+                    if (first.company || first.name) {
+                        // Assume Work Experience
+                        newData.experience = mapWork(parsed);
+                        alert(`Imported ${parsed.length} work experience entries!`);
+                    } else if (first.institution) {
+                        // Assume Education
+                        newData.education = mapEducation(parsed);
+                        alert(`Imported ${parsed.length} education entries!`);
+                    } else if (typeof first === 'string' || first.name) {
+                        // Assume Skills
+                        newData.skills = mapSkills(parsed);
+                        alert(`Imported ${parsed.length} skills!`);
+                    }
+                }
+            } else {
+                // 2. Standard JSON Resume Object OR Single Item
+
+                // Check if the object itself is a single Work/Education item
+                if ((parsed.company || parsed.name) && (parsed.position || parsed.role || parsed.highlights)) {
+                    const newWork = mapWork([parsed]);
+                    newData.experience = [...newWork, ...data.experience];
+                    alert('Imported 1 new work experience entry!');
+                    onChange(newData);
+                    setJsonInput('');
+                    setShowImport(false);
+                    return;
+                } else if (parsed.institution || parsed.studyType) {
+                    const newEdu = mapEducation([parsed]);
+                    newData.education = [...newEdu, ...data.education];
+                    alert('Imported 1 new education entry!');
+                    onChange(newData);
+                    setJsonInput('');
+                    setShowImport(false);
+                    return;
+                }
+
+                // Fallback: Check for standard keys
+
+                // Basics
+                if (parsed.basics) {
+                    if (parsed.basics.name) newData.fullName = parsed.basics.name;
+                    if (parsed.basics.label) newData.title = parsed.basics.label;
+                    if (parsed.basics.email) newData.email = parsed.basics.email;
+                    if (parsed.basics.phone) newData.phone = parsed.basics.phone;
+                    if (parsed.basics.location) newData.location = formatLocation(parsed.basics.location);
+                    if (parsed.basics.summary) newData.summary = parsed.basics.summary;
+                    if (parsed.basics.profiles) newData.websites = parsed.basics.profiles.map((p: any) => p.url);
+                }
+
+                // Work
+                if (parsed.work) newData.experience = mapWork(parsed.work);
+
+                // Education
+                if (parsed.education) newData.education = mapEducation(parsed.education);
+
+                // Skills
+                if (parsed.skills) newData.skills = mapSkills(parsed.skills);
+
+                alert('Resume merged successfully!');
+            }
+
+            // --- SORTING LOGIC ---
+            // Sort experience by start date (descending) to ensure chronological order regardless of insertion
+            const parseStartDate = (period: string) => {
+                if (!period) return new Date(0);
+                // "February 2022 - Present" -> "February 2022"
+                const parts = period.split(' - ');
+                if (parts.length > 0) {
+                    return new Date(parts[0]);
+                }
+                return new Date(0);
             };
+
+            if (newData.experience && newData.experience.length > 0) {
+                newData.experience.sort((a, b) => {
+                    const dateA = parseStartDate(a.period);
+                    const dateB = parseStartDate(b.period);
+                    return dateB.getTime() - dateA.getTime();
+                });
+            }
 
             onChange(newData);
             setJsonInput('');
             setShowImport(false);
-            alert('Resume updated from JSON successfully!');
+
         } catch (e) {
+            console.error(e);
             alert('Invalid JSON format. Please check your input.');
         }
     };
@@ -211,6 +313,14 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                     Edit Profile
                 </h2>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center gap-1 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full hover:bg-blue-700 transition font-medium shadow-sm disabled:opacity-50"
+                    >
+                        <Save size={14} />
+                        {isSaving ? "Saving..." : "Save"}
+                    </button>
                     <button
                         onClick={() => setShowImport(!showImport)}
                         className="flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-200 transition font-medium border border-slate-200"

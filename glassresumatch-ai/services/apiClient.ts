@@ -118,6 +118,13 @@ class ApiClient {
         });
     }
 
+    async updateMasterResume(data: any) {
+        return this.request<any>('/api/resumes/master', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
     async generatePdf(data: any, template: string) {
         const response = await fetch(`${this.baseUrl}/api/pdf/generate?template=${template}`, {
             method: 'POST',

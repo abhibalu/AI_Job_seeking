@@ -140,6 +140,15 @@ const App: React.FC = () => {
         return false;
       }
 
+
+      // 1. Saved Format (Flat ResumeData)
+      if (backendData && backendData.fullName) {
+        setResumeData(backendData);
+        setIsUploading(false);
+        return false;
+      }
+
+      // 2. Legacy/Parsed Format (JSON Resume Schema)
       if (backendData && backendData.basics) {
         // Map Nested JSON Resume to Flat ResumeData
         const mappedData: ResumeData = {

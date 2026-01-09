@@ -34,6 +34,28 @@ def get_master_resume():
             
     raise HTTPException(status_code=404, detail="Master resume not found. Please upload a resume first.")
 
+from api.schemas import ResumeData
+
+@router.post("/master")
+def update_master_resume(resume: ResumeData):
+    """Update (save) the master resume with new content."""
+    try:
+        # Convert Pydantic model to dict
+        content = resume.model_dump()
+        
+        # Save as new master version
+        save_resume(content, name="Master Resume", is_master=True)
+        
+        # Also update file backup for redundancy
+        if os.path.exists(MASTER_RESUME_PATH):
+             with open(MASTER_RESUME_PATH, "w") as f:
+                json.dump(content, f, indent=2)
+                
+        return {"status": "success", "message": "Resume updated successfully"}
+    except Exception as e:
+        print(f"Error updating resume: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 from fastapi.concurrency import run_in_threadpool
 
 async def process_resume_background(full_text: str):

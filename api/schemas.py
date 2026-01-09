@@ -107,6 +107,7 @@ class Education(BaseModel):
     degree: str
     period: str
     location: Optional[str] = ""
+    score: Optional[str] = None
 
 class ResumeData(BaseModel):
     fullName: str

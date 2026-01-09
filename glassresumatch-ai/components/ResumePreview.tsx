@@ -12,15 +12,30 @@ interface ResumePreviewProps {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const formatDate = (dateStr: string) => {
     if (!dateStr) return '';
-    const str = String(dateStr);
-    // Handle "Present" case or simple years
-    if (str.toLowerCase() === 'present') return 'Present';
+    const str = String(dateStr).trim();
+    if (str.toLowerCase() === 'present' || str.toLowerCase() === 'current') return 'Present';
 
-    const [year, month] = str.split('-');
-    if (!year || !month) return str;
-    const mIndex = parseInt(month, 10) - 1;
-    if (mIndex < 0 || mIndex > 11) return str;
-    return `${MONTHS[mIndex]} ${year}`;
+    try {
+        // Handle "February 2022" -> "Feb 2022"
+        const date = new Date(str);
+        if (!isNaN(date.getTime())) {
+            return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        }
+
+        // Handle YYYY-MM manually if Date parse fails for local time reasons (sometimes risky)
+        const parts = str.split('-');
+        if (parts.length >= 2) {
+            const year = parts[0];
+            const month = parseInt(parts[1], 10);
+            if (year.length === 4 && month >= 1 && month <= 12) {
+                return `${MONTHS[month - 1]} ${year}`;
+            }
+        }
+    } catch (e) {
+        // Fallback
+    }
+
+    return str;
 };
 
 const formatPeriod = (period: string) => {
@@ -30,7 +45,8 @@ const formatPeriod = (period: string) => {
     if (parts.length === 2) {
         return `${formatDate(parts[0])} – ${formatDate(parts[1])}`;
     }
-    return period;
+    // Fallback: try formatting the whole string if it's just a single date
+    return formatDate(period);
 }
 
 

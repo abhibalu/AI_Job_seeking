@@ -134,6 +134,10 @@ def create_gold_table():
         for row in top_companies.iter_rows(named=True):
             print(f"  - {row['company_name']}: {row['count']} jobs")
 
+    # 5. Auto-Sync to App Database
+    from .app_sync import sync_gold_to_app
+    sync_gold_to_app()
+
 
 if __name__ == "__main__":
     create_gold_table()

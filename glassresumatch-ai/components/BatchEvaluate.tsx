@@ -31,8 +31,10 @@ export const BatchEvaluate: React.FC<BatchEvaluateProps> = ({ isOpen, onClose, o
                     setIsRunning(false);
                     if (status.status === 'completed') {
                         setTimeout(() => {
+                            setTaskId(null);
+                            setTaskStatus(null);
                             onComplete();
-                            handleClose();
+                            onClose();
                         }, 1500);
                     }
                 }
@@ -72,7 +74,9 @@ export const BatchEvaluate: React.FC<BatchEvaluateProps> = ({ isOpen, onClose, o
     if (!isOpen) return null;
 
     const progress = taskStatus?.progress;
-    const progressPercent = progress ? Math.round((progress.completed / progress.total) * 100) : 0;
+    const progressPercent = (progress && progress.total > 0)
+        ? Math.round((progress.completed / progress.total) * 100)
+        : 0;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -109,23 +113,28 @@ export const BatchEvaluate: React.FC<BatchEvaluateProps> = ({ isOpen, onClose, o
                                 <input
                                     type="range"
                                     min="1"
-                                    max="50"
+                                    max="500"
                                     value={maxJobs}
                                     onChange={(e) => setMaxJobs(Number(e.target.value))}
                                     className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                                 />
                                 <div className="flex justify-between text-xs text-slate-400 mt-1">
                                     <span>1</span>
-                                    <span>25</span>
-                                    <span>50</span>
+                                    <span>250</span>
+                                    <span>500</span>
                                 </div>
                             </div>
 
                             {/* Only Unevaluated Toggle */}
                             <div className="flex items-center justify-between">
-                                <label className="text-sm font-medium text-slate-700">
-                                    Only unevaluated jobs
-                                </label>
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700 block">
+                                        Evaluate only new jobs
+                                    </label>
+                                    <span className="text-xs text-slate-500">
+                                        Uncheck to force re-evaluation of existing jobs
+                                    </span>
+                                </div>
                                 <button
                                     onClick={() => setOnlyUnevaluated(!onlyUnevaluated)}
                                     className={`w-12 h-6 rounded-full transition-colors ${onlyUnevaluated ? 'bg-blue-600' : 'bg-slate-300'
@@ -188,6 +197,17 @@ export const BatchEvaluate: React.FC<BatchEvaluateProps> = ({ isOpen, onClose, o
                                     <p className="text-slate-500 mt-1">
                                         {progress?.completed || 0} of {progress?.total || maxJobs} completed
                                     </p>
+
+                                    {progress?.failed ? (
+                                        <div className="mt-2 text-sm text-rose-500 font-medium bg-rose-50 py-1 px-3 rounded-lg border border-rose-100">
+                                            {progress.failed} failed
+                                            {progress.last_error && (
+                                                <span className="block text-xs font-normal text-rose-600 mt-0.5 truncate max-w-xs mx-auto">
+                                                    Latest: {progress.last_error}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ) : null}
 
                                     {/* Progress Bar */}
                                     <div className="mt-4 w-full bg-slate-200 rounded-full h-3 overflow-hidden">

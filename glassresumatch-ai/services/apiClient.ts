@@ -231,7 +231,12 @@ export interface ParseResult {
 export interface TaskStatus {
     task_id: string;
     status: 'queued' | 'running' | 'completed' | 'failed';
-    progress: { completed: number; total: number } | null;
+    progress: {
+        completed: number;
+        total: number;
+        failed?: number;
+        last_error?: string;
+    } | null;
     created_at: string | null;
     completed_at: string | null;
     error: string | null;

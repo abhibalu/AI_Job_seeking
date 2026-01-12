@@ -102,73 +102,112 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
     """Background task for batch evaluation."""
     from agents.database import save_task_status
     import concurrent.futures
+    import traceback
     
-    df = load_gold_jobs()
-    
-    # Apply filters
-    if company_filter:
-        df = df.filter(pl.col("company_name").str.contains(company_filter, literal=False))
-    
-    # Collect jobs to process first
-    jobs_to_process = []
-    processed_count = 0
-    
-    for row in df.iter_rows(named=True):
-        if len(jobs_to_process) >= max_jobs:
-            break
-            
-        job_id = str(row.get("id", ""))
-        if only_unevaluated and is_job_evaluated(job_id):
-            continue
-            
-        jobs_to_process.append(row)
-    
-    total_jobs = len(jobs_to_process)
-    
-    # Save initial count
-    save_task_status(task_id, "running", {"completed": 0, "total": total_jobs})
-    
-    def process_singe_job(row):
-        job_id = str(row.get("id", ""))
-        try:
-            agent = JobEvaluatorAgent()
-            result = agent.run(
-                job_id=job_id,
-                description_text=row.get("description_text", ""),
-                company_name=row.get("company_name", "Unknown"),
-                title=row.get("title", "Unknown"),
-                job_url=row.get("link", "Unknown"),
-            )
-            
-            # --- Smart Conditional Parsing Logic ---
-            from agents.jd_parser import run_jd_parser_task
-            action = result.get("recommended_action")
-            if action in ["tailor", "apply"]:
-                # Run synchronously in this thread since it's already a background worker
-                run_jd_parser_task(job_id, row.get("description_text", ""))
-            # ---------------------------------------
-
-            return result
-        except Exception as e:
-            print(f"Error evaluating {job_id}: {e}")
-            return None
-
-    # Run concurrently
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(process_singe_job, row): row for row in jobs_to_process}
+    print(f"DEBUG: Starting batch evaluation task {task_id}")
+    try:
+        df = load_gold_jobs()
+        print(f"DEBUG: Loaded {len(df)} jobs from Gold table")
         
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            processed_count += 1
+        # Apply filters
+        if company_filter:
+            df = df.filter(pl.col("company_name").str.contains(company_filter, literal=False))
+        
+        # Collect jobs to process first
+        jobs_to_process = []
+        
+        for row in df.iter_rows(named=True):
+            if len(jobs_to_process) >= max_jobs:
+                break
+                
+            job_id = str(row.get("id", ""))
+            if only_unevaluated and is_job_evaluated(job_id):
+                continue
+                
+            jobs_to_process.append(row)
+        
+        total_jobs = len(jobs_to_process)
+        processed_count = 0
+        failed_count = 0
+        last_error = None
+        
+        # Save initial count
+        save_task_status(task_id, "running", {"completed": 0, "total": total_jobs, "failed": 0})
+        
+        def process_singe_job(row):
+            job_id = str(row.get("id", ""))
+            print(f"DEBUG: Processing job {job_id}")
+            try:
+                agent = JobEvaluatorAgent()
+                print(f"DEBUG: Running agent for {job_id}")
+                result = agent.run(
+                    job_id=job_id,
+                    description_text=row.get("description_text", ""),
+                    company_name=row.get("company_name", "Unknown"),
+                    title=row.get("title", "Unknown"),
+                    job_url=row.get("link", "Unknown"),
+                )
+                print(f"DEBUG: Agent finished for {job_id}")
+                
+                # --- Smart Conditional Parsing Logic ---
+                from agents.jd_parser import run_jd_parser_task
+                action = result.get("recommended_action")
+                if action in ["tailor", "apply"]:
+                    # Run synchronously in this thread since it's already a background worker
+                    try:
+                        run_jd_parser_task(job_id, row.get("description_text", ""))
+                    except Exception as e:
+                        print(f"Error parsing JD {job_id}: {e}")
+                # ---------------------------------------
+
+                return result
+            except Exception as e:
+                print(f"Error evaluating {job_id}: {e}")
+                traceback.print_exc()
+                return {"error": str(e), "job_id": job_id}
+
+        # Run concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=settings.BATCH_EVAL_WORKERS) as executor:
+            futures = {executor.submit(process_singe_job, row): row for row in jobs_to_process}
             
-            if result:
-                save_evaluation(result)
-            
-            # Update task progress
-            save_task_status(task_id, "running", {"completed": processed_count, "total": total_jobs})
-    
-    # Mark complete
-    save_task_status(task_id, "completed", {"completed": processed_count, "total": total_jobs})
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    processed_count += 1
+                    
+                    if result and "error" not in result:
+                        save_evaluation(result)
+                    else:
+                        failed_count += 1
+                        if result and "error" in result:
+                            last_error = result["error"]
+                except Exception as e:
+                    failed_count += 1
+                    last_error = str(e)
+                    print(f"Critical error in worker: {e}")
+                
+                # Update task progress
+                save_task_status(task_id, "running", {
+                    "completed": processed_count, 
+                    "total": total_jobs, 
+                    "failed": failed_count,
+                    "last_error": last_error
+                })
+        
+        # Mark complete
+        status = "completed" if failed_count < total_jobs else "failed"
+        final_error = last_error if status == "failed" else None
+        
+        save_task_status(task_id, status, {
+            "completed": processed_count, 
+            "total": total_jobs, 
+            "failed": failed_count,
+            "last_error": last_error
+        }, error=final_error)
+
+    except Exception as e:
+        print(f"Fatal batch error: {e}")
+        save_task_status(task_id, "failed", {"error": str(e)}, error=str(e))
 
 
 @router.post("/batch", response_model=MessageResponse)

@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Evaluation, ParseResult } from '../services/apiClient';
-import { parseJobDescription, getParsedJD } from '../services/jobService';
+import { parseJobDescription, getParsedJD, evaluateJob, getEvaluation } from '../services/jobService';
 import {
   X, CheckCircle, AlertTriangle, XCircle, User, FileText,
   Lightbulb, Target, MessageSquare, Sparkles, ChevronDown, ChevronUp,
-  BookOpen, Zap, HelpCircle, ExternalLink
+  BookOpen, Zap, HelpCircle, ExternalLink, RefreshCw
 } from 'lucide-react';
 import { GlassCard } from './GlassCard';
 
@@ -20,8 +20,22 @@ export const JobModal: React.FC<JobModalProps> = ({ evaluation, onClose, onEvalu
   const [isParsing, setIsParsing] = useState(false);
   const [showInterviewTips, setShowInterviewTips] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isReEvaluating, setIsReEvaluating] = useState(false);
 
   if (!evaluation) return null;
+
+  const handleReEvaluate = async () => {
+    setIsReEvaluating(true);
+    try {
+      await evaluateJob(evaluation.job_id, true);
+      onEvaluate?.(); // Notify parent to refresh list
+      onClose(); // Close to ensure fresh data on reopen
+    } catch (error) {
+      console.error('Failed to re-evaluate:', error);
+    } finally {
+      setIsReEvaluating(false);
+    }
+  };
 
   const handleParseJD = async () => {
     setIsParsing(true);
@@ -161,6 +175,20 @@ export const JobModal: React.FC<JobModalProps> = ({ evaluation, onClose, onEvalu
                   Parse Job Description
                 </>
               )}
+            </button>
+
+            {/* Re-evaluate Button */}
+            <button
+              onClick={handleReEvaluate}
+              disabled={isReEvaluating}
+              className="w-full mt-3 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-medium transition-all flex items-center justify-center disabled:opacity-50"
+            >
+              {isReEvaluating ? (
+                <div className="w-4 h-4 mr-2 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Re-evaluate Match
             </button>
 
           </div>

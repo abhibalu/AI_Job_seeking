@@ -21,13 +21,15 @@ class Settings(BaseSettings):
     
     # OpenRouter Configuration
     OPENROUTER_API_KEY: str = Field(default="", env="OPENROUTER_API_KEY")
-    OPENROUTER_MODEL: str = Field("google/gemini-2.0-flash-exp:free", env="OPENROUTER_MODEL")
-    OPENROUTER_MODEL_BACKUP: str = Field(default="", env="OPENROUTER_MODEL_BACKUP")
+    OPENROUTER_MODEL: str = Field("z-ai/glm-4.5-air:free", env="OPENROUTER_MODEL")
+    OPENROUTER_MODEL_BACKUP: str = Field(default="google/gemini-2.0-flash-exp:free", env="OPENROUTER_MODEL_BACKUP")
     OPENROUTER_BASE_URL: str = Field("https://openrouter.ai/api/v1", env="OPENROUTER_BASE_URL")
     
     # Evaluation settings
     EVAL_DELAY_SECONDS: float = Field(1.0, env="EVAL_DELAY_SECONDS")
     EVAL_DB_PATH: str = Field("data/evaluations.db", env="EVAL_DB_PATH")
+    CANDIDATE_EXPERIENCE_YEARS: str = Field("8 Years", env="CANDIDATE_EXPERIENCE_YEARS")
+    BATCH_EVAL_WORKERS: int = Field(5, env="BATCH_EVAL_WORKERS")
     
     # Supabase Configuration
     SUPABASE_URL: str = Field(default="", env="SUPABASE_URL")
@@ -37,7 +39,8 @@ class Settings(BaseSettings):
 
     model_config = {
         "env_file": str(ENV_FILE),
-        "env_file_encoding": "utf-8"
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
     }
 
 settings = Settings()

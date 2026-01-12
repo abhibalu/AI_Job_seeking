@@ -56,29 +56,50 @@ class BaseAgent(ABC):
                 "temperature": self.temperature,
             }
             
-            try:
-                if current_model != self.model:
-                    print(f"Retrying with BACKUP model: {current_model}")
+            # Retry logic for this model (e.g. 429 Rate Limits)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if current_model != self.model:
+                        print(f"Retrying with BACKUP model: {current_model}")
 
-                with httpx.Client(timeout=120.0) as client:
-                    # Handle both cases: base URL with or without /chat/completions
-                    base_url = self.base_url.rstrip("/")
-                    url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
-                    response = client.post(
-                        url,
-                        headers=headers,
-                        json=payload,
-                    )
-                    response.raise_for_status()
+                    with httpx.Client(timeout=120.0) as client:
+                        base_url = self.base_url.rstrip("/")
+                        url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+                        response = client.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                        )
+                        
+                        # Handle 429 specifically
+                        if response.status_code == 429:
+                            wait_time = 5 * (attempt + 1) # Linear backoff: 5s, 10s, 15s
+                            print(f"Rate limited (429) on {current_model}. Waiting {wait_time}s...")
+                            time.sleep(wait_time)
+                            if attempt == max_retries - 1:
+                                response.raise_for_status() # Raise on final attempt
+                            continue # Retry same model
+                            
+                        response.raise_for_status()
+                        
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"]
                     
-                data = response.json()
-                return data["choices"][0]["message"]["content"]
-                
-            except Exception as e:
-                print(f"Model {current_model} failed: {e}")
-                last_exception = e
-                # Continue to next model if available
-                continue
+                except Exception as e:
+                    # If it's the last retry, log and break to try next model
+                    if attempt == max_retries - 1:
+                        print(f"Model {current_model} failed after {max_retries} attempts: {e}")
+                        last_exception = e
+                    # For non-429 errors (like network/timeout), maybe retry too? 
+                    # For now we rely on the loop above for 429.
+                    # If it was a 429, we already continued in the loop. 
+                    # If it was other error, break to next model.
+                    if "429" not in str(e):
+                         break
+            
+            # If we are here, this model failed completely. Try next model.
+            continue
                 
         # If we get here, all models failed
         if last_exception:

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .base import BaseAgent
+from agents.database import get_master_resume
 from backend.settings import settings
 
 
@@ -19,13 +20,23 @@ class JobEvaluatorAgent(BaseAgent):
         self._load_approved_skills()
     
     def _load_resume(self):
-        """Load base resume from JSON file."""
+        """Load base resume from DB (preferred) or JSON file."""
+        # 1. Try DB
+        try:
+            db_resume = get_master_resume()
+            if db_resume:
+                self.resume = db_resume
+                return
+        except Exception as e:
+            print(f"Warning: Failed to load resume from DB: {e}")
+
+        # 2. Fallback to file
         resume_path = Path("agent_prompts/base_resume.json")
         if resume_path.exists():
             with open(resume_path) as f:
                 self.resume = json.load(f)
         else:
-            raise FileNotFoundError(f"Resume not found: {resume_path}")
+            raise FileNotFoundError(f"Resume not found in DB or at {resume_path}")
     
     def _load_approved_skills(self):
         """Load approved skills from markdown file."""

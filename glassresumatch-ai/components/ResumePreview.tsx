@@ -5,6 +5,7 @@ export type TemplateType = 'ats_friendly' | 'modern' | 'classic' | 'minimal' | '
 
 interface ResumePreviewProps {
     data: ResumeData;
+    originalData?: ResumeData; // For Diff Mode
     targetRef?: React.RefObject<HTMLDivElement>;
     template?: TemplateType;
 }
@@ -50,7 +51,19 @@ const formatPeriod = (period: string) => {
 }
 
 
-export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, template = 'modern' }) => {
+export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData, targetRef, template = 'modern' }) => {
+
+    // Diff Helper
+    const isChanged = (current: string, original?: string) => {
+        if (!originalData) return false;
+        return current !== original;
+    };
+
+    // Bullet Diff Helper
+    const isBulletChanged = (bullet: string, originalBullets: string[] = []) => {
+        if (!originalData) return false;
+        return !originalBullets.includes(bullet);
+    };
 
     // --- Style Configurations ---
     const styles = {
@@ -243,7 +256,9 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                             {(template === 'minimal') ? 'Personal Profile' : 'Professional Summary'}
                         </h3>
                         <p className={template === 'ats_friendly' ? "text-[13px] leading-relaxed text-justify opacity-90" : "text-sm leading-relaxed text-justify opacity-90"}>
-                            {data.summary}
+                            <span className={template === 'ats_friendly' ? (isChanged(data.summary, originalData?.summary) ? "bg-amber-100 dark:bg-amber-900/30 px-1 rounded transition-colors duration-1000" : "") : (isChanged(data.summary, originalData?.summary) ? "bg-amber-100 dark:bg-amber-900/30 px-1 rounded transition-colors duration-1000" : "")}>
+                                {data.summary}
+                            </span>
                         </p>
                     </section>
                 )}
@@ -329,9 +344,16 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                                     )}
 
                                     <ul className={`list-disc list-outside ml-4 text-sm opacity-90 space-y-1 marker:text-gray-400 ${template === 'compact' ? 'mt-1' : ''}`}>
-                                        {exp.achievements.map((point, index) => (
-                                            <li key={index} className="leading-snug pl-1">{point}</li>
-                                        ))}
+                                        {exp.achievements.map((point, index) => {
+                                            const originalExp = originalData?.experience.find(e => e.id === exp.id);
+                                            const changed = isBulletChanged(point, originalExp?.achievements);
+
+                                            return (
+                                                <li key={index} className={`leading-snug pl-1 ${changed ? 'bg-amber-100 dark:bg-amber-900/30 -ml-1 pr-1 rounded transition-colors duration-1000' : ''}`}>
+                                                    {point}
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                 </div>
                             );

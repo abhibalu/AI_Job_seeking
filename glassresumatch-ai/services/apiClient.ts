@@ -125,6 +125,23 @@ class ApiClient {
         });
     }
 
+    // Tailored Resume endpoints
+    async tailorResume(jobId: string) {
+        return this.request<TailoredResume>(`/api/resumes/tailor/${jobId}`, {
+            method: 'POST',
+        });
+    }
+
+    async getTailoredVersions(jobId: string) {
+        return this.request<TailoredResume[]>(`/api/resumes/tailored/${jobId}`);
+    }
+
+    async updateTailoredStatus(recordId: string, status: string) {
+        return this.request<any>(`/api/resumes/tailored/${recordId}/status?status=${status}`, {
+            method: 'POST',
+        });
+    }
+
     async generatePdf(data: any, template: string) {
         const response = await fetch(`${this.baseUrl}/api/pdf/generate?template=${template}`, {
             method: 'POST',
@@ -226,6 +243,15 @@ export interface ParseResult {
     ats_keywords: string[] | null;
     normalized_skills: Record<string, unknown> | null;
     parsed_at: string | null;
+}
+
+export interface TailoredResume {
+    id: string;
+    job_id: string;
+    version: number;
+    content: any;
+    status: 'pending' | 'approved' | 'rejected';
+    created_at: string;
 }
 
 export interface TaskStatus {

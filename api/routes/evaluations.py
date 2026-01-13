@@ -152,7 +152,8 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
                 # --- Smart Conditional Parsing Logic ---
                 from agents.jd_parser import run_jd_parser_task
                 action = result.get("recommended_action")
-                if action in ["tailor", "apply"]:
+                # User Policy: Only parse 'tailor' jobs. 'Apply' jobs are good enough as-is.
+                if action == "tailor":
                     # Run synchronously in this thread since it's already a background worker
                     try:
                         run_jd_parser_task(job_id, row.get("description_text", ""))
@@ -263,7 +264,8 @@ def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = F
         # --- Smart Conditional Parsing Logic ---
         from agents.jd_parser import run_jd_parser_task
         action = result.get("recommended_action")
-        if action in ["tailor", "apply"]:
+        # User Policy: Only parse 'tailor' jobs. 'Apply' jobs are good enough as-is.
+        if action == "tailor":
             background_tasks.add_task(
                 run_jd_parser_task, 
                 job_id, 

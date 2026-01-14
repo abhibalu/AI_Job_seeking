@@ -61,6 +61,9 @@ def list_jobs(
             "location": row.get("location"),
             "posted_at": str(row.get("posted_at")) if row.get("posted_at") else None,
             "applicants_count": row.get("applicants_count"),
+            "company_website": row.get("company_website"),
+            "description_text": row.get("description_text"),
+            "description_html": row.get("description_html"),
         })
     
     return jobs
@@ -109,6 +112,7 @@ def get_job(job_id: str):
         "posted_at": str(row.get("posted_at")) if row.get("posted_at") else None,
         "applicants_count": row.get("applicants_count"),
         "description_text": row.get("description_text"),
+        "description_html": row.get("description_html"),
         "seniority_level": row.get("seniority_level"),
         "employment_type": row.get("employment_type"),
         "link": row.get("link"),

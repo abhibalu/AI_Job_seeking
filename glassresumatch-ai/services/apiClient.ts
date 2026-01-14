@@ -167,14 +167,15 @@ export interface Job {
     location: string | null;
     posted_at: string | null;
     applicants_count: number | null;
+    company_website: string | null;
+    description_text?: string | null;
+    description_html?: string | null;
 }
 
 export interface JobDetail extends Job {
-    description_text: string | null;
     seniority_level: string | null;
     employment_type: string | null;
     link: string | null;
-    company_website: string | null;
 }
 
 export interface JobStats {

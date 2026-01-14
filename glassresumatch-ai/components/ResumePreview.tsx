@@ -112,14 +112,14 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData
         tech: {
             container: "font-mono text-gray-800 p-8 sm:p-10 text-sm",
             header: "mb-6",
-            name: "text-3xl font-bold text-blue-900 mb-1 tracking-tighter",
-            title: "text-md text-blue-600 font-medium mb-3",
+            name: "text-3xl font-bold text-gray-900 mb-1 tracking-tighter",
+            title: "text-md text-gray-600 font-medium mb-3",
             contactBar: "text-xs text-gray-500 grid grid-cols-2 sm:grid-cols-4 gap-2 border-y border-gray-100 py-2",
             separator: "hidden",
-            sectionTitle: "text-sm font-bold text-blue-800 uppercase tracking-widest mb-3 mt-6 flex items-center gap-2 before:content-['#'] before:text-blue-400",
+            sectionTitle: "text-sm font-bold text-gray-800 uppercase tracking-widest mb-3 mt-6 flex items-center gap-2 before:content-['#'] before:text-gray-400",
             expItem: "mb-5 pl-0",
             expRole: "font-bold text-gray-900",
-            expCompany: "text-blue-700",
+            expCompany: "text-gray-700",
             expDate: "text-xs text-gray-400 block sm:inline sm:ml-2",
             skillsLayout: "flex flex-wrap gap-2",
         },
@@ -256,7 +256,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData
                             {(template === 'minimal') ? 'Personal Profile' : 'Professional Summary'}
                         </h3>
                         <p className={template === 'ats_friendly' ? "text-[13px] leading-relaxed text-justify opacity-90" : "text-sm leading-relaxed text-justify opacity-90"}>
-                            <span className={template === 'ats_friendly' ? (isChanged(data.summary, originalData?.summary) ? "bg-amber-100 dark:bg-amber-900/30 px-1 rounded transition-colors duration-1000" : "") : (isChanged(data.summary, originalData?.summary) ? "bg-amber-100 dark:bg-amber-900/30 px-1 rounded transition-colors duration-1000" : "")}>
+                            <span className={template === 'ats_friendly' ? (isChanged(data.summary, originalData?.summary) ? "bg-gray-100 px-1 rounded transition-colors duration-1000" : "") : (isChanged(data.summary, originalData?.summary) ? "bg-gray-100 px-1 rounded transition-colors duration-1000" : "")}>
                                 {data.summary}
                             </span>
                         </p>
@@ -349,7 +349,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData
                                             const changed = isBulletChanged(point, originalExp?.achievements);
 
                                             return (
-                                                <li key={index} className={`leading-snug pl-1 ${changed ? 'bg-amber-100 dark:bg-amber-900/30 -ml-1 pr-1 rounded transition-colors duration-1000' : ''}`}>
+                                                <li key={index} className={`leading-snug pl-1 ${changed ? 'bg-gray-100 pr-1 rounded transition-colors duration-1000' : ''}`}>
                                                     {point}
                                                 </li>
                                             );

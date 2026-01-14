@@ -14,14 +14,15 @@ class JobBase(BaseModel):
     location: str | None = None
     posted_at: str | None = None
     applicants_count: int | None = None
+    company_website: str | None = None
 
 
 class JobDetail(JobBase):
     description_text: str | None = None
+    description_html: str | None = None
     seniority_level: str | None = None
     employment_type: str | None = None
     link: str | None = None
-    company_website: str | None = None
 
 
 class JobStats(BaseModel):

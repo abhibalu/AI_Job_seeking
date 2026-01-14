@@ -60,6 +60,7 @@ def create_gold_table():
         
         # Job details
         "description_text",
+        "description_html",
         "seniority_level",
         "employment_type",
         "job_function",
@@ -111,6 +112,7 @@ def create_gold_table():
         gold_path,
         gold_df.to_arrow(),
         mode="overwrite",
+        schema_mode="overwrite",
         storage_options=storage_options,
     )
     

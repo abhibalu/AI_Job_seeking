@@ -10,8 +10,8 @@ import {
 } from './services/jobService';
 import apiClient from './services/apiClient';
 import { ViewMode, FilterOptions, ResumeData, INITIAL_DATA } from './types';
-import { JobCard } from './components/JobCard';
-import { JobModal } from './components/JobModal';
+import { JobListItem } from './components/JobListItem';
+import { JobDetailView } from './components/JobDetailView';
 import { Pagination } from './components/Pagination';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -27,6 +27,7 @@ import {
   PenLine,
   Printer,
   Check,
+  Briefcase,
   ChevronRight,
   User,
   Eye,
@@ -54,7 +55,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedEvaluation, setSelectedEvaluation] = useState<Evaluation | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
 
   // --- Filter state ---
@@ -307,17 +308,10 @@ const App: React.FC = () => {
     }
   });
 
+  const selectedJob = jobs.find(j => j.id === selectedJobId) || null;
+
   const handleJobClick = async (job: JobWithEvaluation) => {
-    if (job.isEvaluated && job.evaluation) {
-      try {
-        const fullEval = await getEvaluation(job.id);
-        setSelectedEvaluation(fullEval);
-      } catch {
-        setSelectedEvaluation(job.evaluation);
-      }
-    } else {
-      handleEvaluateJob(job.id);
-    }
+    setSelectedJobId(job.id);
   };
 
   const handleEvaluateJob = async (jobId: string) => {
@@ -325,8 +319,7 @@ const App: React.FC = () => {
     try {
       await evaluateJob(jobId);
       await loadData();
-      const evaluation = await getEvaluation(jobId);
-      setSelectedEvaluation(evaluation);
+      // If the evaluated job is the one currently selected, reload updates it automatically via selectedJob derivation
     } catch (err) {
       console.error('Failed to evaluate job:', err);
       setError('Failed to evaluate job. Please try again.');
@@ -550,37 +543,63 @@ const App: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredJobs.map((job) => (
-                    <JobCard
-                      key={job.id}
-                      job={job}
-                      onClick={() => handleJobClick(job)}
-                      onEvaluate={() => handleEvaluateJob(job.id)}
-                      isEvaluating={evaluatingJobId === job.id}
-                    />
-                  ))}
+              <div className="flex h-[calc(100vh-140px)] gap-6 overflow-hidden">
+                {/* LEFT SIDEBAR: Job List */}
+                <div className="w-full lg:w-[400px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      {totalJobs} Jobs found
+                    </p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-slate-200">
+                    {filteredJobs.map((job) => (
+                      <JobListItem
+                        key={job.id}
+                        job={job}
+                        isActive={selectedJobId === job.id}
+                        onClick={() => handleJobClick(job)}
+                      />
+                    ))}
+                    {/* Pagination inside sidebar */}
+                    <div className="p-4 border-t border-slate-100">
+                      <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
+                        onPageChange={setCurrentPage}
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
-                  onPageChange={setCurrentPage}
-                />
-              </>
+                {/* RIGHT MAIN: Job Details */}
+                <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+                  {selectedJob ? (
+                    <JobDetailView
+                      job={selectedJob}
+                      onEvaluate={() => {
+                        // Reload data to reflect new status
+                        loadData();
+                        // Also need to refetch specific job to update the view?
+                        // loadData updates 'jobs', which updates 'filteredJobs'. 
+                        // We need to update 'selectedJob' reference from the new list.
+                        // Effect hook below can handle this? Or manual update.
+                        // Simple hack: setEvaluatingJobId to trigger UI state.
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                      <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                        <Briefcase className="w-8 h-8 text-slate-300" />
+                      </div>
+                      <p className="font-medium">Select a job to view details</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
       </main>
-
-      {/* Evaluation Detail Modal */}
-      <div className="print:hidden">
-        <JobModal
-          evaluation={selectedEvaluation}
-          onClose={() => setSelectedEvaluation(null)}
-        />
-      </div>
 
       {/* Batch Evaluate Modal */}
       <div className="print:hidden">

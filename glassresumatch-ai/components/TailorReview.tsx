@@ -54,24 +54,24 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
     return (
         <div className="fixed inset-0 z-[60] bg-white flex flex-col animate-in fade-in duration-200">
             {/* Header */}
-            <div className="h-16 border-b border-slate-200 flex items-center justify-between px-6 bg-slate-50">
+            <div className="h-16 border-b border-gray-100 flex items-center justify-between px-6 bg-white">
                 <div className="flex items-center space-x-4">
-                    <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                        <ArrowLeft className="w-5 h-5 text-slate-600" />
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                        <ArrowLeft className="w-5 h-5 text-slate-900" />
                     </button>
                     <div>
-                        <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                        <h2 className="text-lg font-bold text-slate-900 flex items-center">
                             Tailored Resume
-                            <span className="ml-3 text-xs font-normal px-2 py-0.5 bg-slate-200 rounded text-slate-600">
+                            <span className="ml-3 text-xs font-normal px-2 py-0.5 bg-gray-100 rounded text-slate-600 border border-gray-200">
                                 V{tailoredResume.version}
                             </span>
                             {status === 'approved' && (
-                                <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded flex items-center">
+                                <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-slate-900 text-white rounded flex items-center">
                                     <CheckCircle className="w-3 h-3 mr-1" /> Approved
                                 </span>
                             )}
                             {status === 'rejected' && (
-                                <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-rose-100 text-rose-700 rounded flex items-center">
+                                <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-white border border-slate-200 text-slate-500 rounded flex items-center">
                                     <XCircle className="w-3 h-3 mr-1" /> Rejected
                                 </span>
                             )}
@@ -84,17 +84,17 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
 
                 <div className="flex items-center space-x-3">
                     {/* View Toggle */}
-                    <div className="flex items-center bg-slate-200 rounded-lg p-1 mr-4">
+                    <div className="flex items-center bg-gray-100 rounded-lg p-1 mr-4 border border-gray-200">
                         <button
                             onClick={() => setViewMode('diff')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center ${viewMode === 'diff' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center ${viewMode === 'diff' ? 'bg-white text-black shadow-sm' : 'text-slate-500 hover:text-black'}`}
                         >
                             <Eye className="w-4 h-4 mr-2" />
                             Diff View
                         </button>
                         <button
                             onClick={() => setViewMode('final')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center ${viewMode === 'final' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center ${viewMode === 'final' ? 'bg-white text-black shadow-sm' : 'text-slate-500 hover:text-black'}`}
                         >
                             <FileText className="w-4 h-4 mr-2" />
                             Final Preview
@@ -105,7 +105,7 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                         <button
                             onClick={handleDownload}
                             disabled={isDownloading}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center shadow-sm disabled:opacity-50"
+                            className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-md text-sm font-medium flex items-center shadow-sm disabled:opacity-50 border border-black"
                         >
                             {isDownloading ? (
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
@@ -119,7 +119,7 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                             <button
                                 onClick={() => handleUpdateStatus('rejected')}
                                 disabled={isUpdating}
-                                className="px-4 py-2 border border-rose-200 text-rose-700 hover:bg-rose-50 rounded-lg text-sm font-bold flex items-center disabled:opacity-50"
+                                className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-gray-50 rounded-md text-sm font-medium flex items-center disabled:opacity-50"
                             >
                                 <XCircle className="w-4 h-4 mr-2" />
                                 Reject
@@ -127,7 +127,7 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                             <button
                                 onClick={() => handleUpdateStatus('approved')}
                                 disabled={isUpdating}
-                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold flex items-center shadow-sm disabled:opacity-50"
+                                className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-md text-sm font-medium flex items-center shadow-sm disabled:opacity-50 border border-black"
                             >
                                 <CheckCircle className="w-4 h-4 mr-2" />
                                 Approve

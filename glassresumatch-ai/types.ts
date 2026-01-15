@@ -44,6 +44,7 @@ export interface Education {
   degree: string;
   period: string;
   location: string;
+  score?: string;
 }
 
 export interface ResumeData {

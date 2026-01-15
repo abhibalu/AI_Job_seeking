@@ -120,6 +120,19 @@ def init_database():
         )
     """)
     
+    # Tailored Resumes table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tailored_resumes (
+            id TEXT PRIMARY KEY,
+            job_id TEXT,
+            version INTEGER,
+            content TEXT,
+            status TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (job_id) REFERENCES job_evaluations(job_id)
+        )
+    """)
+    
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_verdict ON job_evaluations(verdict)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_score ON job_evaluations(job_match_score)")
@@ -167,7 +180,7 @@ def is_job_evaluated(job_id: str) -> bool:
     """Check if a job has already been evaluated."""
     if _use_supabase():
         client = _get_supabase()
-        result = client.table("job_evaluations").select("id").eq("job_id", job_id).execute()
+        result = client.table("job_evaluations").select("job_id").eq("job_id", job_id).execute()
         return len(result.data) > 0
     
     conn = get_db_connection()
@@ -325,6 +338,7 @@ def save_evaluation(result: dict):
             "missing_keywords": result.get("missing_keywords", []),
             "model_used": result.get("_model_used", ""),
             "raw_response": result,
+            "evaluated_at": datetime.now().isoformat(),
         }
         
         # Upsert (insert or update on conflict)
@@ -344,8 +358,8 @@ def save_evaluation(result: dict):
             verdict, job_match_score, summary, required_exp, recommended_action,
             gaps, improvement_suggestions, interview_tips,
             jd_keywords, matched_keywords, missing_keywords,
-            model_used, raw_response
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_used, raw_response, evaluated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         job_id,
         company_name,
@@ -364,6 +378,7 @@ def save_evaluation(result: dict):
         json.dumps(result.get("missing_keywords", [])),
         result.get("_model_used", ""),
         json.dumps(result),
+        datetime.now()
     ))
     
     conn.commit()
@@ -378,7 +393,7 @@ def is_job_parsed(job_id: str) -> bool:
     """Check if a job's JD has been parsed."""
     if _use_supabase():
         client = _get_supabase()
-        result = client.table("jd_parsed").select("id").eq("job_id", job_id).execute()
+        result = client.table("jd_parsed").select("job_id").eq("job_id", job_id).execute()
         return len(result.data) > 0
     
     conn = get_db_connection()
@@ -410,6 +425,7 @@ def save_jd_parsed(result: dict):
             "normalized_skills": result.get("normalized_skills", {}),
             "model_used": result.get("_model_used", ""),
             "raw_response": result,
+            "parsed_at": datetime.now().isoformat(),
         }
         
         # Upsert
@@ -427,8 +443,8 @@ def save_jd_parsed(result: dict):
         INSERT OR REPLACE INTO jd_parsed (
             job_id, must_haves, nice_to_haves, domain, seniority,
             location_constraints, ats_keywords, normalized_skills,
-            model_used, raw_response
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_used, raw_response, parsed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         job_id,
         json.dumps(result.get("must_haves", [])),
@@ -440,6 +456,7 @@ def save_jd_parsed(result: dict):
         json.dumps(result.get("normalized_skills", {})),
         result.get("_model_used", ""),
         json.dumps(result),
+        datetime.now()
     ))
     
     conn.commit()
@@ -471,7 +488,7 @@ def save_task_status(task_id: str, status: str, progress: dict | None = None, er
         client = _get_supabase()
         
         # Check if task exists
-        result = client.table("tasks").select("id").eq("task_id", task_id).execute()
+        result = client.table("tasks").select("task_id").eq("task_id", task_id).execute()
         
         data = {
             "task_id": task_id,
@@ -614,4 +631,122 @@ def get_master_resume() -> dict | None:
             return json.loads(row[0])
         except:
             return None
+    return None
+
+
+# ============================================
+# TAILORED RESUME FUNCTIONS
+# ============================================
+
+def save_tailored_resume(job_id: str, version: int, content: dict, status: str = "pending") -> str:
+    """Save a tailored resume."""
+    import uuid
+    record_id = str(uuid.uuid4())
+    
+    if _use_supabase():
+        client = _get_supabase()
+        
+        data = {
+            "id": record_id,
+            "job_id": job_id,
+            "version": version,
+            "content": content,
+            "status": status,
+            "created_at": datetime.now().isoformat(),
+        }
+        
+        client.table("tailored_resumes").insert(data).execute()
+        return record_id
+
+    # SQLite fallback
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        INSERT INTO tailored_resumes (id, job_id, version, content, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        record_id,
+        job_id,
+        version,
+        json.dumps(content),
+        status,
+        datetime.now()
+    ))
+    
+    conn.commit()
+    conn.close()
+    return record_id
+
+
+def get_tailored_resumes(job_id: str) -> list[dict]:
+    """Get all tailored versions for a job."""
+    if _use_supabase():
+        client = _get_supabase()
+        # Explicitly selecting expected columns to avoid issues
+        result = client.table("tailored_resumes").select("*").eq("job_id", job_id).order("version", desc=True).execute()
+        return result.data
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM tailored_resumes 
+        WHERE job_id = ? 
+        ORDER BY version DESC
+    """, (job_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["content"] = json.loads(d["content"])
+        except:
+            pass
+        results.append(d)
+    return results
+
+
+def update_tailored_resume_status(record_id: str, status: str):
+    """Update status (approved/rejected)."""
+    if _use_supabase():
+        client = _get_supabase()
+        client.table("tailored_resumes").update({"status": status}).eq("id", record_id).execute()
+        return
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tailored_resumes SET status = ? WHERE id = ?", (status, record_id))
+    conn.commit()
+    conn.close()
+
+
+def get_jd_parsed(job_id: str) -> dict | None:
+    """Get parsed signals for a job."""
+    if _use_supabase():
+        client = _get_supabase()
+        result = client.table("jd_parsed").select("*").eq("job_id", job_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM jd_parsed WHERE job_id = ?", (job_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        result = dict(row)
+        # Parse JSON fields
+        for f in ["must_haves", "nice_to_haves", "ats_keywords", "normalized_skills"]:
+             if result.get(f):
+                 try:
+                     result[f] = json.loads(result[f])
+                 except:
+                     pass
+        return result
     return None

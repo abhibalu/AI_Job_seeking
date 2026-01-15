@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ResumeData, Experience, Education } from '../types';
-import { Plus, Trash2, GripVertical, FileJson, X, ChevronDown, ChevronRight, Briefcase, GraduationCap } from 'lucide-react';
+import { Plus, Trash2, GripVertical, FileJson, X, ChevronDown, ChevronRight, Briefcase, GraduationCap, Save } from 'lucide-react';
+import apiClient from '../services/apiClient';
 
 interface EditorProps {
     data: ResumeData;
@@ -11,6 +12,7 @@ interface EditorProps {
 export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
     const [showImport, setShowImport] = useState(false);
     const [jsonInput, setJsonInput] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
 
     // State for collapsible items
     const [expandedExpIds, setExpandedExpIds] = useState<string[]>([]);
@@ -22,6 +24,19 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
     const toggleEdu = (id: string) => {
         setExpandedEduIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            await apiClient.updateMasterResume(data);
+            alert('Resume saved successfully!');
+        } catch (error) {
+            console.error('Failed to save resume:', error);
+            alert('Failed to save changes. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleInputChange = (field: keyof ResumeData, value: string) => {
@@ -50,37 +65,125 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                 }
             };
 
-            const newData: ResumeData = {
-                fullName: parsed.basics?.name || data.fullName,
-                title: parsed.basics?.label || data.title,
-                email: parsed.basics?.email || data.email,
-                phone: parsed.basics?.phone || data.phone,
-                location: formatLocation(parsed.basics?.location) || data.location,
-                websites: parsed.basics?.profiles?.map((p: any) => p.url) || [],
-                summary: parsed.basics?.summary || "",
-                experience: parsed.work?.map((w: any) => ({
-                    id: Math.random().toString(36).substr(2, 9),
-                    company: w.name || "",
-                    role: w.position || "",
-                    period: `${formatDate(w.startDate)} - ${w.endDate ? formatDate(w.endDate) : 'Present'}`,
-                    location: w.location || "",
-                    achievements: w.highlights || []
-                })) || [],
-                education: parsed.education?.map((e: any) => ({
-                    id: Math.random().toString(36).substr(2, 9),
-                    institution: e.institution || "",
-                    degree: `${e.studyType || ''} ${e.area || ''}`.trim(),
-                    period: `${formatDate(e.startDate)} - ${e.endDate ? formatDate(e.endDate) : 'Present'}`,
-                    location: ""
-                })) || [],
-                skills: parsed.skills?.map((s: any) => s.name) || []
+            // Start with current data to allow partial updates (Merge strategy)
+            const newData: ResumeData = { ...data };
+
+            // Helper to map Work Experience
+            const mapWork = (workData: any[]) => workData.map((w: any) => ({
+                id: Math.random().toString(36).substr(2, 9),
+                company: w.name || w.company || "",
+                role: w.position || w.role || "",
+                period: w.period || `${formatDate(w.startDate)} - ${w.endDate ? formatDate(w.endDate) : 'Present'}`,
+                location: w.location || "",
+                achievements: w.highlights || w.achievements || []
+            }));
+
+            // Helper to map Education
+            const mapEducation = (eduData: any[]) => eduData.map((e: any) => ({
+                id: Math.random().toString(36).substr(2, 9),
+                institution: e.institution || "",
+                degree: e.degree || `${e.studyType || ''} ${e.area || ''}`.trim(),
+                period: e.period || `${formatDate(e.startDate)} - ${e.endDate ? formatDate(e.endDate) : 'Present'}`,
+                location: e.location || "",
+                score: e.score || ""
+            }));
+
+            // Helper to map Skills
+            const mapSkills = (skillData: any[]) => skillData.map((s: any) =>
+                typeof s === 'string' ? s : (s.name || "")
+            );
+
+            // 1. Direct Array Detection (Smart Import)
+            if (Array.isArray(parsed)) {
+                if (parsed.length > 0) {
+                    const first = parsed[0];
+                    if (first.company || first.name) {
+                        // Assume Work Experience
+                        newData.experience = mapWork(parsed);
+                        alert(`Imported ${parsed.length} work experience entries!`);
+                    } else if (first.institution) {
+                        // Assume Education
+                        newData.education = mapEducation(parsed);
+                        alert(`Imported ${parsed.length} education entries!`);
+                    } else if (typeof first === 'string' || first.name) {
+                        // Assume Skills
+                        newData.skills = mapSkills(parsed);
+                        alert(`Imported ${parsed.length} skills!`);
+                    }
+                }
+            } else {
+                // 2. Standard JSON Resume Object OR Single Item
+
+                // Check if the object itself is a single Work/Education item
+                if ((parsed.company || parsed.name) && (parsed.position || parsed.role || parsed.highlights)) {
+                    const newWork = mapWork([parsed]);
+                    newData.experience = [...newWork, ...data.experience];
+                    alert('Imported 1 new work experience entry!');
+                    onChange(newData);
+                    setJsonInput('');
+                    setShowImport(false);
+                    return;
+                } else if (parsed.institution || parsed.studyType) {
+                    const newEdu = mapEducation([parsed]);
+                    newData.education = [...newEdu, ...data.education];
+                    alert('Imported 1 new education entry!');
+                    onChange(newData);
+                    setJsonInput('');
+                    setShowImport(false);
+                    return;
+                }
+
+                // Fallback: Check for standard keys
+
+                // Basics
+                if (parsed.basics) {
+                    if (parsed.basics.name) newData.fullName = parsed.basics.name;
+                    if (parsed.basics.label) newData.title = parsed.basics.label;
+                    if (parsed.basics.email) newData.email = parsed.basics.email;
+                    if (parsed.basics.phone) newData.phone = parsed.basics.phone;
+                    if (parsed.basics.location) newData.location = formatLocation(parsed.basics.location);
+                    if (parsed.basics.summary) newData.summary = parsed.basics.summary;
+                    if (parsed.basics.profiles) newData.websites = parsed.basics.profiles.map((p: any) => p.url);
+                }
+
+                // Work
+                if (parsed.work) newData.experience = mapWork(parsed.work);
+
+                // Education
+                if (parsed.education) newData.education = mapEducation(parsed.education);
+
+                // Skills
+                if (parsed.skills) newData.skills = mapSkills(parsed.skills);
+
+                alert('Resume merged successfully!');
+            }
+
+            // --- SORTING LOGIC ---
+            // Sort experience by start date (descending) to ensure chronological order regardless of insertion
+            const parseStartDate = (period: string) => {
+                if (!period) return new Date(0);
+                // "February 2022 - Present" -> "February 2022"
+                const parts = period.split(' - ');
+                if (parts.length > 0) {
+                    return new Date(parts[0]);
+                }
+                return new Date(0);
             };
+
+            if (newData.experience && newData.experience.length > 0) {
+                newData.experience.sort((a, b) => {
+                    const dateA = parseStartDate(a.period);
+                    const dateB = parseStartDate(b.period);
+                    return dateB.getTime() - dateA.getTime();
+                });
+            }
 
             onChange(newData);
             setJsonInput('');
             setShowImport(false);
-            alert('Resume updated from JSON successfully!');
+
         } catch (e) {
+            console.error(e);
             alert('Invalid JSON format. Please check your input.');
         }
     };
@@ -202,17 +305,25 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
     };
 
     return (
-        <div className="h-full flex flex-col text-white">
+        <div className="h-full flex flex-col text-slate-800 bg-white/95 backdrop-blur-xl border-l border-slate-200 shadow-2xl">
             {/* Header */}
-            <div className="flex justify-between items-center p-6 border-b border-white/10 bg-[#0f172a]/50 backdrop-blur-md sticky top-0 z-10">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <FileJson className="text-pink-500" />
+            <div className="flex justify-between items-center p-6 border-b border-slate-200 bg-white/50 backdrop-blur-md sticky top-0 z-10">
+                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <FileJson className="text-blue-600" />
                     Edit Profile
                 </h2>
                 <div className="flex items-center gap-2">
                     <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center gap-1 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full hover:bg-blue-700 transition font-medium shadow-sm disabled:opacity-50"
+                    >
+                        <Save size={14} />
+                        {isSaving ? "Saving..." : "Save"}
+                    </button>
+                    <button
                         onClick={() => setShowImport(!showImport)}
-                        className="flex items-center gap-1 text-xs bg-white/10 text-white/80 px-3 py-1.5 rounded-full hover:bg-white/20 transition font-medium border border-white/10"
+                        className="flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full hover:bg-slate-200 transition font-medium border border-slate-200"
                     >
                         <FileJson size={14} />
                         {showImport ? "Hide" : "Import JSON"}
@@ -220,7 +331,7 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                     {onClose && (
                         <button
                             onClick={onClose}
-                            className="p-1.5 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition"
+                            className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition"
                         >
                             <X size={20} />
                         </button>
@@ -229,19 +340,19 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
             </div>
 
             {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+            <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                 {showImport && (
-                    <div className="mb-8 p-4 bg-black/30 rounded-xl border border-white/10 animate-in fade-in slide-in-from-top-2">
-                        <p className="text-xs text-white/50 mb-2">Paste JSON Resume compatible JSON below.</p>
+                    <div className="mb-8 p-4 bg-slate-50 rounded-xl border border-slate-200 animate-in fade-in slide-in-from-top-2 shadow-inner">
+                        <p className="text-xs text-slate-500 mb-2">Paste JSON Resume compatible JSON below.</p>
                         <textarea
-                            className="w-full h-40 p-3 text-xs font-mono bg-black/40 border border-white/10 rounded-lg mb-3 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 outline-none text-white/90"
+                            className="w-full h-40 p-3 text-xs font-mono bg-white border border-slate-200 rounded-lg mb-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 shadow-sm"
                             placeholder='{ "basics": { ... } }'
                             value={jsonInput}
                             onChange={(e) => setJsonInput(e.target.value)}
                         />
                         <button
                             onClick={handleImport}
-                            className="w-full bg-pink-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-pink-500 transition shadow-lg shadow-pink-900/40"
+                            className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-500 transition shadow-lg shadow-blue-200"
                         >
                             Apply JSON Data
                         </button>
@@ -250,51 +361,51 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
                 {/* Section: Personal Info */}
                 <div className="space-y-4 mb-8">
-                    <h3 className="font-semibold text-white/40 uppercase text-xs tracking-wider border-b border-white/10 pb-2">Personal Information</h3>
+                    <h3 className="font-semibold text-slate-400 uppercase text-xs tracking-wider border-b border-slate-100 pb-2">Personal Information</h3>
                     <div className="grid grid-cols-1 gap-4">
                         <div className="group">
-                            <label className="block text-xs text-white/50 mb-1 group-focus-within:text-pink-400 transition-colors">Full Name</label>
+                            <label className="block text-xs text-slate-500 mb-1 group-focus-within:text-blue-600 transition-colors">Full Name</label>
                             <input
                                 type="text"
-                                className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 outline-none transition text-sm text-white"
+                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                 value={data.fullName}
                                 onChange={(e) => handleInputChange('fullName', e.target.value)}
                             />
                         </div>
                         <div className="group">
-                            <label className="block text-xs text-white/50 mb-1 group-focus-within:text-pink-400 transition-colors">Job Title</label>
+                            <label className="block text-xs text-slate-500 mb-1 group-focus-within:text-blue-600 transition-colors">Job Title</label>
                             <input
                                 type="text"
-                                className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 outline-none transition text-sm text-white"
+                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                 value={data.title || ''}
                                 onChange={(e) => handleInputChange('title', e.target.value)}
                             />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="group">
-                                <label className="block text-xs text-white/50 mb-1 group-focus-within:text-pink-400 transition-colors">Phone</label>
+                                <label className="block text-xs text-slate-500 mb-1 group-focus-within:text-blue-600 transition-colors">Phone</label>
                                 <input
                                     type="text"
-                                    className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 outline-none transition text-sm text-white"
+                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                     value={data.phone}
                                     onChange={(e) => handleInputChange('phone', e.target.value)}
                                 />
                             </div>
                             <div className="group">
-                                <label className="block text-xs text-white/50 mb-1 group-focus-within:text-pink-400 transition-colors">Email</label>
+                                <label className="block text-xs text-slate-500 mb-1 group-focus-within:text-blue-600 transition-colors">Email</label>
                                 <input
                                     type="email"
-                                    className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 outline-none transition text-sm text-white"
+                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                     value={data.email}
                                     onChange={(e) => handleInputChange('email', e.target.value)}
                                 />
                             </div>
                         </div>
                         <div className="group">
-                            <label className="block text-xs text-white/50 mb-1 group-focus-within:text-pink-400 transition-colors">Location</label>
+                            <label className="block text-xs text-slate-500 mb-1 group-focus-within:text-blue-600 transition-colors">Location</label>
                             <input
                                 type="text"
-                                className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 outline-none transition text-sm text-white"
+                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                 value={data.location}
                                 onChange={(e) => handleInputChange('location', e.target.value)}
                             />
@@ -302,34 +413,34 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
                         {/* Websites */}
                         <div className="space-y-2 pt-2">
-                            <label className="block text-xs text-white/50 mb-1">Links / Websites</label>
+                            <label className="block text-xs text-slate-500 mb-1">Links (LinkedIn, GitHub, Portfolio)</label>
                             {data.websites.map((site, idx) => (
                                 <div key={idx} className="flex gap-2">
                                     <input
                                         type="text"
-                                        placeholder="https://..."
-                                        className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 outline-none transition text-sm text-white"
+                                        placeholder="e.g. https://linkedin.com/in/yourname"
+                                        className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                         value={site}
                                         onChange={(e) => handleWebsiteChange(idx, e.target.value)}
                                     />
                                     <button
                                         onClick={() => removeWebsite(idx)}
-                                        className="p-2 text-white/40 hover:text-red-400 transition"
+                                        className="p-2 text-slate-400 hover:text-rose-500 transition"
                                     >
                                         <Trash2 size={16} />
                                     </button>
                                 </div>
                             ))}
-                            <button onClick={addWebsite} className="text-xs font-medium text-pink-400 hover:text-pink-300 flex items-center gap-1 mt-1 transition-colors">
+                            <button onClick={addWebsite} className="text-xs font-medium text-blue-600 hover:text-blue-500 flex items-center gap-1 mt-1 transition-colors">
                                 <Plus size={12} /> Add Link
                             </button>
                         </div>
 
                         <div className="pt-2 group">
-                            <label className="block text-xs text-white/50 mb-1 group-focus-within:text-pink-400 transition-colors">Professional Summary</label>
+                            <label className="block text-xs text-slate-500 mb-1 group-focus-within:text-blue-600 transition-colors">Professional Summary</label>
                             <textarea
                                 rows={4}
-                                className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 outline-none transition text-sm text-white resize-none"
+                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm resize-none"
                                 value={data.summary || ''}
                                 onChange={(e) => handleInputChange('summary', e.target.value)}
                             />
@@ -339,11 +450,11 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
                 {/* Section: Experience */}
                 <div className="space-y-4 mb-8">
-                    <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                        <h3 className="font-semibold text-white/40 uppercase text-xs tracking-wider">Experience</h3>
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                        <h3 className="font-semibold text-slate-400 uppercase text-xs tracking-wider">Experience</h3>
                         <button
                             onClick={addExperience}
-                            className="flex items-center gap-1 text-xs bg-pink-500/10 text-pink-400 border border-pink-500/20 px-2 py-1 rounded hover:bg-pink-500/20 transition font-medium"
+                            className="flex items-center gap-1 text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded hover:bg-blue-100 transition font-medium"
                         >
                             <Plus size={12} /> Add
                         </button>
@@ -353,70 +464,70 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                         {data.experience.map((exp) => {
                             const isExpanded = expandedExpIds.includes(exp.id);
                             return (
-                                <div key={exp.id} className="bg-white/5 rounded-xl border border-white/5 overflow-hidden transition-all duration-300">
+                                <div key={exp.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
                                     {/* Collapsible Header */}
                                     <div
-                                        className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-white/10 transition-colors group"
+                                        className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-slate-50 transition-colors group"
                                         onClick={() => toggleExp(exp.id)}
                                     >
                                         <div className="flex items-center gap-3 overflow-hidden">
-                                            <div className={`p-2 rounded-lg transition-colors duration-300 ${isExpanded ? 'bg-pink-500/20 text-pink-400' : 'bg-white/5 text-white/40'}`}>
+                                            <div className={`p-2 rounded-lg transition-colors duration-300 ${isExpanded ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
                                                 <Briefcase size={16} />
                                             </div>
                                             <div className="flex flex-col truncate pr-2">
-                                                <span className="text-sm font-semibold text-white truncate group-hover:text-pink-200 transition-colors">{exp.company || 'New Company'}</span>
-                                                <span className="text-[10px] text-white/50 truncate uppercase tracking-wide">{exp.role || 'Role'}</span>
+                                                <span className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-600 transition-colors">{exp.company || 'New Company'}</span>
+                                                <span className="text-[10px] text-slate-500 truncate uppercase tracking-wide">{exp.role || 'Role'}</span>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); removeExperience(exp.id); }}
-                                                className="p-2 text-white/20 hover:text-red-400 hover:bg-white/5 rounded-lg transition opacity-0 group-hover:opacity-100"
+                                                className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition opacity-0 group-hover:opacity-100"
                                                 title="Delete"
                                             >
                                                 <Trash2 size={15} />
                                             </button>
-                                            {isExpanded ? <ChevronDown size={16} className="text-white/40" /> : <ChevronRight size={16} className="text-white/40" />}
+                                            {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                                         </div>
                                     </div>
 
                                     {/* Collapsible Content */}
                                     {isExpanded && (
-                                        <div className="p-4 border-t border-white/5 bg-black/20 animate-in slide-in-from-top-2">
+                                        <div className="p-4 border-t border-slate-100 bg-slate-50/50 animate-in slide-in-from-top-2">
                                             <div className="grid grid-cols-1 gap-3 mb-4">
                                                 <div>
-                                                    <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Role</label>
+                                                    <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Role</label>
                                                     <input
                                                         type="text"
-                                                        className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm font-medium focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                        className="w-full p-2 bg-white border border-slate-200 rounded text-sm font-medium focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                         value={exp.role}
                                                         onChange={(e) => handleExperienceChange(exp.id, 'role', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Company</label>
+                                                    <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Company</label>
                                                     <input
                                                         type="text"
-                                                        className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                        className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                         value={exp.company}
                                                         onChange={(e) => handleExperienceChange(exp.id, 'company', e.target.value)}
                                                     />
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div>
-                                                        <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Period</label>
+                                                        <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Period</label>
                                                         <input
                                                             type="text"
-                                                            className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                            className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                             value={exp.period}
                                                             onChange={(e) => handleExperienceChange(exp.id, 'period', e.target.value)}
                                                         />
                                                     </div>
                                                     <div>
-                                                        <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Location</label>
+                                                        <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Location</label>
                                                         <input
                                                             type="text"
-                                                            className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                            className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                             value={exp.location || ''}
                                                             onChange={(e) => handleExperienceChange(exp.id, 'location', e.target.value)}
                                                         />
@@ -425,19 +536,19 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                                             </div>
 
                                             <div className="space-y-2">
-                                                <p className="text-[10px] font-semibold text-white/40 uppercase">Achievements</p>
+                                                <p className="text-[10px] font-semibold text-slate-400 uppercase">Achievements</p>
                                                 {exp.achievements.map((ach, idx) => (
                                                     <div key={idx} className="flex gap-2 items-start group/ach">
-                                                        <div className="mt-2 text-white/20"><GripVertical size={14} /></div>
+                                                        <div className="mt-2 text-slate-300"><GripVertical size={14} /></div>
                                                         <textarea
                                                             rows={2}
-                                                            className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm resize-none focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                            className="w-full p-2 bg-white border border-slate-200 rounded text-sm resize-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                             value={ach}
                                                             onChange={(e) => handleAchievementChange(exp.id, idx, e.target.value)}
                                                         />
                                                         <button
                                                             onClick={() => removeAchievement(exp.id, idx)}
-                                                            className="mt-2 text-white/20 hover:text-red-400 transition opacity-0 group-hover/ach:opacity-100"
+                                                            className="mt-2 text-slate-300 hover:text-rose-500 transition opacity-0 group-hover/ach:opacity-100"
                                                         >
                                                             <Trash2 size={14} />
                                                         </button>
@@ -445,7 +556,7 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                                                 ))}
                                                 <button
                                                     onClick={() => addAchievement(exp.id)}
-                                                    className="text-xs font-medium text-pink-400 hover:text-pink-300 flex items-center gap-1 mt-2 transition-colors"
+                                                    className="text-xs font-medium text-blue-600 hover:text-blue-500 flex items-center gap-1 mt-2 transition-colors"
                                                 >
                                                     <Plus size={12} /> Add Achievement
                                                 </button>
@@ -460,11 +571,11 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
                 {/* Section: Education */}
                 <div className="space-y-4 mb-8">
-                    <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                        <h3 className="font-semibold text-white/40 uppercase text-xs tracking-wider">Education</h3>
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                        <h3 className="font-semibold text-slate-400 uppercase text-xs tracking-wider">Education</h3>
                         <button
                             onClick={addEducation}
-                            className="flex items-center gap-1 text-xs bg-pink-500/10 text-pink-400 border border-pink-500/20 px-2 py-1 rounded hover:bg-pink-500/20 transition font-medium"
+                            className="flex items-center gap-1 text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded hover:bg-blue-100 transition font-medium"
                         >
                             <Plus size={12} /> Add
                         </button>
@@ -474,71 +585,81 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                         {data.education.map((edu) => {
                             const isExpanded = expandedEduIds.includes(edu.id);
                             return (
-                                <div key={edu.id} className="bg-white/5 rounded-xl border border-white/5 overflow-hidden transition-all duration-300">
+                                <div key={edu.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
                                     <div
-                                        className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-white/10 transition-colors group"
+                                        className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-slate-50 transition-colors group"
                                         onClick={() => toggleEdu(edu.id)}
                                     >
                                         <div className="flex items-center gap-3 overflow-hidden">
-                                            <div className={`p-2 rounded-lg transition-colors duration-300 ${isExpanded ? 'bg-pink-500/20 text-pink-400' : 'bg-white/5 text-white/40'}`}>
+                                            <div className={`p-2 rounded-lg transition-colors duration-300 ${isExpanded ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
                                                 <GraduationCap size={16} />
                                             </div>
                                             <div className="flex flex-col truncate pr-2">
-                                                <span className="text-sm font-semibold text-white truncate group-hover:text-pink-200 transition-colors">{edu.degree || 'Degree'}</span>
-                                                <span className="text-[10px] text-white/50 truncate uppercase tracking-wide">{edu.institution || 'Institution'}</span>
+                                                <span className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-600 transition-colors">{edu.degree || 'Degree'}</span>
+                                                <span className="text-[10px] text-slate-500 truncate uppercase tracking-wide">{edu.institution || 'Institution'}</span>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); removeEducation(edu.id); }}
-                                                className="p-2 text-white/20 hover:text-red-400 hover:bg-white/5 rounded-lg transition opacity-0 group-hover:opacity-100"
+                                                className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition opacity-0 group-hover:opacity-100"
                                             >
                                                 <Trash2 size={15} />
                                             </button>
-                                            {isExpanded ? <ChevronDown size={16} className="text-white/40" /> : <ChevronRight size={16} className="text-white/40" />}
+                                            {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                                         </div>
                                     </div>
 
                                     {isExpanded && (
-                                        <div className="p-4 border-t border-white/5 bg-black/20 animate-in slide-in-from-top-2">
+                                        <div className="p-4 border-t border-slate-100 bg-slate-50/50 animate-in slide-in-from-top-2">
                                             <div className="grid grid-cols-1 gap-3">
                                                 <div>
-                                                    <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Degree</label>
+                                                    <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Degree</label>
                                                     <input
                                                         type="text"
-                                                        className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm font-medium focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                        className="w-full p-2 bg-white border border-slate-200 rounded text-sm font-medium focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                         value={edu.degree}
                                                         onChange={(e) => handleEducationChange(edu.id, 'degree', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Institution</label>
+                                                    <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Institution</label>
                                                     <input
                                                         type="text"
-                                                        className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                        className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                         value={edu.institution}
                                                         onChange={(e) => handleEducationChange(edu.id, 'institution', e.target.value)}
                                                     />
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div>
-                                                        <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Period</label>
+                                                        <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Period</label>
                                                         <input
                                                             type="text"
-                                                            className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                            className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                             value={edu.period}
                                                             onChange={(e) => handleEducationChange(edu.id, 'period', e.target.value)}
                                                         />
                                                     </div>
                                                     <div>
-                                                        <label className="block text-[10px] text-white/40 mb-0.5 uppercase">Location</label>
+                                                        <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Location</label>
                                                         <input
                                                             type="text"
-                                                            className="w-full p-2 bg-white/5 border border-white/10 rounded text-sm focus:bg-black/40 focus:border-pink-500/50 outline-none text-white transition-colors"
+                                                            className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
                                                             value={edu.location}
                                                             onChange={(e) => handleEducationChange(edu.id, 'location', e.target.value)}
                                                         />
                                                     </div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <label className="block text-[10px] text-slate-400 mb-0.5 uppercase">Grade / Score / CPA</label>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full p-2 bg-white border border-slate-200 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-800 transition-colors"
+                                                        value={edu.score || ''}
+                                                        onChange={(e) => handleEducationChange(edu.id, 'score', e.target.value)}
+                                                        placeholder="e.g. GPA 3.8/4.0 or 85%"
+                                                    />
                                                 </div>
                                             </div>
                                         </div>
@@ -551,11 +672,11 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
 
                 {/* Section: Skills */}
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                        <h3 className="font-semibold text-white/40 uppercase text-xs tracking-wider">Skills</h3>
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                        <h3 className="font-semibold text-slate-400 uppercase text-xs tracking-wider">Skills</h3>
                         <button
                             onClick={addSkill}
-                            className="flex items-center gap-1 text-xs bg-pink-500/10 text-pink-400 border border-pink-500/20 px-2 py-1 rounded hover:bg-pink-500/20 transition font-medium"
+                            className="flex items-center gap-1 text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded hover:bg-blue-100 transition font-medium"
                         >
                             <Plus size={12} /> Add
                         </button>
@@ -566,13 +687,13 @@ export const Editor: React.FC<EditorProps> = ({ data, onChange, onClose }) => {
                             <div key={idx} className="flex gap-2 items-center group">
                                 <input
                                     type="text"
-                                    className="w-full p-2.5 bg-white/5 border border-white/10 rounded-lg focus:bg-white/10 focus:border-pink-500/50 outline-none transition text-sm text-white"
+                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition text-sm text-slate-800 shadow-sm"
                                     value={skill}
                                     onChange={(e) => handleSkillChange(idx, e.target.value)}
                                 />
                                 <button
                                     onClick={() => removeSkill(idx)}
-                                    className="p-2 text-white/20 hover:text-red-400 transition"
+                                    className="p-2 text-slate-400 hover:text-rose-500 transition"
                                 >
                                     <Trash2 size={16} />
                                 </button>

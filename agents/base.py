@@ -26,8 +26,9 @@ class BaseAgent(ABC):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = settings.OPENROUTER_BASE_URL
         
+    
     def _call_llm(self, user_prompt: str) -> str:
-        """Make a raw LLM call and return the response text."""
+        """Make a raw LLM call and return the response text. Retries with backup model on failure."""
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY not set in environment")
         
@@ -38,27 +39,72 @@ class BaseAgent(ABC):
             "X-Title": "TailorAI Job Evaluator",
         }
         
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": self.temperature,
-        }
-        
-        with httpx.Client(timeout=120.0) as client:
-            # Handle both cases: base URL with or without /chat/completions
-            url = self.base_url if self.base_url.endswith("/chat/completions") else f"{self.base_url}/chat/completions"
-            response = client.post(
-                url,
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
+        # Primary then Backup model strategy
+        models_to_try = [self.model]
+        if settings.OPENROUTER_MODEL_BACKUP and settings.OPENROUTER_MODEL_BACKUP != self.model:
+            models_to_try.append(settings.OPENROUTER_MODEL_BACKUP)
             
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        last_exception = None
+        
+        for current_model in models_to_try:
+            payload = {
+                "model": current_model,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": self.temperature,
+            }
+            
+            # Retry logic for this model (e.g. 429 Rate Limits)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if current_model != self.model:
+                        print(f"Retrying with BACKUP model: {current_model}")
+
+                    with httpx.Client(timeout=120.0) as client:
+                        base_url = self.base_url.rstrip("/")
+                        url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+                        response = client.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                        )
+                        
+                        # Handle 429 specifically
+                        if response.status_code == 429:
+                            wait_time = 5 * (attempt + 1) # Linear backoff: 5s, 10s, 15s
+                            print(f"Rate limited (429) on {current_model}. Waiting {wait_time}s...")
+                            time.sleep(wait_time)
+                            if attempt == max_retries - 1:
+                                response.raise_for_status() # Raise on final attempt
+                            continue # Retry same model
+                            
+                        response.raise_for_status()
+                        
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"]
+                    
+                except Exception as e:
+                    # If it's the last retry, log and break to try next model
+                    if attempt == max_retries - 1:
+                        print(f"Model {current_model} failed after {max_retries} attempts: {e}")
+                        last_exception = e
+                    # For non-429 errors (like network/timeout), maybe retry too? 
+                    # For now we rely on the loop above for 429.
+                    # If it was a 429, we already continued in the loop. 
+                    # If it was other error, break to next model.
+                    if "429" not in str(e):
+                         break
+            
+            # If we are here, this model failed completely. Try next model.
+            continue
+                
+        # If we get here, all models failed
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("LLM call failed with no exception captured")
     
     def _parse_json_response(self, response_text: str) -> dict:
         """Parse JSON from LLM response, handling markdown code blocks."""

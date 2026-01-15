@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 
 from .base import BaseAgent
+from agents.database import get_master_resume
+from backend.settings import settings
 
 
 class JobEvaluatorAgent(BaseAgent):
@@ -18,13 +20,23 @@ class JobEvaluatorAgent(BaseAgent):
         self._load_approved_skills()
     
     def _load_resume(self):
-        """Load base resume from JSON file."""
+        """Load base resume from DB (preferred) or JSON file."""
+        # 1. Try DB
+        try:
+            db_resume = get_master_resume()
+            if db_resume:
+                self.resume = db_resume
+                return
+        except Exception as e:
+            print(f"Warning: Failed to load resume from DB: {e}")
+
+        # 2. Fallback to file
         resume_path = Path("agent_prompts/base_resume.json")
         if resume_path.exists():
             with open(resume_path) as f:
                 self.resume = json.load(f)
         else:
-            raise FileNotFoundError(f"Resume not found: {resume_path}")
+            raise FileNotFoundError(f"Resume not found in DB or at {resume_path}")
     
     def _load_approved_skills(self):
         """Load approved skills from markdown file."""
@@ -36,18 +48,19 @@ class JobEvaluatorAgent(BaseAgent):
             self.approved_skills = ""
     
     def get_system_prompt(self) -> str:
-        return """You are an AI Job Match Evaluator Agent.
+        prompt_intro = f"""You are an AI Job Match Evaluator Agent.
 
-Your task: Compare the candidate's resume with a given job description and return **exactly one valid JSON object** that includes:
-- Company and role information
-- Job description summary
-- Alignment verdict and numeric score
-- Detailed gaps categorized by type (for interview prep)
-- Actionable improvement suggestions grounded in approved skills/projects
-- Interview preparation tips based on JD emphasis
-- Recruiter contact and metadata
+Your task: Compare the candidate's resume with a given job description and return **exactly one valid JSON object**.
 
-You may reason privately but **must not output your thoughts**.
+## CANDIDATE EXPERIENCE
+- The candidate has **{settings.CANDIDATE_EXPERIENCE_YEARS}** of total experience.
+- Assume this experience is relevant unless the job is in a completely different domain requiring zero overlap with the candidate's skills.
+
+## EXPERIENCE FIT RULE
+- Compare **{settings.CANDIDATE_EXPERIENCE_YEARS}** to the JD's requirement.
+- If **{settings.CANDIDATE_EXPERIENCE_YEARS} < JD Required Years**, set recommended_action: "skip" and penalize the score significantly."""
+
+        prompt_schema = """
 
 ## OUTPUT FORMAT (JSON ONLY)
 
@@ -115,19 +128,11 @@ Verdict mapping:
 - Moderate Match: 50-70
 - Weak Match: <= 40
 
-## EXPERIENCE FIT RULE
-
-If the JD requires more than 5 years of experience, set:
-- recommended_action: "skip"
-- Reduce job_match_score by at least 20 points
-
-The candidate has only 3-5 years of professional experience.
-
 ## recommended_action LOGIC
 
-- "skip": required_exp > 6 years OR job_match_score < 50
-- "tailor": job_match_score 50-79 AND required_exp <= 5 years
-- "apply": job_match_score >= 80 AND required_exp <= 5 years
+- "skip": Relevant Exp < Required Exp OR job_match_score < 50
+- "tailor": job_match_score 50-79 AND Relevant Exp >= Required Exp
+- "apply": job_match_score >= 80 AND Relevant Exp >= Required Exp
 
 ## STRICT OUTPUT RULES
 
@@ -135,6 +140,8 @@ The candidate has only 3-5 years of professional experience.
 - No markdown, no code fences, no explanations
 - Use valid JSON with double quotes
 - Keep values single-line"""
+
+        return prompt_intro + prompt_schema
     
     def build_user_prompt(self, job_id: str, description_text: str, 
                           company_name: str = "Unknown", 

@@ -3,6 +3,7 @@ Pydantic schemas for API request/response models.
 """
 from datetime import datetime
 from pydantic import BaseModel
+from typing import List, Optional
 
 
 # Job schemas
@@ -13,14 +14,15 @@ class JobBase(BaseModel):
     location: str | None = None
     posted_at: str | None = None
     applicants_count: int | None = None
+    company_website: str | None = None
 
 
 class JobDetail(JobBase):
     description_text: str | None = None
+    description_html: str | None = None
     seniority_level: str | None = None
     employment_type: str | None = None
     link: str | None = None
-    company_website: str | None = None
 
 
 class JobStats(BaseModel):
@@ -89,3 +91,33 @@ class MessageResponse(BaseModel):
     message: str
     job_id: str | None = None
     task_id: str | None = None
+
+
+# Resume Data Schemas (For Typst generation)
+class Experience(BaseModel):
+    id: str
+    company: str
+    role: str
+    period: str
+    location: Optional[str] = ""
+    achievements: List[str] = []
+
+class Education(BaseModel):
+    id: str
+    institution: str
+    degree: str
+    period: str
+    location: Optional[str] = ""
+    score: Optional[str] = None
+
+class ResumeData(BaseModel):
+    fullName: str
+    title: Optional[str] = ""
+    phone: str
+    email: str
+    location: str
+    websites: List[str] = []
+    summary: Optional[str] = ""
+    experience: List[Experience] = []
+    education: List[Education] = []
+    skills: List[str] = []

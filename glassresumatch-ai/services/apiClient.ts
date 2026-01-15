@@ -117,6 +117,46 @@ class ApiClient {
             body: formData,
         });
     }
+
+    async updateMasterResume(data: any) {
+        return this.request<any>('/api/resumes/master', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    // Tailored Resume endpoints
+    async tailorResume(jobId: string) {
+        return this.request<TailoredResume>(`/api/resumes/tailor/${jobId}`, {
+            method: 'POST',
+        });
+    }
+
+    async getTailoredVersions(jobId: string) {
+        return this.request<TailoredResume[]>(`/api/resumes/tailored/${jobId}`);
+    }
+
+    async updateTailoredStatus(recordId: string, status: string) {
+        return this.request<any>(`/api/resumes/tailored/${recordId}/status?status=${status}`, {
+            method: 'POST',
+        });
+    }
+
+    async generatePdf(data: any, template: string) {
+        const response = await fetch(`${this.baseUrl}/api/pdf/generate?template=${template}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+            throw new Error(`PDF generation failed: ${response.statusText}`);
+        }
+
+        return response.blob();
+    }
 }
 
 // Types matching backend schemas
@@ -127,14 +167,15 @@ export interface Job {
     location: string | null;
     posted_at: string | null;
     applicants_count: number | null;
+    company_website: string | null;
+    description_text?: string | null;
+    description_html?: string | null;
 }
 
 export interface JobDetail extends Job {
-    description_text: string | null;
     seniority_level: string | null;
     employment_type: string | null;
     link: string | null;
-    company_website: string | null;
 }
 
 export interface JobStats {
@@ -205,10 +246,24 @@ export interface ParseResult {
     parsed_at: string | null;
 }
 
+export interface TailoredResume {
+    id: string;
+    job_id: string;
+    version: number;
+    content: any;
+    status: 'pending' | 'approved' | 'rejected';
+    created_at: string;
+}
+
 export interface TaskStatus {
     task_id: string;
     status: 'queued' | 'running' | 'completed' | 'failed';
-    progress: { completed: number; total: number } | null;
+    progress: {
+        completed: number;
+        total: number;
+        failed?: number;
+        last_error?: string;
+    } | null;
     created_at: string | null;
     completed_at: string | null;
     error: string | null;

@@ -1,15 +1,69 @@
 import React from 'react';
 import { ResumeData } from '../types';
 
-export type TemplateType = 'modern' | 'classic' | 'compact' | 'tech' | 'minimal';
+export type TemplateType = 'ats_friendly' | 'modern' | 'classic' | 'minimal' | 'tech' | 'compact';
 
 interface ResumePreviewProps {
     data: ResumeData;
+    originalData?: ResumeData; // For Diff Mode
     targetRef?: React.RefObject<HTMLDivElement>;
     template?: TemplateType;
 }
 
-export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, template = 'modern' }) => {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const str = String(dateStr).trim();
+    if (str.toLowerCase() === 'present' || str.toLowerCase() === 'current') return 'Present';
+
+    try {
+        // Handle "February 2022" -> "Feb 2022"
+        const date = new Date(str);
+        if (!isNaN(date.getTime())) {
+            return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        }
+
+        // Handle YYYY-MM manually if Date parse fails for local time reasons (sometimes risky)
+        const parts = str.split('-');
+        if (parts.length >= 2) {
+            const year = parts[0];
+            const month = parseInt(parts[1], 10);
+            if (year.length === 4 && month >= 1 && month <= 12) {
+                return `${MONTHS[month - 1]} ${year}`;
+            }
+        }
+    } catch (e) {
+        // Fallback
+    }
+
+    return str;
+};
+
+const formatPeriod = (period: string) => {
+    if (!period) return '';
+    // Assuming period comes as "Start - End"
+    const parts = period.split(' - ');
+    if (parts.length === 2) {
+        return `${formatDate(parts[0])} – ${formatDate(parts[1])}`;
+    }
+    // Fallback: try formatting the whole string if it's just a single date
+    return formatDate(period);
+}
+
+
+export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData, targetRef, template = 'modern' }) => {
+
+    // Diff Helper
+    const isChanged = (current: string, original?: string) => {
+        if (!originalData) return false;
+        return current !== original;
+    };
+
+    // Bullet Diff Helper
+    const isBulletChanged = (bullet: string, originalBullets: string[] = []) => {
+        if (!originalData) return false;
+        return !originalBullets.includes(bullet);
+    };
 
     // --- Style Configurations ---
     const styles = {
@@ -58,19 +112,19 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
         tech: {
             container: "font-mono text-gray-800 p-8 sm:p-10 text-sm",
             header: "mb-6",
-            name: "text-3xl font-bold text-blue-900 mb-1 tracking-tighter",
-            title: "text-md text-blue-600 font-medium mb-3",
+            name: "text-3xl font-bold text-gray-900 mb-1 tracking-tighter",
+            title: "text-md text-gray-600 font-medium mb-3",
             contactBar: "text-xs text-gray-500 grid grid-cols-2 sm:grid-cols-4 gap-2 border-y border-gray-100 py-2",
             separator: "hidden",
-            sectionTitle: "text-sm font-bold text-blue-800 uppercase tracking-widest mb-3 mt-6 flex items-center gap-2 before:content-['#'] before:text-blue-400",
+            sectionTitle: "text-sm font-bold text-gray-800 uppercase tracking-widest mb-3 mt-6 flex items-center gap-2 before:content-['#'] before:text-gray-400",
             expItem: "mb-5 pl-0",
             expRole: "font-bold text-gray-900",
-            expCompany: "text-blue-700",
+            expCompany: "text-gray-700",
             expDate: "text-xs text-gray-400 block sm:inline sm:ml-2",
             skillsLayout: "flex flex-wrap gap-2",
         },
         minimal: {
-            // Replaced with "Traditional / Ivy League" style
+            // Traditional / Ivy League style
             container: "font-serif text-black p-10 sm:p-12 max-w-[210mm] mx-auto leading-normal",
             header: "text-center mb-6",
             name: "text-3xl font-bold text-black mb-2 uppercase tracking-wide font-serif",
@@ -83,13 +137,35 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
             expCompany: "italic text-black font-serif",
             expDate: "text-black font-serif",
             skillsLayout: "grid grid-cols-1 gap-y-1",
+        },
+        ats_friendly: {
+            // ATS Friendly - Strict Sans-Serif, Compact, Split Header
+            container: "font-sans text-[#111] px-12 py-8 sm:px-14 sm:py-10 print:px-8 print:py-10 max-w-[210mm] mx-auto leading-[1.3] text-[12px]", // Fixed print margins
+            header: "flex flex-col items-center text-center mb-4",
+            name: "text-xl sm:text-2xl font-bold text-[#111] uppercase tracking-wide mb-1 mt-2 whitespace-nowrap", // Reduced base size to xl to prevent print wrapping
+            title: "text-lg text-[#333] font-medium mb-2", // Reduced size and margin
+            contactBar: "text-[12px] text-[#444] flex flex-wrap justify-center gap-x-3 gap-y-1 mb-1 font-medium",
+            separator: "hidden", // Hide separator
+            sectionTitle: "text-xs font-bold text-[#999] uppercase tracking-[0.15em] mb-2 border-b border-[#eee] pb-1", // Reduced mb-4->mb-2
+            expItem: "mb-0",
+            expRole: "",
+            expCompany: "",
+            expDate: "",
+            skillsLayout: "compact-list text-[12px] leading-[1.3]",
         }
     };
 
-    const activeStyle = styles[template];
+    const activeStyle = styles[template] || styles.modern;
 
     return (
         <div className="relative group perspective-1000 print:perspective-none w-full flex justify-center print:block print:w-auto">
+            {/* Print Styles to remove browser headers/footers */}
+            <style>{`
+                @media print {
+                    @page { margin: 0; }
+                    body { margin: 0; }
+                }
+            `}</style>
 
             {/* Visual Depth/Shadow (Screen only) */}
             <div className="absolute inset-0 bg-black/40 blur-2xl transform translate-y-8 scale-95 rounded-[20px] -z-10 print:hidden transition-all duration-500 group-hover:translate-y-12 group-hover:blur-3xl group-hover:scale-90 opacity-60"></div>
@@ -97,9 +173,9 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
             <div
                 ref={targetRef}
                 className={`
-          bg-white 
-          w-full max-w-[210mm] min-h-[297mm] 
-          shadow-2xl 
+          bg-white
+          w-full max-w-[210mm] min-h-[297mm]
+          shadow-2xl
           print:shadow-none print:w-full print:max-w-none print:min-h-0 print:p-0 print:overflow-visible
           relative
           z-10
@@ -107,6 +183,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
           group-hover:-translate-y-2
           ${activeStyle.container}
         `}
+                style={template === 'ats_friendly' ? { fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif' } : {}}
             >
                 {/* --- HEADER --- */}
                 <header className={activeStyle.header}>
@@ -131,26 +208,37 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                         <>
                             <h1 className={activeStyle.name}>{data.fullName}</h1>
                             {/* For Minimal/Traditional, we typically hide the job title in header to focus on Name + Contact */}
-                            {template !== 'minimal' && data.title && <p className={activeStyle.title}>{data.title}</p>}
+                            {template !== 'minimal' && template !== 'ats_friendly' && data.title && <p className={activeStyle.title}>{data.title}</p>}
+                            {template === 'ats_friendly' && data.title && <p className={activeStyle.title}>{data.title}</p>}
 
                             <div className={activeStyle.contactBar}>
                                 <span>{data.phone}</span>
-                                <span className={`${template === 'tech' ? 'hidden' : 'text-black/50 mx-1'}`}>|</span>
                                 <a href={`mailto:${data.email}`} className="hover:underline transition-colors">{data.email}</a>
-                                <span className={`${template === 'tech' ? 'hidden' : 'text-black/50 mx-1'}`}>|</span>
                                 <span>{data.location}</span>
 
                                 {data.websites.length > 0 && (
                                     <>
-                                        <span className={`${template === 'tech' ? 'hidden' : 'text-black/50 mx-1'}`}>|</span>
-                                        {data.websites.map((site, index) => (
-                                            <React.Fragment key={index}>
-                                                {index > 0 && <span className={`${template === 'tech' ? 'hidden' : 'text-black/50 mx-1'}`}>|</span>}
-                                                <a href={site} target="_blank" rel="noreferrer" className="hover:underline transition-colors break-all">
-                                                    {site.replace(/^https?:\/\//, '')}
-                                                </a>
-                                            </React.Fragment>
-                                        ))}
+                                        {data.websites.map((site, index) => {
+                                            // Infer label
+                                            let label = site.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                                            if (site.toLowerCase().includes('linkedin')) label = 'LinkedIn';
+                                            if (site.toLowerCase().includes('github') || site.toLowerCase().includes('git')) label = 'GitHub';
+
+                                            return (
+                                                <React.Fragment key={index}>
+                                                    {/* Separator style varies */}
+                                                    {template === 'ats_friendly' ? (
+                                                        <span className="mx-1">•</span>
+                                                    ) : (
+                                                        <span className={`${template === 'tech' ? 'hidden' : 'text-black/50 mx-1'}`}>|</span>
+                                                    )}
+
+                                                    <a href={site} target="_blank" rel="noreferrer" className="hover:underline transition-colors break-all">
+                                                        {label}
+                                                    </a>
+                                                </React.Fragment>
+                                            );
+                                        })}
                                     </>
                                 )}
                             </div>
@@ -159,16 +247,18 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                 </header>
 
                 {/* Separator (Modern only) */}
-                <div className={activeStyle.separator}></div>
+                {(template === 'modern') && <div className={activeStyle.separator}></div>}
 
                 {/* --- SUMMARY --- */}
                 {data.summary && (
                     <section className={template === 'compact' ? "mb-4" : "mb-6"}>
                         <h3 className={activeStyle.sectionTitle}>
-                            {template === 'minimal' ? 'Personal Profile' : 'Professional Summary'}
+                            {(template === 'minimal') ? 'Personal Profile' : 'Professional Summary'}
                         </h3>
-                        <p className="text-sm leading-relaxed text-justify opacity-90">
-                            {data.summary}
+                        <p className={template === 'ats_friendly' ? "text-[13px] leading-relaxed text-justify opacity-90" : "text-sm leading-relaxed text-justify opacity-90"}>
+                            <span className={template === 'ats_friendly' ? (isChanged(data.summary, originalData?.summary) ? "bg-gray-100 px-1 rounded transition-colors duration-1000" : "") : (isChanged(data.summary, originalData?.summary) ? "bg-gray-100 px-1 rounded transition-colors duration-1000" : "")}>
+                                {data.summary}
+                            </span>
                         </p>
                     </section>
                 )}
@@ -194,6 +284,34 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                                         <ul className="list-disc list-outside ml-5 text-sm leading-snug text-black space-y-1 mt-1">
                                             {exp.achievements.map((point, index) => (
                                                 <li key={index} className="pl-1">{point}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                );
+                            }
+
+                            // ATS Friendly Style
+                            if (template === 'ats_friendly') {
+                                // Split header layout
+                                // Line 1: Company + Dates
+                                // Line 2: Role + Location
+                                return (
+                                    <div key={exp.id} className="mb-2">
+                                        {/* Line 1: Company and Dates */}
+                                        <h3 className="mb-0 text-[12px] font-normal leading-normal">
+                                            <span className="float-right font-normal text-[12px]">{formatPeriod(exp.period)}</span>
+                                            <span className="font-bold">{exp.company}</span>
+                                        </h3>
+                                        {/* Line 2: Role and Location */}
+                                        <div className="text-[12px] mb-0.5 leading-normal">
+                                            <span className="float-right">{exp.location}</span>
+                                            <strong className="font-bold">{exp.role}</strong>
+                                        </div>
+
+                                        {/* Hanging Indent Bullets */}
+                                        <ul style={{ paddingLeft: '1.2em', listStylePosition: 'outside' }} className="mt-0.5 mb-0 list-disc space-y-0 text-[12px] leading-snug">
+                                            {exp.achievements.map((point, index) => (
+                                                <li key={index} className="mb-0">{point}</li>
                                             ))}
                                         </ul>
                                     </div>
@@ -226,9 +344,16 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                                     )}
 
                                     <ul className={`list-disc list-outside ml-4 text-sm opacity-90 space-y-1 marker:text-gray-400 ${template === 'compact' ? 'mt-1' : ''}`}>
-                                        {exp.achievements.map((point, index) => (
-                                            <li key={index} className="leading-snug pl-1">{point}</li>
-                                        ))}
+                                        {exp.achievements.map((point, index) => {
+                                            const originalExp = originalData?.experience.find(e => e.id === exp.id);
+                                            const changed = isBulletChanged(point, originalExp?.achievements);
+
+                                            return (
+                                                <li key={index} className={`leading-snug pl-1 ${changed ? 'bg-gray-100 pr-1 rounded transition-colors duration-1000' : ''}`}>
+                                                    {point}
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                 </div>
                             );
@@ -236,7 +361,70 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                     </div>
                 </section>
 
-                {/* --- EDUCATION --- */}
+                {/* --- SKILLS (Swapped) --- */}
+                <section>
+                    <h3 className={activeStyle.sectionTitle}>
+                        {(template === 'minimal') ? 'Technical Skills' : template === 'ats_friendly' ? 'Skills and Technologies' : 'Skills'}
+                    </h3>
+
+                    {template === 'compact' ? (
+                        // Compact: Comma separated list
+                        <div className="text-sm text-gray-800 leading-relaxed">
+                            {data.skills.map(s => s.replace(':', '')).join(' • ')}
+                        </div>
+                    ) : template === 'ats_friendly' ? (
+                        // ATS Friendly: Compact List with Categories
+                        <ul className="list-none m-0 p-0 text-[12px] leading-[1.3] space-y-1">
+                            {data.skills.map((skill, index) => {
+                                // Parse "Category: Items"
+                                const parts = skill.split(':');
+                                const category = parts[0];
+                                const items = parts.length > 1 ? parts.slice(1).join(':') : "";
+
+                                return (
+                                    <li key={index} className="mb-0">
+                                        {items ? (
+                                            <>
+                                                <strong className="font-bold">{category}</strong>: {items}
+                                            </>
+                                        ) : (
+                                            skill
+                                        )}
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                    ) : (
+                        <ul className={activeStyle.skillsLayout}>
+                            {data.skills.map((skill, index) => {
+                                if (template === 'tech') {
+                                    // Tech: Tag style
+                                    return (
+                                        <li key={index} className="px-2 py-1 bg-gray-100 text-blue-900 rounded text-xs font-medium font-mono border border-gray-200">
+                                            {skill}
+                                        </li>
+                                    );
+                                }
+
+                                return (
+                                    <li key={index} className="leading-snug text-sm text-gray-800">
+                                        {/* Check if skill has a label like "Language: Value" to split */}
+                                        {skill.includes(':') ? (
+                                            <>
+                                                <span className={`font-bold ${(template === 'minimal' || template === 'ats_friendly') ? 'text-black' : 'text-gray-800'}`}>{skill.split(':')[0]}:</span>
+                                                <span className="opacity-90 ml-2">{skill.substring(skill.indexOf(':') + 1)}</span>
+                                            </>
+                                        ) : (
+                                            <span>{skill}</span>
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    )}
+                </section>
+
+                {/* --- EDUCATION (Swapped) --- */}
                 {data.education && data.education.length > 0 && (
                     <section className={template === 'compact' ? "mb-4" : "mb-6"}>
                         <h3 className={activeStyle.sectionTitle}>Education</h3>
@@ -258,6 +446,25 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                                     );
                                 }
 
+                                // ATS Friendly Style
+                                if (template === 'ats_friendly') {
+                                    return (
+                                        <div key={edu.id} className="mb-1 text-[12px]">
+                                            <h3 className="mb-0 text-[12px] font-normal leading-normal">
+                                                <span className="float-right font-normal">{formatPeriod(edu.period)}</span>
+                                                <span className="font-bold">{edu.institution}</span>
+                                            </h3>
+                                            <div className="text-[12px] leading-normal flex justify-between">
+                                                <div>
+                                                    <strong className="font-bold">{edu.degree}</strong>
+                                                    {edu.score && <span> | GPA: {edu.score}</span>}
+                                                </div>
+                                                <span>{edu.location}</span>
+                                            </div>
+                                        </div>
+                                    )
+                                }
+
                                 return (
                                     <div key={edu.id} className="flex flex-col sm:flex-row justify-between sm:items-baseline">
                                         <div className="text-sm">
@@ -273,47 +480,6 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, targetRef, t
                         </div>
                     </section>
                 )}
-
-                {/* --- SKILLS --- */}
-                <section>
-                    <h3 className={activeStyle.sectionTitle}>
-                        {template === 'minimal' ? 'Technical Skills' : 'Skills'}
-                    </h3>
-
-                    {template === 'compact' ? (
-                        // Compact: Comma separated list
-                        <div className="text-sm text-gray-800 leading-relaxed">
-                            {data.skills.map(s => s.replace(':', '')).join(' • ')}
-                        </div>
-                    ) : (
-                        <ul className={activeStyle.skillsLayout}>
-                            {data.skills.map((skill, index) => {
-                                if (template === 'tech') {
-                                    // Tech: Tag style
-                                    return (
-                                        <li key={index} className="px-2 py-1 bg-gray-100 text-blue-900 rounded text-xs font-medium font-mono border border-gray-200">
-                                            {skill}
-                                        </li>
-                                    );
-                                }
-
-                                return (
-                                    <li key={index} className="leading-snug text-sm text-gray-800">
-                                        {/* Check if skill has a label like "Language: Value" to split */}
-                                        {skill.includes(':') ? (
-                                            <>
-                                                <span className={`font-bold ${template === 'minimal' ? 'text-black' : 'text-gray-800'}`}>{skill.split(':')[0]}:</span>
-                                                <span className="opacity-90 ml-2">{skill.substring(skill.indexOf(':') + 1)}</span>
-                                            </>
-                                        ) : (
-                                            <span>{skill}</span>
-                                        )}
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                    )}
-                </section>
 
             </div>
         </div>

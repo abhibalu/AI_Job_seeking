@@ -44,6 +44,7 @@ def parse_raw_json(raw_json: str) -> dict:
         # Job details
         "title": job.get("title"),
         "description_text": job.get("descriptionText"),  # Discard HTML
+        "description_html": job.get("descriptionHtml"),
         "seniority_level": job.get("seniorityLevel"),
         "employment_type": job.get("employmentType"),
         "job_function": job.get("jobFunction"),
@@ -204,6 +205,7 @@ def transform_to_silver():
         silver_path,
         silver_df.to_arrow(),
         mode="overwrite",  # For SCD we rebuild the table
+        schema_mode="overwrite",
         partition_by=["ingestion_date"],
         storage_options=storage_options,
     )

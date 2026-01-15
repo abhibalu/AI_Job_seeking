@@ -11,9 +11,9 @@ These are verified capabilities — do not fabricate beyond this list.
 
 **Data Engineering**: dbt, Apache Airflow, ETL Development, Data Modeling (Fact/Dimension, Star Schema), Incremental Models, Medallion Architecture, Data Lineage, Orchestration
 
-**Cloud & Storage**: BigQuery, Google Cloud Storage, Cloud Functions, Azure Data Factory, Azure Synapse, ADLS Gen2, Databricks
+**Cloud & Storage**: BigQuery, Google Cloud Storage, Cloud Functions, Azure Data Factory, Azure Synapse, ADLS Gen2, Databricks, AWS
 
-**Databases**: PostgreSQL, MySQL, MongoDB, Teradata, Snowflake
+**Databases**: PostgreSQL, MySQL, MongoDB, Teradata, Snowflake, Amazon Redshift
 
 **Infrastructure**: Docker, Git, Linux Environment, Hadoop Ecosystem
 

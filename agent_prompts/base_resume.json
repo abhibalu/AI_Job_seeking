@@ -118,6 +118,7 @@
                 "dbt",
                 "Databricks",
                 "Azure Data Factory",
+                "AWS",
                 "Dagster"
             ]
         },
@@ -130,6 +131,7 @@
                 "BigQuery",
                 "Teradata",
                 "Snowflake",
+                "Amazon Redshift",
                 "ADLS Gen2",
                 "GCS"
             ]

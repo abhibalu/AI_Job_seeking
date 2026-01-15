@@ -10,8 +10,8 @@ import {
 } from './services/jobService';
 import apiClient from './services/apiClient';
 import { ViewMode, FilterOptions, ResumeData, INITIAL_DATA } from './types';
-import { JobCard } from './components/JobCard';
-import { JobModal } from './components/JobModal';
+import { JobListItem } from './components/JobListItem';
+import { JobDetailView } from './components/JobDetailView';
 import { Pagination } from './components/Pagination';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -27,9 +27,12 @@ import {
   PenLine,
   Printer,
   Check,
+  Briefcase,
   ChevronRight,
   User,
-  Eye
+  Eye,
+  Upload,
+  Download
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -43,13 +46,16 @@ const App: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
   const [isResumeLoading, setIsResumeLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- UI state ---
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedEvaluation, setSelectedEvaluation] = useState<Evaluation | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
 
   // --- Filter state ---
@@ -117,59 +123,123 @@ const App: React.FC = () => {
   }, [loadData]);
 
   // --- Fetch Resume Data ---
-  useEffect(() => {
-    // Fetch resume data when app loads or when switching to resume view
-    const fetchResume = async () => {
-      try {
-        setIsResumeLoading(true);
-        const backendData = await apiClient.getMasterResume();
-        if (backendData && backendData.basics) {
-          // Map Nested JSON Resume to Flat ResumeData
-          const mappedData: ResumeData = {
-            fullName: backendData.basics.name || "Your Name",
-            title: backendData.basics.label || "Professional Title",
-            email: backendData.basics.email || "",
-            phone: backendData.basics.phone || "",
-            location: backendData.basics.location ?
-              `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
-              : "",
-            websites: [
-              backendData.basics.url || "",
-              ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
-            ].filter(Boolean),
-            summary: backendData.basics.summary || "",
-            experience: backendData.work?.map((w: any) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              company: w.name || "",
-              role: w.position || "",
-              period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
-              location: w.location || "",
-              achievements: w.highlights || []
-            })) || [],
-            education: backendData.education?.map((e: any) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              institution: e.institution || "",
-              degree: `${e.studyType || ''} ${e.area || ''}`,
-              period: `${e.startDate || ''} - ${e.endDate || ''}`,
-              location: ""
-            })) || [],
-            skills: backendData.skills?.map((s: any) =>
-              s.keywords && s.keywords.length > 0
-                ? `${s.name}: ${s.keywords.join(', ')}`
-                : s.name
-            ) || []
-          };
-          setResumeData(mappedData);
-        }
-      } catch (err) {
-        console.error("Failed to load resume", err);
-      } finally {
-        setIsResumeLoading(false);
-      }
-    };
+  const fetchResume = useCallback(async () => {
+    try {
+      setIsResumeLoading(true);
+      const backendData = await apiClient.getMasterResume();
 
-    fetchResume();
+      // Check if processing
+      if (backendData.status === 'processing') {
+        // Return true to indicate we should keep polling
+        return true;
+      }
+
+      // Check if error
+      if (backendData.status === 'error') {
+        console.error("Resume parsing error:", backendData.error);
+        alert(`Resume parsing failed: ${backendData.error}\n\nPlease try again or check the backend logs.`);
+        return false;
+      }
+
+
+      // 1. Saved Format (Flat ResumeData)
+      if (backendData && backendData.fullName) {
+        setResumeData(backendData);
+        setIsUploading(false);
+        return false;
+      }
+
+      // 2. Legacy/Parsed Format (JSON Resume Schema)
+      if (backendData && backendData.basics) {
+        // Map Nested JSON Resume to Flat ResumeData
+        const mappedData: ResumeData = {
+          fullName: backendData.basics.name || "Your Name",
+          title: backendData.basics.label || "Professional Title",
+          email: backendData.basics.email || "",
+          phone: backendData.basics.phone || "",
+          location: backendData.basics.location ?
+            `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
+            : "",
+          websites: [
+            backendData.basics.url || "",
+            ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
+          ].filter(Boolean),
+          summary: backendData.basics.summary || "",
+          experience: backendData.work?.map((w: any) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            company: w.name || "",
+            role: w.position || "",
+            period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
+            location: w.location || "",
+            achievements: w.highlights || []
+          })) || [],
+          education: backendData.education?.map((e: any) => ({
+            id: Math.random().toString(36).substr(2, 9),
+            institution: e.institution || "",
+            degree: `${e.studyType || ''} ${e.area || ''}`,
+            period: `${e.startDate || ''} - ${e.endDate || ''}`,
+            location: "",
+            score: e.score || ""
+          })) || [],
+          skills: backendData.skills?.map((s: any) =>
+            s.keywords && s.keywords.length > 0
+              ? `${s.name}: ${s.keywords.join(', ')}`
+              : s.name
+          ) || []
+        };
+        setResumeData(mappedData);
+        setIsUploading(false); // Stop loading if we were uploading
+      }
+      return false; // Stop polling
+    } catch (err) {
+      console.error("Failed to load resume", err);
+      return false; // Stop polling on error
+    } finally {
+      setIsResumeLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchResume();
+  }, [fetchResume]);
+
+  // --- Resume Upload Handler ---
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setIsResumeLoading(true);
+
+    try {
+      await apiClient.uploadResume(file);
+
+      // Start polling for completion
+      const pollInterval = setInterval(async () => {
+        const serverStillProcessing = await fetchResume();
+        if (!serverStillProcessing) {
+          clearInterval(pollInterval);
+          setIsUploading(false);
+        }
+      }, 2000); // Check every 2 seconds
+
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setIsUploading(false);
+        setIsResumeLoading(false);
+      }, 60000);
+
+    } catch (error) {
+      console.error("Upload failed", error);
+      setIsUploading(false);
+      setIsResumeLoading(false);
+      alert("Failed to upload resume. Please try again.");
+    } finally {
+      // Clear input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   // --- Resume Handlers ---
   const handlePrint = () => {
@@ -179,12 +249,36 @@ const App: React.FC = () => {
     }, 150);
   };
 
+  const handleDownloadPdf = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      const blob = await apiClient.generatePdf(resumeData, selectedTemplate);
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${resumeData.fullName.replace(/\s+/g, '_')}_Resume.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("PDF generation failed", error);
+      alert("Failed to generate PDF. Please ensure the backend server has 'typst' installed.");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+
   const templates: { id: TemplateType, label: string, desc: string }[] = [
     { id: 'modern', label: 'Modern', desc: 'Clean, balanced, standard' },
     { id: 'classic', label: 'Classic', desc: 'Serif, traditional, formal' },
     { id: 'compact', label: 'Compact', desc: 'Dense, single page optimized' },
     { id: 'tech', label: 'Technical', desc: 'Monospaced, code-like' },
     { id: 'minimal', label: 'Traditional', desc: 'Ivy League, ATS-Standard' },
+    { id: 'ats_friendly', label: 'ATS Friendly', desc: ' optimized for ATS parsing' },
   ];
 
   // --- Filter and sort jobs ---
@@ -214,17 +308,10 @@ const App: React.FC = () => {
     }
   });
 
+  const selectedJob = jobs.find(j => j.id === selectedJobId) || null;
+
   const handleJobClick = async (job: JobWithEvaluation) => {
-    if (job.isEvaluated && job.evaluation) {
-      try {
-        const fullEval = await getEvaluation(job.id);
-        setSelectedEvaluation(fullEval);
-      } catch {
-        setSelectedEvaluation(job.evaluation);
-      }
-    } else {
-      handleEvaluateJob(job.id);
-    }
+    setSelectedJobId(job.id);
   };
 
   const handleEvaluateJob = async (jobId: string) => {
@@ -232,8 +319,7 @@ const App: React.FC = () => {
     try {
       await evaluateJob(jobId);
       await loadData();
-      const evaluation = await getEvaluation(jobId);
-      setSelectedEvaluation(evaluation);
+      // If the evaluated job is the one currently selected, reload updates it automatically via selectedJob derivation
     } catch (err) {
       console.error('Failed to evaluate job:', err);
       setError('Failed to evaluate job. Please try again.');
@@ -258,42 +344,49 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900 font-sans">
-      {/* Abstract Background Blobs - Keep consistent look */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+      {/* Abstract Background Blobs - Hide in print */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none print:hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-100/50 blur-[100px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-100/50 blur-[100px]" />
         <div className="absolute top-[30%] left-[60%] w-[20%] h-[20%] rounded-full bg-emerald-50/60 blur-[80px]" />
       </div>
 
-      <Header
-        onAddJob={() => setIsAddModalOpen(true)}
-        onBatchEvaluate={() => setIsBatchModalOpen(true)}
-        totalJobs={totalJobs}
-        evaluatedCount={stats?.total_evaluated || 0}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-      />
+      <div className="print:hidden">
+        <Header
+          onAddJob={() => setIsAddModalOpen(true)}
+          onBatchEvaluate={() => setIsBatchModalOpen(true)}
+          totalJobs={totalJobs}
+          evaluatedCount={stats?.total_evaluated || 0}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
+      </div>
 
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Main Container - Reset padding/margins for print */}
+      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:m-0 print:max-w-none print:w-full">
 
         {/* Stats Card - Show only in job views */}
         {viewMode !== 'resume' && (
-          <StatsCard stats={stats} totalJobs={totalJobs} />
+          <div className="print:hidden">
+            <StatsCard stats={stats} totalJobs={totalJobs} />
+          </div>
         )}
 
         {/* Filter Bar - Show only in job views */}
         {viewMode !== 'resume' && (
-          <FilterBar
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-            filters={filters}
-            onFiltersChange={setFilters}
-          />
+          <div className="print:hidden">
+            <FilterBar
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              filters={filters}
+              onFiltersChange={setFilters}
+            />
+          </div>
         )}
 
         {/* Error Message */}
         {error && (
-          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center">
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center print:hidden">
             <AlertCircle className="w-5 h-5 text-rose-500 mr-3" />
             <p className="text-rose-700">{error}</p>
             <button
@@ -308,8 +401,8 @@ const App: React.FC = () => {
         {/* --- MAIN CONTENT AREA --- */}
         {viewMode === 'resume' ? (
           <div>
-            {/* Resume Toolbar */}
-            <div className="mb-8 animate-in slide-in-from-top-2 relative z-40">
+            {/* Resume Toolbar - Hide in print */}
+            <div className="mb-8 animate-in slide-in-from-top-2 relative z-40 print:hidden">
               <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between p-6 rounded-2xl bg-white border border-slate-200 shadow-xl">
 
                 {/* Template Selector */}
@@ -341,6 +434,29 @@ const App: React.FC = () => {
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
+
+                  {/* File Upload Input */}
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    ref={fileInputRef}
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl bg-blue-50 border border-blue-100 hover:bg-blue-100 text-blue-700 font-semibold transition-all shadow-sm"
+                  >
+                    {isUploading ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Upload size={18} />
+                    )}
+                    <span>{isUploading ? 'Parsing...' : 'Upload PDF'}</span>
+                  </button>
+
                   <button
                     onClick={() => setIsEditorOpen(true)}
                     className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-sm"
@@ -348,12 +464,26 @@ const App: React.FC = () => {
                     <PenLine size={18} />
                     <span>Edit Data</span>
                   </button>
+
+                  <button
+                    onClick={handleDownloadPdf}
+                    disabled={isGeneratingPdf}
+                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    {isGeneratingPdf ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Download size={18} />
+                    )}
+                    <span>Download PDF</span>
+                  </button>
+
                   <button
                     onClick={handlePrint}
-                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <Printer size={18} />
-                    <span>Print / PDF</span>
+                    <span>Print / Preview</span>
                   </button>
                 </div>
               </div>
@@ -361,20 +491,22 @@ const App: React.FC = () => {
               <div className="mt-4 text-center">
                 <p className="text-slate-400 text-xs flex items-center justify-center gap-2 inline-block px-4 py-1 rounded-full bg-white/50 border border-slate-100">
                   <AlertCircle size={12} />
-                  <span>Tip: Select <strong>"Save as PDF"</strong> in your print dialog.</span>
+                  <span>Tip: Use <strong>"Typst PDF"</strong> for high-quality generation, or <strong>"Print"</strong> for browser-based saving.</span>
                 </p>
               </div>
             </div>
 
-            {/* Resume Preview */}
-            <div className="flex justify-center pb-12">
+            {/* Resume Preview - Position absolutely for print */}
+            <div className="flex justify-center pb-12 print:pb-0 print:block">
               {isResumeLoading ? (
                 <div className="py-20 flex flex-col items-center">
                   <Loader2 className="w-10 h-10 text-slate-300 animate-spin mb-4" />
-                  <p className="text-slate-500 font-medium animate-pulse">Loading resume data...</p>
+                  <p className="text-slate-500 font-medium animate-pulse">
+                    {isUploading ? 'Analyzing resume with AI...' : 'Loading resume data...'}
+                  </p>
                 </div>
               ) : (
-                <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center">
+                <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center print:absolute print:top-0 print:left-0 print:w-full print:m-0 print:block">
                   <ResumePreview data={resumeData} targetRef={printRef} template={selectedTemplate} />
                 </div>
               )}
@@ -382,7 +514,7 @@ const App: React.FC = () => {
           </div>
         ) : (
           // --- JOB BOARD CONTENT ---
-          <>
+          <div className="print:hidden">
             {loading ? (
               <div className="flex flex-col items-center justify-center h-[60vh]">
                 <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
@@ -411,46 +543,76 @@ const App: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredJobs.map((job) => (
-                    <JobCard
-                      key={job.id}
-                      job={job}
-                      onClick={() => handleJobClick(job)}
-                      onEvaluate={() => handleEvaluateJob(job.id)}
-                      isEvaluating={evaluatingJobId === job.id}
-                    />
-                  ))}
+              <div className="flex h-[calc(100vh-140px)] gap-6 overflow-hidden">
+                {/* LEFT SIDEBAR: Job List */}
+                <div className="w-full lg:w-[400px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      {totalJobs} Jobs found
+                    </p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-slate-200">
+                    {filteredJobs.map((job) => (
+                      <JobListItem
+                        key={job.id}
+                        job={job}
+                        isActive={selectedJobId === job.id}
+                        onClick={() => handleJobClick(job)}
+                      />
+                    ))}
+                    {/* Pagination inside sidebar */}
+                    <div className="p-4 border-t border-slate-100">
+                      <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
+                        onPageChange={setCurrentPage}
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
-                  onPageChange={setCurrentPage}
-                />
-              </>
+                {/* RIGHT MAIN: Job Details */}
+                <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+                  {selectedJob ? (
+                    <JobDetailView
+                      job={selectedJob}
+                      onEvaluate={() => {
+                        // Reload data to reflect new status
+                        loadData();
+                        // Also need to refetch specific job to update the view?
+                        // loadData updates 'jobs', which updates 'filteredJobs'. 
+                        // We need to update 'selectedJob' reference from the new list.
+                        // Effect hook below can handle this? Or manual update.
+                        // Simple hack: setEvaluatingJobId to trigger UI state.
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                      <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                        <Briefcase className="w-8 h-8 text-slate-300" />
+                      </div>
+                      <p className="font-medium">Select a job to view details</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
-          </>
+          </div>
         )}
       </main>
 
-      {/* Evaluation Detail Modal */}
-      <JobModal
-        evaluation={selectedEvaluation}
-        onClose={() => setSelectedEvaluation(null)}
-      />
-
       {/* Batch Evaluate Modal */}
-      <BatchEvaluate
-        isOpen={isBatchModalOpen}
-        onClose={() => setIsBatchModalOpen(false)}
-        onComplete={loadData}
-      />
+      <div className="print:hidden">
+        <BatchEvaluate
+          isOpen={isBatchModalOpen}
+          onClose={() => setIsBatchModalOpen(false)}
+          onComplete={loadData}
+        />
+      </div>
 
       {/* Add New Job Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
           <div
             className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity"
             onClick={() => !analyzing && setIsAddModalOpen(false)}
@@ -497,7 +659,7 @@ const App: React.FC = () => {
       {/* Editor Slide-over */}
       <div
         className={`
-            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10
+            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10 print:hidden
             ${isEditorOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'}
           `}
       >
@@ -513,7 +675,7 @@ const App: React.FC = () => {
       {/* Backdrop for Editor */}
       {isEditorOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"
+          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity print:hidden"
           onClick={() => setIsEditorOpen(false)}
         />
       )}

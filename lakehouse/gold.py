@@ -60,6 +60,7 @@ def create_gold_table():
         
         # Job details
         "description_text",
+        "description_html",
         "seniority_level",
         "employment_type",
         "job_function",
@@ -111,6 +112,7 @@ def create_gold_table():
         gold_path,
         gold_df.to_arrow(),
         mode="overwrite",
+        schema_mode="overwrite",
         storage_options=storage_options,
     )
     
@@ -133,6 +135,10 @@ def create_gold_table():
         print("\nTop 5 companies by job count:")
         for row in top_companies.iter_rows(named=True):
             print(f"  - {row['company_name']}: {row['count']} jobs")
+
+    # 5. Auto-Sync to App Database
+    from .app_sync import sync_gold_to_app
+    sync_gold_to_app()
 
 
 if __name__ == "__main__":

@@ -58,3 +58,6 @@ test/ats-resume-builder/
 
 # Exclude test directory
 test/
+
+# Scraped Data
+jobs_*.json

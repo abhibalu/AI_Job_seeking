@@ -83,12 +83,13 @@ const App: React.FC = () => {
   const ITEMS_PER_PAGE = 9;
 
   // --- Fetch Jobs Data ---
-  const loadData = useCallback(async () => {
+  // --- Fetch Jobs Data ---
+  const loadData = useCallback(async (silent = false) => {
     // If we are in resume view, we technically don't need to refresh jobs, 
     // but we'll stick to the original behavior to keep state fresh or handle it gracefully.
     if (viewMode === 'resume') return;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const statsResult = await getEvaluationStats().catch(() => null);
@@ -121,7 +122,7 @@ const App: React.FC = () => {
       console.error('Failed to load data:', err);
       setError('Failed to load jobs. Make sure the API server is running.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [currentPage, viewMode, filters.action]);
 
@@ -325,7 +326,7 @@ const App: React.FC = () => {
     setEvaluatingJobId(jobId);
     try {
       await evaluateJob(jobId);
-      await loadData();
+      await loadData(true);
       // If the evaluated job is the one currently selected, reload updates it automatically via selectedJob derivation
     } catch (err) {
       console.error('Failed to evaluate job:', err);
@@ -471,7 +472,7 @@ const App: React.FC = () => {
             <AlertCircle className="w-5 h-5 text-rose-500 mr-3" />
             <p className="text-rose-700">{error}</p>
             <button
-              onClick={loadData}
+              onClick={() => loadData()}
               className="ml-auto px-3 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-sm font-medium"
             >
               Retry
@@ -679,13 +680,8 @@ const App: React.FC = () => {
                     <JobDetailView
                       job={selectedJob}
                       onEvaluate={() => {
-                        // Reload data to reflect new status
-                        loadData();
-                        // Also need to refetch specific job to update the view?
-                        // loadData updates 'jobs', which updates 'filteredJobs'. 
-                        // We need to update 'selectedJob' reference from the new list.
-                        // Effect hook below can handle this? Or manual update.
-                        // Simple hack: setEvaluatingJobId to trigger UI state.
+                        // Reload data to reflect new status (silent refresh)
+                        loadData(true);
                       }}
                     />
                   ) : (

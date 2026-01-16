@@ -45,6 +45,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
         setIsGeneratingResume(false);
         setSimulationStatus('pending');
         setViewMode('diff');
+        setIsReEvaluating(false);
     }, [job.id]);
 
     const calculateMockResume = (base: any) => {
@@ -181,7 +182,19 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
                             {job.company_name?.charAt(0) || 'C'}
                         </div>
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-900 leading-tight">{job.title}</h1>
+                            {job.job_url ? (
+                                <a
+                                    href={job.job_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="hover:underline hover:text-blue-700 transition-colors flex items-center gap-2 group"
+                                >
+                                    <h1 className="text-2xl font-bold text-slate-900 leading-tight group-hover:text-blue-700">{job.title}</h1>
+                                    <ExternalLink className="w-5 h-5 text-slate-400 group-hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-all" />
+                                </a>
+                            ) : (
+                                <h1 className="text-2xl font-bold text-slate-900 leading-tight">{job.title}</h1>
+                            )}
                             <div className="flex items-center flex-wrap gap-2 text-slate-600 mt-1 text-sm">
                                 {job.company_website ? (
                                     <a

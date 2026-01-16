@@ -70,7 +70,7 @@ const App: React.FC = () => {
     searchQuery: '',
     verdict: 'all',
     action: 'all',
-    sortBy: 'score',
+    sortBy: 'date',
     sortOrder: 'desc',
   });
 
@@ -114,7 +114,12 @@ const App: React.FC = () => {
         setJobs(jobsWithEvals);
         setTotalJobs(evaluationsResult.total);
       } else {
-        const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE);
+        // 'all' or 'pending' view
+        const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
+        // Search query as company filter
+        const companyFilter = filters.searchQuery ? filters.searchQuery : undefined;
+
+        const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE, companyFilter, isEvaluatedFilter);
         setJobs(jobsResult.data);
         setTotalJobs(jobsResult.total);
       }
@@ -124,7 +129,7 @@ const App: React.FC = () => {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [currentPage, viewMode, filters.action]);
+  }, [currentPage, viewMode, filters.action, filters.searchQuery]);
 
   useEffect(() => {
     loadData();
@@ -291,8 +296,11 @@ const App: React.FC = () => {
 
   // --- Filter and sort jobs ---
   const filteredJobs = jobs.filter(job => {
+    // viewMode filtering is now handled by backend pagination
     if (viewMode === 'evaluated' && !job.isEvaluated) return false;
-    if (viewMode === 'pending' && job.isEvaluated) return false;
+
+    // Kept for now: if (viewMode === 'pending' && job.isEvaluated) return false;
+    // but effectively handled by backend.
     if (filters.searchQuery) {
       const query = filters.searchQuery.toLowerCase();
       const matchesCompany = job.company_name?.toLowerCase().includes(query);
@@ -304,9 +312,49 @@ const App: React.FC = () => {
     return true;
   }).sort((a, b) => {
     const multiplier = filters.sortOrder === 'asc' ? 1 : -1;
+
+    // Smart Sort specific logic when sorting by 'score' (default)
+    if (filters.sortBy === 'score') {
+      const now = Date.now();
+      const NEW_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+
+      const aTime = new Date(a.updated_at || a.posted_at || 0).getTime();
+      const bTime = new Date(b.updated_at || b.posted_at || 0).getTime();
+
+      const aIsAnalyzing = a.id === evaluatingJobId;
+      const bIsAnalyzing = b.id === evaluatingJobId;
+      // "New" only applies to unevaluated jobs (evaluated ones jump to score tier)
+      const aIsNew = !a.isEvaluated && (now - aTime) < NEW_THRESHOLD;
+      const bIsNew = !b.isEvaluated && (now - bTime) < NEW_THRESHOLD;
+
+      const aPinned = aIsAnalyzing || aIsNew;
+      const bPinned = bIsAnalyzing || bIsNew;
+
+      // Tier 1: Pinned (Analyzing or Just Imported)
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      if (aPinned && bPinned) return bTime - aTime; // Newest pinned first
+
+      // Tier 2: Evaluated (Score desc) vs Unevaluated
+      const aHasEval = a.isEvaluated && a.evaluation?.job_match_score != null;
+      const bHasEval = b.isEvaluated && b.evaluation?.job_match_score != null;
+
+      if (aHasEval && !bHasEval) return -1 * multiplier;
+      if (!aHasEval && bHasEval) return 1 * multiplier;
+
+      if (aHasEval && bHasEval) {
+        // Both evaluated: Sort by Score
+        const scoreA = a.evaluation?.job_match_score || 0;
+        const scoreB = b.evaluation?.job_match_score || 0;
+        if (scoreA !== scoreB) return (scoreB - scoreA) * multiplier;
+      }
+
+      // Tier 3: Both Unevaluated (or same score) -> Sort by Time
+      return (bTime - aTime) * multiplier;
+    }
+
+    // Standard sorts for other columns
     switch (filters.sortBy) {
-      case 'score':
-        return ((b.evaluation?.job_match_score || 0) - (a.evaluation?.job_match_score || 0)) * multiplier;
       case 'company':
         return ((a.company_name || '').localeCompare(b.company_name || '')) * multiplier;
       case 'date':
@@ -615,7 +663,7 @@ const App: React.FC = () => {
                       searchQuery: '',
                       verdict: 'all',
                       action: 'all',
-                      sortBy: 'score',
+                      sortBy: 'date',
                       sortOrder: 'desc',
                     });
                   }}

@@ -48,8 +48,11 @@ class ApiClient {
     }
 
     // Jobs endpoints
-    async getJobs(skip: number = 0, limit: number = 20) {
-        return this.request<Job[]>(`/api/jobs?skip=${skip}&limit=${limit}`);
+    async getJobs(skip: number = 0, limit: number = 20, company?: string, is_evaluated?: boolean) {
+        let url = `/api/jobs?skip=${skip}&limit=${limit}`;
+        if (company) url += `&company=${encodeURIComponent(company)}`;
+        if (is_evaluated !== undefined) url += `&is_evaluated=${is_evaluated}`;
+        return this.request<Job[]>(url);
     }
 
     async getAllJobIds(company?: string) {
@@ -63,8 +66,16 @@ class ApiClient {
         return this.request<JobDetail>(`/api/jobs/${jobId}`);
     }
 
-    async getJobStats() {
-        return this.request<JobStats>(`/api/jobs/stats`);
+    async getJobStats(company?: string, is_evaluated?: boolean) {
+        let url = `/api/jobs/stats`;
+        const params = new URLSearchParams();
+        if (company) params.append('company', company);
+        if (is_evaluated !== undefined) params.append('is_evaluated', String(is_evaluated));
+
+        if (params.toString()) {
+            url += `?${params.toString()}`;
+        }
+        return this.request<JobStats>(url);
     }
 
     async importJob(url: string) {
@@ -199,6 +210,8 @@ export interface Job {
     posted_at: string | null;
     applicants_count: number | null;
     company_website: string | null;
+    job_url?: string | null; // Matched to DB alias
+    updated_at?: string | null;
     description_text?: string | null;
     description_html?: string | null;
 }
@@ -206,7 +219,7 @@ export interface Job {
 export interface JobDetail extends Job {
     seniority_level: string | null;
     employment_type: string | null;
-    link: string | null;
+    // link removed, inherited job_url
 }
 
 export interface JobStats {

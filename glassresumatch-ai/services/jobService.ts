@@ -24,12 +24,14 @@ export interface JobWithEvaluation extends Job {
  */
 export const fetchJobsWithEvaluations = async (
   page: number,
-  limit: number
+  limit: number,
+  company?: string,
+  is_evaluated?: boolean
 ): Promise<{ data: JobWithEvaluation[]; total: number }> => {
   try {
     // Fetch jobs and evaluations in parallel
     const [jobs, evaluations] = await Promise.all([
-      apiClient.getJobs((page - 1) * limit, limit),
+      apiClient.getJobs((page - 1) * limit, limit, company, is_evaluated),
       apiClient.getEvaluations(0, 1000), // Get all evaluations for matching
     ]);
 
@@ -45,7 +47,7 @@ export const fetchJobsWithEvaluations = async (
     }));
 
     // Get total count from stats
-    const stats = await apiClient.getJobStats();
+    const stats = await apiClient.getJobStats(company, is_evaluated);
 
     return {
       data: jobsWithEvals,

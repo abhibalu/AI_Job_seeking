@@ -11,7 +11,7 @@ load_dotenv()
 # --- CONFIGURATION ---
 # Add your URLs here
 URLS = [
-    "https://www.linkedin.com/jobs/search/?currentJobId=4298729156&keywords=data%20engineer&origin=SWITCH_SEARCH_VERTICAL"
+    "https://ie.linkedin.com/jobs/search?keywords=Data%20Engineer&location=Ireland&geoId=104738515&f_TPR=r604800&position=1&pageNum=0"
 ]
 
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")

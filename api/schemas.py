@@ -55,6 +55,9 @@ class JobStats(BaseModel):
     top_companies: list[dict]
 
 
+class DeleteRequest(BaseModel):
+    ids: list[str]
+
 # Evaluation schemas
 class EvaluationResult(BaseModel):
     job_id: str

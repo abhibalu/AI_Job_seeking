@@ -8,6 +8,7 @@ from deltalake import DeltaTable
 try:
     from backend.settings import settings
     from agents.supabase_client import get_supabase_client
+    from services.job_mapper import map_job_record
 except ImportError:
     # Fallback for standalone script execution if needed
     import sys
@@ -15,6 +16,7 @@ except ImportError:
     sys.path.append(str(Path(__file__).parent.parent))
     from backend.settings import settings
     from agents.supabase_client import get_supabase_client
+    from services.job_mapper import map_job_record
 
 BATCH_SIZE = 100
 
@@ -93,49 +95,15 @@ def sync_silver_to_app():
             skipped += 1
             continue
 
-        # Map Columns (Enhanced Schema)
-        record = {
-            "id": job_id,
-            "company_name": row.get("company_name"),
-            "title": row.get("title"),
-            "location": row.get("location"),
-            "description_text": row.get("description_text"),
-            "job_url": row.get("link") or row.get("job_url"),
-            "posted_at": clean_value(row.get("posted_at")),
-            "seniority_level": row.get("seniority_level"),
-            "employment_type": row.get("employment_type"),
-            "applicants_count": row.get("applicants_count"),
-            "company_website": row.get("company_website"),
-            
-            # New Fields
-            "job_function": row.get("job_function"), # JSON
-            "industries": row.get("industries"), # JSON
-            "salary_info": row.get("salary_info"),
-            "salary_min": None, # Parsing needed if separate
-            "salary_max": None,
-            "benefits": row.get("benefits"), # JSON
-            
-            "company_linkedin_url": row.get("company_linkedin_url"),
-            "company_logo": row.get("company_logo"),
-            "company_description": row.get("company_description"),
-            "company_slogan": row.get("company_slogan"),
-            "company_employees_count": row.get("company_employees_count"),
-            "company_city": row.get("company_city"),
-            "company_state": row.get("company_state"),
-            "company_country": row.get("company_country"),
-            "company_postal_code": row.get("company_postal_code"),
-            "company_street_address": row.get("company_street_address"),
-            
-            "job_poster_name": row.get("job_poster_name"),
-            "job_poster_title": row.get("job_poster_title"),
-            "job_poster_profile_url": row.get("job_poster_profile_url"),
-            
-            "apply_url": row.get("apply_url"),
-            "input_url": row.get("input_url"),
-            
-            "status": "active", # Force to active if not ignored
-            "updated_at": datetime.now().isoformat() 
-        }
+        # Map Columns (Enhanced Schema using Shared Mapper)
+        record = map_job_record(row) 
+        # app_sync.py iterates rows from Silver which are dicts when iter_rows(named=True) is used
+        # We need to ensure 'status' logic is consistent or handled by mapper
+        # Mapper defaults status to 'active'. 
+        # Sync logic here might have custom needs? 
+        # The original code: "status": "active", # Force to active if not ignored
+        # The mapper does: "status": "active" if is_active else "archived"
+        # So calling map_job_record(row) is sufficient as default is_active=True.
         
         batch.append(record)
         

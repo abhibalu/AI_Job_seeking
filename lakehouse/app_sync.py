@@ -36,32 +36,49 @@ def clean_value(val):
         return val.isoformat()
     return val
 
-def sync_gold_to_app():
-    print("\n--- Syncing Gold Jobs to App Database (Upsert) ---")
+def sync_silver_to_app():
+    print("\n--- Syncing Silver Jobs (Current) to App Database (Upsert) ---")
     
     if not settings.USE_SUPABASE:
         print("ℹ️  USE_SUPABASE is False. Skipping Sync.")
         return
 
-    # 1. Load Gold Table
-    gold_path = f"s3://{settings.DELTA_LAKEHOUSE_BUCKET}/gold/jobs"
-    print(f"Reading Gold table from: {gold_path}")
+    # 1. Load Silver Table
+    silver_path = f"s3://{settings.DELTA_LAKEHOUSE_BUCKET}/silver/jobs"
+    print(f"Reading Silver table from: {silver_path}")
     
     try:
-        dt = DeltaTable(gold_path, storage_options=get_storage_options())
-        df = pl.from_arrow(dt.to_pyarrow_table())
+        dt = DeltaTable(silver_path, storage_options=get_storage_options())
+        # Filter for current records only
+        df = pl.from_arrow(dt.to_pyarrow_table()).filter(pl.col("is_current") == True)
     except Exception as e:
-        print(f"❌ Failed to load Gold table: {e}")
+        print(f"❌ Failed to load Silver table: {e}")
         return
         
     total_rows = len(df)
-    print(f"Found {total_rows} records in Gold.")
+    print(f"Found {total_rows} active records in Silver.")
     
     client = get_supabase_client()
     
-    # 2. Process in Batches
+    # 2. Get Soft-Deleted Jobs from App DB
+    # We must NOT re-insert jobs that the user has marked as 'deleted' or 'archived'
+    print("Fetching existing deleted/archived jobs from App DB...")
+    ignored_ids = set()
+    try:
+        # Fetch IDs where status is NOT active
+        # Supabase filtering: status.neq.active
+        # Page through if necessary, but for now assuming < 100k deleted jobs fits in mem or simple query
+        res = client.table("jobs").select("id").neq("status", "active").execute()
+        if res.data:
+            ignored_ids = {r["id"] for r in res.data}
+            print(f"found {len(ignored_ids)} ignored (deleted/archived) jobs.")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not fetch deleted jobs: {e}")
+
+    # 3. Process in Batches
     processed = 0
     errors = 0
+    skipped = 0
     
     # Convert to Python dicts for easier iteration
     rows = df.iter_rows(named=True)
@@ -69,9 +86,16 @@ def sync_gold_to_app():
     batch = []
     
     for row in rows:
-        # Map Columns
+        job_id = str(row.get("id"))
+        
+        # SKIP if in ignored list
+        if job_id in ignored_ids:
+            skipped += 1
+            continue
+
+        # Map Columns (Enhanced Schema)
         record = {
-            "id": str(row.get("id")),
+            "id": job_id,
             "company_name": row.get("company_name"),
             "title": row.get("title"),
             "location": row.get("location"),
@@ -82,6 +106,34 @@ def sync_gold_to_app():
             "employment_type": row.get("employment_type"),
             "applicants_count": row.get("applicants_count"),
             "company_website": row.get("company_website"),
+            
+            # New Fields
+            "job_function": row.get("job_function"), # JSON
+            "industries": row.get("industries"), # JSON
+            "salary_info": row.get("salary_info"),
+            "salary_min": None, # Parsing needed if separate
+            "salary_max": None,
+            "benefits": row.get("benefits"), # JSON
+            
+            "company_linkedin_url": row.get("company_linkedin_url"),
+            "company_logo": row.get("company_logo"),
+            "company_description": row.get("company_description"),
+            "company_slogan": row.get("company_slogan"),
+            "company_employees_count": row.get("company_employees_count"),
+            "company_city": row.get("company_city"),
+            "company_state": row.get("company_state"),
+            "company_country": row.get("company_country"),
+            "company_postal_code": row.get("company_postal_code"),
+            "company_street_address": row.get("company_street_address"),
+            
+            "job_poster_name": row.get("job_poster_name"),
+            "job_poster_title": row.get("job_poster_title"),
+            "job_poster_profile_url": row.get("job_poster_profile_url"),
+            
+            "apply_url": row.get("apply_url"),
+            "input_url": row.get("input_url"),
+            
+            "status": "active", # Force to active if not ignored
             "updated_at": datetime.now().isoformat() 
         }
         
@@ -89,9 +141,10 @@ def sync_gold_to_app():
         
         if len(batch) >= BATCH_SIZE:
             try:
+                # Upsert
                 client.table("jobs").upsert(batch, on_conflict="id").execute()
                 processed += len(batch)
-                print(f"Synced {processed}/{total_rows} records...", end="\r")
+                print(f"Synced {processed}/{total_rows} records... (Skipped: {skipped})", end="\r")
                 batch = []
             except Exception as e:
                 print(f"\n❌ Error syncing batch: {e}")
@@ -107,4 +160,4 @@ def sync_gold_to_app():
             print(f"\n❌ Error syncing final batch: {e}")
             errors += 1
 
-    print(f"\n✅ App DB Sync Complete! Processed: {processed}, Errors: {errors}")
+    print(f"\n✅ App DB Sync Complete! Processed: {processed}, Skipped: {skipped}, Errors: {errors}")

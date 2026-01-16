@@ -135,6 +135,7 @@ pyee==11.0.1
 Pygments==2.19.2
 pyiceberg==0.10.0
 PyJWT==2.10.1
+PyMuPDF==1.26.7
 pyparsing==3.3.1
 PyPDF2==3.0.1
 pypdfium2==5.1.0
@@ -144,6 +145,7 @@ pytest==7.4.4
 pytest-asyncio==0.23.3
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
+python-multipart==0.0.21
 python-slugify==8.0.4
 pytimeparse==1.1.8
 pytz==2025.2
@@ -191,6 +193,7 @@ typer==0.19.2
 typing-inspect==0.9.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
+typst==0.14.5
 tzdata==2025.2
 universal_pathlib==0.3.3
 urllib3==2.4.0
@@ -205,4 +208,3 @@ wrapt==2.0.1
 yarl==1.22.0
 zipp==3.22.0
 zopfli==0.2.3.post1
-typst

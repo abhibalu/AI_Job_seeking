@@ -23,6 +23,30 @@ class JobDetail(JobBase):
     seniority_level: str | None = None
     employment_type: str | None = None
     link: str | None = None
+    
+    # New Fields from Supabase
+    status: str | None = None
+    job_function: str | list | dict | None = None
+    industries: str | list | dict | None = None
+    salary_info: str | None = None
+    benefits: list | dict | None = None
+    
+    # Company Details
+    company_linkedin_url: str | None = None
+    company_logo: str | None = None
+    company_description: str | None = None
+    company_slogan: str | None = None
+    company_employees_count: int | None = None
+    company_city: str | None = None
+    company_country: str | None = None
+    
+    # Poster
+    job_poster_name: str | None = None
+    job_poster_profile_url: str | None = None
+    
+    # URLs
+    apply_url: str | None = None
+    input_url: str | None = None
 
 
 class JobStats(BaseModel):

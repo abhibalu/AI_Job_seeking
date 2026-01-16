@@ -166,3 +166,15 @@ export const getEvaluation = async (jobId: string): Promise<Evaluation> => {
     throw error;
   }
 };
+
+/**
+ * Delete jobs in bulk
+ */
+export const deleteJobs = async (ids: string[]): Promise<void> => {
+  try {
+    await apiClient.deleteJobs(ids);
+  } catch (error) {
+    console.error('Failed to delete jobs:', error);
+    throw error;
+  }
+};

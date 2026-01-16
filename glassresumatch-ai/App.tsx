@@ -4,6 +4,7 @@ import {
   fetchJobsWithEvaluations,
   fetchEvaluations,
   evaluateJob,
+  deleteJobs,
   getEvaluationStats,
   getEvaluation,
   JobWithEvaluation
@@ -32,7 +33,8 @@ import {
   User,
   Eye,
   Upload,
-  Download
+  Download,
+  Trash2
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -57,6 +59,8 @@ const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // --- Filter state ---
   const [viewMode, setViewMode] = useState<ViewMode>('all');
@@ -99,6 +103,7 @@ const App: React.FC = () => {
           location: null,
           posted_at: null,
           applicants_count: null,
+          company_website: null,
           evaluation: e,
           isEvaluated: true,
         }));
@@ -342,6 +347,42 @@ const App: React.FC = () => {
     }
   };
 
+  // --- Selection Handlers ---
+  const toggleSelectJob = (id: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredJobs.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredJobs.map(j => j.id)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedIds.size} jobs?`)) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteJobs(Array.from(selectedIds));
+      setSelectedIds(new Set());
+      await loadData();
+    } catch (err) {
+      console.error('Failed to delete jobs:', err);
+      alert('Failed to delete jobs');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900 font-sans">
       {/* Abstract Background Blobs - Hide in print */}
@@ -546,10 +587,29 @@ const App: React.FC = () => {
               <div className="flex h-[calc(100vh-140px)] gap-6 overflow-hidden">
                 {/* LEFT SIDEBAR: Job List */}
                 <div className="w-full lg:w-[400px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                  <div className="p-3 border-b border-slate-100 bg-slate-50/50">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                      {totalJobs} Jobs found
-                    </p>
+                  <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center h-12">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={filteredJobs.length > 0 && selectedIds.size === filteredJobs.length}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        {selectedIds.size > 0 ? `${selectedIds.size} Selected` : `${totalJobs} Jobs`}
+                      </p>
+                    </div>
+
+                    {selectedIds.size > 0 && (
+                      <button
+                        onClick={handleDeleteSelected}
+                        disabled={isDeleting}
+                        className="flex items-center gap-1 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2 py-1 rounded transition-colors"
+                      >
+                        {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        Delete
+                      </button>
+                    )}
                   </div>
                   <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-slate-200">
                     {filteredJobs.map((job) => (
@@ -557,6 +617,8 @@ const App: React.FC = () => {
                         key={job.id}
                         job={job}
                         isActive={selectedJobId === job.id}
+                        isSelected={selectedIds.has(job.id)}
+                        onToggleSelect={() => toggleSelectJob(job.id)}
                         onClick={() => handleJobClick(job)}
                       />
                     ))}

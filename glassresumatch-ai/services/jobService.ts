@@ -178,3 +178,33 @@ export const deleteJobs = async (ids: string[]): Promise<void> => {
     throw error;
   }
 };
+
+/**
+ * Import job from URL
+ */
+export const importJob = async (url: string): Promise<{
+  id: string;
+  status: string;
+  count?: number;
+  first_job?: { id: string; title: string; company: string };
+  ids?: string[];
+}> => {
+  try {
+    return await apiClient.importJob(url);
+  } catch (error) {
+    console.error('Failed to import job:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get all job IDs (for select all)
+ */
+export const getAllJobIds = async (company?: string): Promise<string[]> => {
+  try {
+    return await apiClient.getAllJobIds(company);
+  } catch (error) {
+    console.error('Failed to get all job IDs:', error);
+    throw error;
+  }
+};

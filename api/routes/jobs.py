@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from agents.supabase_client import get_supabase_client
 from backend.settings import settings
-from api.schemas import JobBase, JobDetail, JobStats
+from services.scraper_service import ScraperService
+from api.schemas import JobBase, JobDetail, JobStats, DeleteRequest
 
 router = APIRouter()
 
@@ -14,7 +15,7 @@ router = APIRouter()
 @router.get("", response_model=list[JobBase])
 def list_jobs(
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=10000),
     company: str | None = Query(None, description="Filter by company name"),
 ):
     """List jobs from App DB (paginated)."""
@@ -83,9 +84,6 @@ def get_job(job_id: str):
     
     return result.data[0]
 
-class DeleteRequest(BaseModel):
-    ids: list[str]
-
 @router.delete("", status_code=204)
 def delete_jobs(request: DeleteRequest):
     """Bulk soft-delete jobs."""
@@ -107,3 +105,15 @@ def delete_jobs(request: DeleteRequest):
         raise HTTPException(status_code=500, detail=f"Failed to delete jobs: {e}")
     
     return
+
+class ImportRequest(BaseModel):
+    url: str
+
+@router.post("/import", status_code=201)
+def import_job(request: ImportRequest):
+    """Import a job from a LinkedIn URL via Apify."""
+    try:
+        result = ScraperService.scrape_and_import(request.url)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

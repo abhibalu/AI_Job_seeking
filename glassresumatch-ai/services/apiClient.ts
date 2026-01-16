@@ -52,12 +52,32 @@ class ApiClient {
         return this.request<Job[]>(`/api/jobs?skip=${skip}&limit=${limit}`);
     }
 
+    async getAllJobIds(company?: string) {
+        let url = `/api/jobs?skip=0&limit=10000`; // Fetch all (up to 10k)
+        if (company) url += `&company=${encodeURIComponent(company)}`;
+        const jobs = await this.request<Job[]>(url);
+        return jobs.map(j => j.id);
+    }
+
     async getJob(jobId: string) {
         return this.request<JobDetail>(`/api/jobs/${jobId}`);
     }
 
     async getJobStats() {
         return this.request<JobStats>(`/api/jobs/stats`);
+    }
+
+    async importJob(url: string) {
+        return this.request<{
+            id: string; // First job ID (backwards compat)
+            status: string;
+            count?: number;
+            first_job?: { id: string; title: string; company: string };
+            ids?: string[];
+        }>(`/api/jobs/import`, {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        });
     }
 
     // Evaluations endpoints

@@ -244,10 +244,26 @@ def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = F
     if is_job_evaluated(job_id) and not force:
         return {"message": "Job already evaluated", "job_id": job_id}
     
-    # Get job from Gold table
+    # Get job from Gold table OR Supabase (for fresh imports)
     job = get_job_by_id(job_id)
+    
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Gold table")
+        # Fallback: Try Supabase
+        from agents.supabase_client import get_supabase_client
+        sb = get_supabase_client()
+        res = sb.table("jobs").select("*").eq("id", job_id).execute()
+        if res.data:
+            job = res.data[0]
+            # Adapt keys if necessary (Supabase keys should match Gold mostly, 
+            # but check description_text vs descriptionText if any mapping issues exist. 
+            # map_job_record ensures snake_case in Supabase so it should match Gold schema used in evaluate_job)
+            
+            # Ensure 'link' field exists (Supabase has 'job_url')
+            if "link" not in job and "job_url" in job:
+                job["link"] = job["job_url"]
+                
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Gold table or Supabase")
     
     # Run evaluation
     try:

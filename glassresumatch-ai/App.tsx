@@ -5,6 +5,8 @@ import {
   fetchEvaluations,
   evaluateJob,
   deleteJobs,
+  importJob,
+  getAllJobIds,
   getEvaluationStats,
   getEvaluation,
   JobWithEvaluation
@@ -337,13 +339,38 @@ const App: React.FC = () => {
     if (!newJobText.trim()) return;
     setAnalyzing(true);
     try {
-      setIsAddModalOpen(false);
-      setNewJobText('');
-      alert('New JD analysis coming soon! This will integrate with your Gemini key.');
+      // Assuming text is a URL
+      // Assuming text is a URL
+      const response = await importJob(newJobText.trim());
+
+      if (response && response.id) {
+        // Find and select the job (it might be newly added)
+        setSelectedJobId(response.id);
+
+        // Auto-start evaluation for the FIRST job (or only job)
+        await evaluateJob(response.id);
+
+        await loadData(); // Reload list
+
+        // Re-select after reload
+        setSelectedJobId(response.id);
+
+        if (response.count && response.count > 1) {
+          alert(`Batch Import Successful! Imported ${response.count} jobs. Analyzing the newest one.`);
+        } else {
+          alert('Job Imported & Analyzed Successfully!');
+        }
+      } else {
+        throw new Error("Import returned no ID");
+      }
+
     } catch (error) {
-      console.error('Analysis failed', error);
+      console.error('Import/Analyze failed', error);
+      alert('Failed to import/analyze job. Ensure it is a valid LinkedIn URL.');
     } finally {
       setAnalyzing(false);
+      setIsAddModalOpen(false);
+      setNewJobText('');
     }
   };
 
@@ -358,11 +385,24 @@ const App: React.FC = () => {
     setSelectedIds(newSelected);
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === filteredJobs.length) {
+  const toggleSelectAll = async () => {
+    if (selectedIds.size === totalJobs && totalJobs > 0) {
+      // If all are selected (based on count), unselect all
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredJobs.map(j => j.id)));
+      try {
+        if (filters.searchQuery) {
+          // If filtering, select only visible for now (simplification)
+          setSelectedIds(new Set(filteredJobs.map(j => j.id)));
+        } else {
+          // Global Select All - Fetch all IDs
+          const allIds = await getAllJobIds();
+          setSelectedIds(new Set(allIds));
+        }
+      } catch (err) {
+        console.error("Failed to select all", err);
+        alert("Failed to select all jobs");
+      }
     }
   };
 
@@ -591,7 +631,7 @@ const App: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
-                        checked={filteredJobs.length > 0 && selectedIds.size === filteredJobs.length}
+                        checked={totalJobs > 0 && selectedIds.size === totalJobs}
                         onChange={toggleSelectAll}
                         className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                       />
@@ -682,15 +722,22 @@ const App: React.FC = () => {
           <GlassCard className="w-full max-w-2xl p-6 z-20 bg-white/95 shadow-2xl">
             <h2 className="text-xl font-bold mb-4 flex items-center text-slate-900">
               <Sparkles className="w-5 h-5 mr-2 text-blue-600" />
-              Analyze New Job Description
+              Import from LinkedIn
             </h2>
-            <textarea
-              className="w-full h-48 bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all"
-              placeholder="Paste job description here..."
-              value={newJobText}
-              onChange={(e) => setNewJobText(e.target.value)}
-              disabled={analyzing}
-            />
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">LinkedIn Job URL</label>
+              <input
+                type="text"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                placeholder="https://www.linkedin.com/jobs/view/..."
+                value={newJobText}
+                onChange={(e) => setNewJobText(e.target.value)}
+                disabled={analyzing}
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Paste a LinkedIn job URL. We will scrape and analyze it automatically.
+              </p>
+            </div>
             <div className="flex justify-end mt-4 space-x-3">
               <button
                 onClick={() => setIsAddModalOpen(false)}

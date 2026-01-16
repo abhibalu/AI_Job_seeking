@@ -2,6 +2,7 @@
 Jobs routes - Read jobs directly from App DB (Supabase).
 """
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from agents.supabase_client import get_supabase_client
 from backend.settings import settings
@@ -81,3 +82,28 @@ def get_job(job_id: str):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     
     return result.data[0]
+
+class DeleteRequest(BaseModel):
+    ids: list[str]
+
+@router.delete("", status_code=204)
+def delete_jobs(request: DeleteRequest):
+    """Bulk soft-delete jobs."""
+    if not settings.USE_SUPABASE:
+        raise HTTPException(status_code=503, detail="Supabase backend not enabled")
+
+    client = get_supabase_client()
+    
+    # Update status to 'deleted' for all IDs
+    # Supabase 'in_' filter works for lists
+    try:
+        (
+            client.table("jobs")
+            .update({"status": "deleted"})
+            .in_("id", request.ids)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete jobs: {e}")
+    
+    return

@@ -6,10 +6,12 @@ import { formatTimeAgo } from '../utils/format';
 interface JobListItemProps {
     job: JobWithEvaluation;
     isActive: boolean;
+    isSelected: boolean;
     onClick: () => void;
+    onToggleSelect: (e: React.MouseEvent) => void;
 }
 
-export const JobListItem: React.FC<JobListItemProps> = ({ job, isActive, onClick }) => {
+export const JobListItem: React.FC<JobListItemProps> = ({ job, isActive, isSelected, onClick, onToggleSelect }) => {
     const score = job.evaluation?.job_match_score || 0;
 
     // Logo is now strict black/dark theme
@@ -29,6 +31,23 @@ export const JobListItem: React.FC<JobListItemProps> = ({ job, isActive, onClick
       `}
         >
             <div className="flex gap-3">
+                {/* Checkbox */}
+                <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                            // Cast the event to MouseEvent-like behavior for parent handler compatibility if needed, 
+                            // or better, just allow the handler to take ChangeEvent or be generic.
+                            // But cleaner: onClick on parent div handles stopPropagation.
+                            // Let's just use the onToggleSelect passed down.
+                            // Actually, onChange on input is safer for accessibility.
+                        }}
+                        onClick={onToggleSelect}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                </div>
+
                 {/* Logo */}
                 <div className={`w-12 h-12 min-w-[3rem] rounded-md ${getLogoColor()} flex items-center justify-center text-white font-bold text-lg shadow-sm border border-slate-900`}>
                     {job.company_name?.charAt(0) || 'C'}

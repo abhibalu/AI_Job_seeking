@@ -40,6 +40,10 @@ class ApiClient {
             throw new Error(error.detail || `HTTP ${response.status}`);
         }
 
+        if (response.status === 204) {
+            return {} as T;
+        }
+
         return response.json();
     }
 
@@ -65,6 +69,13 @@ class ApiClient {
 
     async getEvaluation(jobId: string) {
         return this.request<Evaluation>(`/api/evaluations/${jobId}`);
+    }
+
+    async deleteJobs(ids: string[]): Promise<void> {
+        return this.request<void>(`/api/jobs`, {
+            method: 'DELETE',
+            body: JSON.stringify({ ids }),
+        });
     }
 
     async evaluateJob(jobId: string, force: boolean = false) {

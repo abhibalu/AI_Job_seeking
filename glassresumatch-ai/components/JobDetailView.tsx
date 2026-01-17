@@ -48,20 +48,11 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
         setIsReEvaluating(false);
     }, [job.id]);
 
-    const calculateMockResume = (base: any) => {
-        if (!base) return null;
-        return {
-            ...base,
-            summary: `[TAILORED for ${job.company_name}]: Highly skilled professional targeting the ${job.title} role. ` + (base.summary || ""),
-            experience: base.experience?.map((exp: any, i: number) =>
-                i === 0 ? { ...exp, achievements: [`[Optimized for ${job.title}]: Highlighted relevant experience in ${job.company_name}'s domain.`, ...exp.achievements] } : exp
-            )
-        };
-    };
 
-    const handleTailorSimulation = async () => {
+
+    const handleTailorJob = async () => {
         setIsGeneratingResume(true);
-        // Ensure we have base resume
+        // Ensure we have base resume for Diff View
         if (!baseResume) {
             try {
                 const base = await apiClient.getMasterResume();
@@ -71,12 +62,17 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
             }
         }
 
-        // Simulate 2s delay
-        setTimeout(() => {
-            setIsGeneratingResume(false);
+        try {
+            const result = await apiClient.tailorResume(job.id);
+            setTailoredResume(result);
             setHasGeneratedResume(true);
             setIsSimulatedModalOpen(true);
-        }, 2000);
+        } catch (error) {
+            console.error("Tailoring failed:", error);
+            alert("Failed to tailor resume. Please check the backend.");
+        } finally {
+            setIsGeneratingResume(false);
+        }
     };
 
     // Check for existing tailored versions logic
@@ -237,7 +233,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
                 <div className="flex items-center gap-3 mt-6">
                     {isEvaluated && evaluation?.recommended_action === 'tailor' && (
                         <button
-                            onClick={() => hasGeneratedResume ? setIsSimulatedModalOpen(true) : handleTailorSimulation()}
+                            onClick={() => hasGeneratedResume ? setIsSimulatedModalOpen(true) : handleTailorJob()}
                             disabled={isGeneratingResume}
                             className="px-6 py-2 bg-white hover:bg-slate-50 text-black font-semibold rounded-md transition-colors flex items-center gap-2 shadow-sm disabled:opacity-70 border border-black"
                         >
@@ -557,17 +553,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
                         <div className="flex-1 overflow-y-auto p-8 bg-slate-50 flex justify-center">
                             <div className="transform scale-[0.85] origin-top bg-white shadow-xl min-h-[297mm]">
                                 <ResumePreview
-                                    data={calculateMockResume(baseResume || {
-                                        fullName: "Abhijith Sivadas",
-                                        email: "abhijith.s@example.com",
-                                        phone: "+1 (555) 012-3456",
-                                        location: "San Francisco, CA",
-                                        websites: ["linkedin.com/in/abhijith", "github.com/abhijith"],
-                                        education: [],
-                                        experience: [],
-                                        skills: [],
-                                        summary: ""
-                                    })}
+                                    data={tailoredResume || (baseResume as any) || {}}
                                     originalData={viewMode === 'diff' ? baseResume : undefined}
                                     template="ats_friendly"
                                 />

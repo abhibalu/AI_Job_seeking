@@ -1,0 +1,48 @@
+version: '3.9'
+services:
+  langfuse-server:
+    image: langfuse/langfuse:2
+    depends_on:
+      - langfuse-db
+      - langfuse-cache
+    ports:
+      - "3010:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      - NEXTAUTH_SECRET=mysecret
+      - SALT=mysalt
+      - NEXTAUTH_URL=http://localhost:3010
+      - TELEMETRY_ENABLED=false
+      - REDIS_HOST=langfuse-cache
+      - REDIS_PORT=6379
+      - REDIS_AUTH=myredis
+    restart: unless-stopped
+
+  langfuse-db:
+    image: postgres:16
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U langfuse" ]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    environment:
+      - POSTGRES_USER=langfuse
+      - POSTGRES_PASSWORD=langfuse
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+
+  langfuse-cache:
+    image: redis:7.2.4
+    restart: unless-stopped
+    command: redis-server --requirepass myredis
+    ports:
+      - 6379
+    volumes:
+      - langfuse_redis_data:/data
+
+volumes:
+  langfuse_postgres_data:
+  langfuse_redis_data:

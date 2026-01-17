@@ -7,9 +7,15 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
+import os
+from langfuse.decorators import observe
 
 from backend.settings import settings
 
+# Configure Langfuse Env Vars for the SDK to pick up automatically
+os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
+os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_SECRET_KEY
+os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 
 class BaseAgent(ABC):
     """Base class for all LLM agents."""
@@ -26,7 +32,7 @@ class BaseAgent(ABC):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = settings.OPENROUTER_BASE_URL
         
-    
+    @observe()
     def _call_llm(self, user_prompt: str) -> str:
         """Make a raw LLM call and return the response text. Retries with backup model on failure."""
         if not self.api_key:
@@ -140,6 +146,7 @@ class BaseAgent(ABC):
         """Build the user prompt from input data."""
         pass
     
+    @observe()
     def run(self, **kwargs) -> dict:
         """Execute the agent and return parsed results."""
         self.system_prompt = self.get_system_prompt()

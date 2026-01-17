@@ -4,8 +4,7 @@ Parse routes - Parse JD for evaluated jobs.
 import json
 from fastapi import APIRouter, HTTPException
 
-import polars as pl
-from deltalake import DeltaTable
+from agents.supabase_client import get_supabase_client
 
 from backend.settings import settings
 from api.schemas import ParseResult, MessageResponse
@@ -21,25 +20,15 @@ from agents.jd_parser import JDParserAgent
 router = APIRouter()
 
 
-def get_storage_options() -> dict:
-    return {
-        "AWS_ENDPOINT_URL": f"http://{settings.MINIO_ENDPOINT}",
-        "AWS_ACCESS_KEY_ID": settings.MINIO_ACCESS_KEY,
-        "AWS_SECRET_ACCESS_KEY": settings.MINIO_SECRET_KEY,
-        "AWS_REGION": "us-east-1",
-        "AWS_ALLOW_HTTP": "true",
-    }
-
 
 def get_job_by_id(job_id: str) -> dict | None:
-    storage_options = get_storage_options()
-    gold_path = f"s3://{settings.DELTA_LAKEHOUSE_BUCKET}/gold/jobs"
-    dt = DeltaTable(gold_path, storage_options=storage_options)
-    df = pl.from_arrow(dt.to_pyarrow_table())
-    job_df = df.filter(pl.col("id") == job_id)
-    if job_df.is_empty():
+    client = get_supabase_client()
+    result = client.table("jobs").select("*").eq("id", job_id).execute()
+    
+    if not result.data:
         return None
-    return job_df.row(0, named=True)
+        
+    return result.data[0]
 
 
 @router.get("/{job_id}", response_model=ParseResult)
@@ -84,10 +73,10 @@ def parse_jd(job_id: str, force: bool = False):
     if is_job_parsed(job_id) and not force:
         return {"message": "JD already parsed", "job_id": job_id}
     
-    # Get job from Gold table
+    # Get job from Supabase
     job = get_job_by_id(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Supabase")
     
     # Run parser
     try:

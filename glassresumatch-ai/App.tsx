@@ -5,6 +5,8 @@ import {
   fetchEvaluations,
   evaluateJob,
   deleteJobs,
+  importJob,
+  getAllJobIds,
   getEvaluationStats,
   getEvaluation,
   JobWithEvaluation
@@ -68,7 +70,7 @@ const App: React.FC = () => {
     searchQuery: '',
     verdict: 'all',
     action: 'all',
-    sortBy: 'score',
+    sortBy: 'date',
     sortOrder: 'desc',
   });
 
@@ -81,12 +83,13 @@ const App: React.FC = () => {
   const ITEMS_PER_PAGE = 9;
 
   // --- Fetch Jobs Data ---
-  const loadData = useCallback(async () => {
+  // --- Fetch Jobs Data ---
+  const loadData = useCallback(async (silent = false) => {
     // If we are in resume view, we technically don't need to refresh jobs, 
     // but we'll stick to the original behavior to keep state fresh or handle it gracefully.
     if (viewMode === 'resume') return;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const statsResult = await getEvaluationStats().catch(() => null);
@@ -111,7 +114,12 @@ const App: React.FC = () => {
         setJobs(jobsWithEvals);
         setTotalJobs(evaluationsResult.total);
       } else {
-        const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE);
+        // 'all' or 'pending' view
+        const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
+        // Search query as company filter
+        const companyFilter = filters.searchQuery ? filters.searchQuery : undefined;
+
+        const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE, companyFilter, isEvaluatedFilter);
         setJobs(jobsResult.data);
         setTotalJobs(jobsResult.total);
       }
@@ -119,9 +127,9 @@ const App: React.FC = () => {
       console.error('Failed to load data:', err);
       setError('Failed to load jobs. Make sure the API server is running.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [currentPage, viewMode, filters.action]);
+  }, [currentPage, viewMode, filters.action, filters.searchQuery]);
 
   useEffect(() => {
     loadData();
@@ -288,8 +296,11 @@ const App: React.FC = () => {
 
   // --- Filter and sort jobs ---
   const filteredJobs = jobs.filter(job => {
+    // viewMode filtering is now handled by backend pagination
     if (viewMode === 'evaluated' && !job.isEvaluated) return false;
-    if (viewMode === 'pending' && job.isEvaluated) return false;
+
+    // Kept for now: if (viewMode === 'pending' && job.isEvaluated) return false;
+    // but effectively handled by backend.
     if (filters.searchQuery) {
       const query = filters.searchQuery.toLowerCase();
       const matchesCompany = job.company_name?.toLowerCase().includes(query);
@@ -301,9 +312,49 @@ const App: React.FC = () => {
     return true;
   }).sort((a, b) => {
     const multiplier = filters.sortOrder === 'asc' ? 1 : -1;
+
+    // Smart Sort specific logic when sorting by 'score' (default)
+    if (filters.sortBy === 'score') {
+      const now = Date.now();
+      const NEW_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+
+      const aTime = new Date(a.updated_at || a.posted_at || 0).getTime();
+      const bTime = new Date(b.updated_at || b.posted_at || 0).getTime();
+
+      const aIsAnalyzing = a.id === evaluatingJobId;
+      const bIsAnalyzing = b.id === evaluatingJobId;
+      // "New" only applies to unevaluated jobs (evaluated ones jump to score tier)
+      const aIsNew = !a.isEvaluated && (now - aTime) < NEW_THRESHOLD;
+      const bIsNew = !b.isEvaluated && (now - bTime) < NEW_THRESHOLD;
+
+      const aPinned = aIsAnalyzing || aIsNew;
+      const bPinned = bIsAnalyzing || bIsNew;
+
+      // Tier 1: Pinned (Analyzing or Just Imported)
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      if (aPinned && bPinned) return bTime - aTime; // Newest pinned first
+
+      // Tier 2: Evaluated (Score desc) vs Unevaluated
+      const aHasEval = a.isEvaluated && a.evaluation?.job_match_score != null;
+      const bHasEval = b.isEvaluated && b.evaluation?.job_match_score != null;
+
+      if (aHasEval && !bHasEval) return -1 * multiplier;
+      if (!aHasEval && bHasEval) return 1 * multiplier;
+
+      if (aHasEval && bHasEval) {
+        // Both evaluated: Sort by Score
+        const scoreA = a.evaluation?.job_match_score || 0;
+        const scoreB = b.evaluation?.job_match_score || 0;
+        if (scoreA !== scoreB) return (scoreB - scoreA) * multiplier;
+      }
+
+      // Tier 3: Both Unevaluated (or same score) -> Sort by Time
+      return (bTime - aTime) * multiplier;
+    }
+
+    // Standard sorts for other columns
     switch (filters.sortBy) {
-      case 'score':
-        return ((b.evaluation?.job_match_score || 0) - (a.evaluation?.job_match_score || 0)) * multiplier;
       case 'company':
         return ((a.company_name || '').localeCompare(b.company_name || '')) * multiplier;
       case 'date':
@@ -323,7 +374,7 @@ const App: React.FC = () => {
     setEvaluatingJobId(jobId);
     try {
       await evaluateJob(jobId);
-      await loadData();
+      await loadData(true);
       // If the evaluated job is the one currently selected, reload updates it automatically via selectedJob derivation
     } catch (err) {
       console.error('Failed to evaluate job:', err);
@@ -337,13 +388,38 @@ const App: React.FC = () => {
     if (!newJobText.trim()) return;
     setAnalyzing(true);
     try {
-      setIsAddModalOpen(false);
-      setNewJobText('');
-      alert('New JD analysis coming soon! This will integrate with your Gemini key.');
+      // Assuming text is a URL
+      // Assuming text is a URL
+      const response = await importJob(newJobText.trim());
+
+      if (response && response.id) {
+        // Find and select the job (it might be newly added)
+        setSelectedJobId(response.id);
+
+        // Auto-start evaluation for the FIRST job (or only job)
+        await evaluateJob(response.id);
+
+        await loadData(); // Reload list
+
+        // Re-select after reload
+        setSelectedJobId(response.id);
+
+        if (response.count && response.count > 1) {
+          alert(`Batch Import Successful! Imported ${response.count} jobs. Analyzing the newest one.`);
+        } else {
+          alert('Job Imported & Analyzed Successfully!');
+        }
+      } else {
+        throw new Error("Import returned no ID");
+      }
+
     } catch (error) {
-      console.error('Analysis failed', error);
+      console.error('Import/Analyze failed', error);
+      alert('Failed to import/analyze job. Ensure it is a valid LinkedIn URL.');
     } finally {
       setAnalyzing(false);
+      setIsAddModalOpen(false);
+      setNewJobText('');
     }
   };
 
@@ -358,11 +434,24 @@ const App: React.FC = () => {
     setSelectedIds(newSelected);
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === filteredJobs.length) {
+  const toggleSelectAll = async () => {
+    if (selectedIds.size === totalJobs && totalJobs > 0) {
+      // If all are selected (based on count), unselect all
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filteredJobs.map(j => j.id)));
+      try {
+        if (filters.searchQuery) {
+          // If filtering, select only visible for now (simplification)
+          setSelectedIds(new Set(filteredJobs.map(j => j.id)));
+        } else {
+          // Global Select All - Fetch all IDs
+          const allIds = await getAllJobIds();
+          setSelectedIds(new Set(allIds));
+        }
+      } catch (err) {
+        console.error("Failed to select all", err);
+        alert("Failed to select all jobs");
+      }
     }
   };
 
@@ -431,7 +520,7 @@ const App: React.FC = () => {
             <AlertCircle className="w-5 h-5 text-rose-500 mr-3" />
             <p className="text-rose-700">{error}</p>
             <button
-              onClick={loadData}
+              onClick={() => loadData()}
               className="ml-auto px-3 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-sm font-medium"
             >
               Retry
@@ -574,7 +663,7 @@ const App: React.FC = () => {
                       searchQuery: '',
                       verdict: 'all',
                       action: 'all',
-                      sortBy: 'score',
+                      sortBy: 'date',
                       sortOrder: 'desc',
                     });
                   }}
@@ -591,7 +680,7 @@ const App: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
-                        checked={filteredJobs.length > 0 && selectedIds.size === filteredJobs.length}
+                        checked={totalJobs > 0 && selectedIds.size === totalJobs}
                         onChange={toggleSelectAll}
                         className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                       />
@@ -639,13 +728,8 @@ const App: React.FC = () => {
                     <JobDetailView
                       job={selectedJob}
                       onEvaluate={() => {
-                        // Reload data to reflect new status
-                        loadData();
-                        // Also need to refetch specific job to update the view?
-                        // loadData updates 'jobs', which updates 'filteredJobs'. 
-                        // We need to update 'selectedJob' reference from the new list.
-                        // Effect hook below can handle this? Or manual update.
-                        // Simple hack: setEvaluatingJobId to trigger UI state.
+                        // Reload data to reflect new status (silent refresh)
+                        loadData(true);
                       }}
                     />
                   ) : (
@@ -682,15 +766,22 @@ const App: React.FC = () => {
           <GlassCard className="w-full max-w-2xl p-6 z-20 bg-white/95 shadow-2xl">
             <h2 className="text-xl font-bold mb-4 flex items-center text-slate-900">
               <Sparkles className="w-5 h-5 mr-2 text-blue-600" />
-              Analyze New Job Description
+              Import from LinkedIn
             </h2>
-            <textarea
-              className="w-full h-48 bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition-all"
-              placeholder="Paste job description here..."
-              value={newJobText}
-              onChange={(e) => setNewJobText(e.target.value)}
-              disabled={analyzing}
-            />
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">LinkedIn Job URL</label>
+              <input
+                type="text"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                placeholder="https://www.linkedin.com/jobs/view/..."
+                value={newJobText}
+                onChange={(e) => setNewJobText(e.target.value)}
+                disabled={analyzing}
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Paste a LinkedIn job URL. We will scrape and analyze it automatically.
+              </p>
+            </div>
             <div className="flex justify-end mt-4 space-x-3">
               <button
                 onClick={() => setIsAddModalOpen(false)}

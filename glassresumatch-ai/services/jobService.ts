@@ -24,12 +24,14 @@ export interface JobWithEvaluation extends Job {
  */
 export const fetchJobsWithEvaluations = async (
   page: number,
-  limit: number
+  limit: number,
+  company?: string,
+  is_evaluated?: boolean
 ): Promise<{ data: JobWithEvaluation[]; total: number }> => {
   try {
     // Fetch jobs and evaluations in parallel
     const [jobs, evaluations] = await Promise.all([
-      apiClient.getJobs((page - 1) * limit, limit),
+      apiClient.getJobs((page - 1) * limit, limit, company, is_evaluated),
       apiClient.getEvaluations(0, 1000), // Get all evaluations for matching
     ]);
 
@@ -45,7 +47,7 @@ export const fetchJobsWithEvaluations = async (
     }));
 
     // Get total count from stats
-    const stats = await apiClient.getJobStats();
+    const stats = await apiClient.getJobStats(company, is_evaluated);
 
     return {
       data: jobsWithEvals,
@@ -175,6 +177,36 @@ export const deleteJobs = async (ids: string[]): Promise<void> => {
     await apiClient.deleteJobs(ids);
   } catch (error) {
     console.error('Failed to delete jobs:', error);
+    throw error;
+  }
+};
+
+/**
+ * Import job from URL
+ */
+export const importJob = async (url: string): Promise<{
+  id: string;
+  status: string;
+  count?: number;
+  first_job?: { id: string; title: string; company: string };
+  ids?: string[];
+}> => {
+  try {
+    return await apiClient.importJob(url);
+  } catch (error) {
+    console.error('Failed to import job:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get all job IDs (for select all)
+ */
+export const getAllJobIds = async (company?: string): Promise<string[]> => {
+  try {
+    return await apiClient.getAllJobIds(company);
+  } catch (error) {
+    console.error('Failed to get all job IDs:', error);
     throw error;
   }
 };

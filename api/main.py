@@ -29,6 +29,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .middleware import LangfuseMiddleware
+app.add_middleware(LangfuseMiddleware)
+
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(evaluations.router, prefix="/api/evaluations", tags=["Evaluations"])

@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = Field(default="", env="SUPABASE_URL")
     SUPABASE_SERVICE_KEY: str = Field(default="", env="SUPABASE_SERVICE_KEY")
     USE_SUPABASE: bool = Field(default=False, env="USE_SUPABASE")
-
-
+    
+    # Langfuse Configuration
+    LANGFUSE_PUBLIC_KEY: str = Field(default="pk-lf-1234567890", env="LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_SECRET_KEY: str = Field(default="sk-lf-1234567890", env="LANGFUSE_SECRET_KEY")
+    LANGFUSE_HOST: str = Field(default="http://localhost:3010", env="LANGFUSE_HOST")
+    
     model_config = {
         "env_file": str(ENV_FILE),
         "env_file_encoding": "utf-8",

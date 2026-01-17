@@ -4,8 +4,7 @@ Evaluations routes - Evaluate jobs and get results.
 import json
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
-import polars as pl
-from deltalake import DeltaTable
+from agents.supabase_client import get_supabase_client
 
 from backend.settings import settings
 from api.schemas import EvaluationResult, EvaluationStats, BatchRequest, MessageResponse
@@ -22,29 +21,23 @@ from agents.job_evaluator import JobEvaluatorAgent
 router = APIRouter()
 
 
-def get_storage_options() -> dict:
-    return {
-        "AWS_ENDPOINT_URL": f"http://{settings.MINIO_ENDPOINT}",
-        "AWS_ACCESS_KEY_ID": settings.MINIO_ACCESS_KEY,
-        "AWS_SECRET_ACCESS_KEY": settings.MINIO_SECRET_KEY,
-        "AWS_REGION": "us-east-1",
-        "AWS_ALLOW_HTTP": "true",
-    }
-
-
-def load_gold_jobs() -> pl.DataFrame:
-    storage_options = get_storage_options()
-    gold_path = f"s3://{settings.DELTA_LAKEHOUSE_BUCKET}/gold/jobs"
-    dt = DeltaTable(gold_path, storage_options=storage_options)
-    return pl.from_arrow(dt.to_pyarrow_table())
-
 
 def get_job_by_id(job_id: str) -> dict | None:
-    df = load_gold_jobs()
-    job_df = df.filter(pl.col("id") == job_id)
-    if job_df.is_empty():
+    client = get_supabase_client()
+    # Query jobs table directly
+    result = client.table("jobs").select("*").eq("id", job_id).execute()
+    
+    if not result.data:
         return None
-    return job_df.row(0, named=True)
+    
+    job = result.data[0]
+    
+    # Ensure compatibility fields if needed (Supabase usually uses snake_case matching schema)
+    # The gold data had 'description_text' and 'link'. Supabase has 'description_text' and 'job_url'.
+    if "link" not in job and "job_url" in job:
+        job["link"] = job["job_url"]
+        
+    return job
 
 
 @router.get("", response_model=list[EvaluationResult])
@@ -105,22 +98,51 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
     import traceback
     
     print(f"DEBUG: Starting batch evaluation task {task_id}")
+    print(f"DEBUG: Starting batch evaluation task {task_id}")
     try:
-        df = load_gold_jobs()
-        print(f"DEBUG: Loaded {len(df)} jobs from Gold table")
+        from agents.supabase_client import get_supabase_client
+        client = get_supabase_client()
+        
+        # Build query for jobs
+        query = client.table("jobs").select("*").eq("status", "active")
         
         # Apply filters
         if company_filter:
-            df = df.filter(pl.col("company_name").str.contains(company_filter, literal=False))
+            query = query.ilike("company_name", f"%{company_filter}%")
+            
+        # Get all candidates (limit to max_jobs + buffer if filtering happens later, 
+        # but here we can just fetch max_jobs if only_unevaluated is False.
+        # If only_unevaluated is True, we might need to fetch more or filter in DB.
         
-        # Collect jobs to process first
+        # Fetching jobs...
+        # Optimally we should exclude evaluated IDs in the query if possible, 
+        # but `not.in` with subquery isn't direct in supabase-py simple client without rpc or 2 steps.
+        # We will fetch a chunk and filter.
+        
+        # Fetch up to max_jobs * 2 to handle some skips
+        result = query.order("posted_at", desc=True).limit(max_jobs * 2).execute()
+        
+        if not result.data:
+            print("DEBUG: No jobs found in Supabase")
+            jobs = []
+        else:
+            jobs = result.data
+            
+        print(f"DEBUG: Loaded {len(jobs)} candidate jobs from Supabase")
+
+        # Collect jobs to process
         jobs_to_process = []
         
-        for row in df.iter_rows(named=True):
+        for row in jobs:
             if len(jobs_to_process) >= max_jobs:
                 break
                 
             job_id = str(row.get("id", ""))
+            
+            # Ensure compatibility
+            if "link" not in row and "job_url" in row:
+                row["link"] = row["job_url"]
+                
             if only_unevaluated and is_job_evaluated(job_id):
                 continue
                 
@@ -244,10 +266,11 @@ def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = F
     if is_job_evaluated(job_id) and not force:
         return {"message": "Job already evaluated", "job_id": job_id}
     
-    # Get job from Gold table
+    # Get job from Supabase (Primary Source now)
     job = get_job_by_id(job_id)
+    
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Gold table")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Supabase")
     
     # Run evaluation
     try:

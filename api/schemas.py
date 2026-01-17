@@ -15,6 +15,8 @@ class JobBase(BaseModel):
     posted_at: str | None = None
     applicants_count: int | None = None
     company_website: str | None = None
+    job_url: str | None = None
+    updated_at: str | None = None
 
 
 class JobDetail(JobBase):
@@ -22,7 +24,8 @@ class JobDetail(JobBase):
     description_html: str | None = None
     seniority_level: str | None = None
     employment_type: str | None = None
-    link: str | None = None
+    # link field removed as it's now job_url in JobBase
+
     
     # New Fields from Supabase
     status: str | None = None
@@ -54,6 +57,9 @@ class JobStats(BaseModel):
     unique_companies: int
     top_companies: list[dict]
 
+
+class DeleteRequest(BaseModel):
+    ids: list[str]
 
 # Evaluation schemas
 class EvaluationResult(BaseModel):

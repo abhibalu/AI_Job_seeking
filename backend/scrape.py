@@ -2,9 +2,15 @@ from apify_client import ApifyClient
 from minio import Minio
 from minio.error import S3Error
 import json
+import logging
 from datetime import datetime
 from io import BytesIO
 from settings import settings
+from backend.logging import setup_logging
+
+# Setup logging for standalone script
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # Initialize the ApifyClient with your API token
 client = ApifyClient(settings.APIFY_TOKEN)
@@ -22,11 +28,11 @@ bucket_name = settings.MINIO_BUCKET
 try:
     if not minio_client.bucket_exists(bucket_name):
         minio_client.make_bucket(bucket_name)
-        print(f"Created bucket: {bucket_name}")
+        logger.info(f"Created bucket: {bucket_name}")
     else:
-        print(f"Bucket {bucket_name} already exists")
+        logger.debug(f"Bucket {bucket_name} already exists")
 except S3Error as e:
-    print(f"Error creating bucket: {e}")
+    logger.critical(f"Error creating bucket: {e}")
     raise
 
 # Prepare the Actor input
@@ -37,15 +43,19 @@ run_input = {
 }
 
 # Run the Actor and wait for it to finish
-print("Starting Apify scrape...")
-run = client.actor("hKByXkMQaC5Qt9UMN").call(run_input=run_input)
+logger.info("Starting Apify scrape...")
+try:
+    run = client.actor("hKByXkMQaC5Qt9UMN").call(run_input=run_input)
+except Exception as e:
+    logger.critical(f"Apify actor execution failed: {e}", exc_info=True)
+    raise
 
 results = []
 # Fetch and print Actor results from the run's dataset (if there are any)
 for item in client.dataset(run["defaultDatasetId"]).iterate_items():
     results.append(item)
 
-print(f"Scraped {len(results)} jobs")
+logger.info(f"Scraped {len(results)} jobs from Apify")
 
 # Create date-based partition path (YYYY-MM-DD)
 ingestion_date = datetime.now()
@@ -67,10 +77,9 @@ try:
         length=len(json_bytes),
         content_type="application/json"
     )
-    print(f"Successfully uploaded to MinIO: {bucket_name}/{object_name}")
-    print(f"Total size: {len(json_bytes)} bytes")
+    logger.info(f"Successfully uploaded to MinIO: {bucket_name}/{object_name}", extra={"size_bytes": len(json_bytes)})
 except S3Error as e:
-    print(f"Error uploading to MinIO: {e}")
+    logger.error(f"Error uploading to MinIO: {e}", exc_info=True)
     raise
 
-print("Scraping and upload complete!")
+logger.info("Scraping and upload pipeline complete!")

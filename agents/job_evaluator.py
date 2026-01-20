@@ -4,11 +4,14 @@ Job Evaluator Agent - Compares resume with job description.
 Returns match score, verdict, gaps, and recommendations.
 """
 import json
+import logging
 from pathlib import Path
 
 from .base import BaseAgent
 from agents.database import get_master_resume
 from backend.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 class JobEvaluatorAgent(BaseAgent):
@@ -28,7 +31,7 @@ class JobEvaluatorAgent(BaseAgent):
                 self.resume = db_resume
                 return
         except Exception as e:
-            print(f"Warning: Failed to load resume from DB: {e}")
+            logger.warning(f"Failed to load resume from DB: {e}")
 
         # 2. Fallback to file
         resume_path = Path("agent_prompts/base_resume.json")

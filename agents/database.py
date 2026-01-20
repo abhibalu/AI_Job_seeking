@@ -6,11 +6,14 @@ Toggle with USE_SUPABASE environment variable.
 """
 import json
 import sqlite3
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from backend.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================
@@ -43,9 +46,10 @@ def get_db_connection() -> sqlite3.Connection:
 def init_database():
     """Initialize the SQLite database schema."""
     if _use_supabase():
-        print("Using Supabase - SQLite init skipped")
+        logger.info("Using Supabase - SQLite init skipped")
         return
     
+    logger.info(f"Using SQLite at {get_db_path()}")
     conn = get_db_connection()
     cursor = conn.cursor()
     

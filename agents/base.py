@@ -3,6 +3,7 @@ Base Agent class for OpenRouter LLM interactions.
 """
 import json
 import time
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -11,6 +12,8 @@ import os
 from langfuse.decorators import observe
 
 from backend.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # Configure Langfuse Env Vars for the SDK to pick up automatically
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
@@ -36,6 +39,7 @@ class BaseAgent(ABC):
     def _call_llm(self, user_prompt: str) -> str:
         """Make a raw LLM call and return the response text. Retries with backup model on failure."""
         if not self.api_key:
+            logger.critical("OPENROUTER_API_KEY not set in environment")
             raise ValueError("OPENROUTER_API_KEY not set in environment")
         
         headers = {
@@ -67,7 +71,7 @@ class BaseAgent(ABC):
             for attempt in range(max_retries):
                 try:
                     if current_model != self.model:
-                        print(f"Retrying with BACKUP model: {current_model}")
+                        logger.warning(f"Retrying with BACKUP model: {current_model}")
 
                     with httpx.Client(timeout=120.0) as client:
                         base_url = self.base_url.rstrip("/")
@@ -81,7 +85,7 @@ class BaseAgent(ABC):
                         # Handle 429 specifically
                         if response.status_code == 429:
                             wait_time = 5 * (attempt + 1) # Linear backoff: 5s, 10s, 15s
-                            print(f"Rate limited (429) on {current_model}. Waiting {wait_time}s...")
+                            logger.warning(f"Rate limited (429) on {current_model}. Waiting {wait_time}s...")
                             time.sleep(wait_time)
                             if attempt == max_retries - 1:
                                 response.raise_for_status() # Raise on final attempt
@@ -95,7 +99,7 @@ class BaseAgent(ABC):
                 except Exception as e:
                     # If it's the last retry, log and break to try next model
                     if attempt == max_retries - 1:
-                        print(f"Model {current_model} failed after {max_retries} attempts: {e}")
+                        logger.error(f"Model {current_model} failed after {max_retries} attempts: {e}")
                         last_exception = e
                     # For non-429 errors (like network/timeout), maybe retry too? 
                     # For now we rely on the loop above for 429.

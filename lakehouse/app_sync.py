@@ -1,5 +1,5 @@
-
 import sys
+import logging
 from datetime import datetime, date
 import polars as pl
 from deltalake import DeltaTable
@@ -9,6 +9,7 @@ try:
     from backend.settings import settings
     from agents.supabase_client import get_supabase_client
     from services.job_mapper import map_job_record
+    from backend.logging import setup_logging
 except ImportError:
     # Fallback for standalone script execution if needed
     import sys
@@ -17,6 +18,10 @@ except ImportError:
     from backend.settings import settings
     from agents.supabase_client import get_supabase_client
     from services.job_mapper import map_job_record
+    from backend.logging import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100
 
@@ -39,32 +44,32 @@ def clean_value(val):
     return val
 
 def sync_silver_to_app():
-    print("\n--- Syncing Silver Jobs (Current) to App Database (Upsert) ---")
+    logger.info("Starting Sync: Silver Jobs -> App Database (Upsert)")
     
     if not settings.USE_SUPABASE:
-        print("ℹ️  USE_SUPABASE is False. Skipping Sync.")
+        logger.warning("USE_SUPABASE is False. Skipping Sync.")
         return
 
     # 1. Load Silver Table
     silver_path = f"s3://{settings.DELTA_LAKEHOUSE_BUCKET}/silver/jobs"
-    print(f"Reading Silver table from: {silver_path}")
+    logger.info(f"Reading Silver table from: {silver_path}")
     
     try:
         dt = DeltaTable(silver_path, storage_options=get_storage_options())
         # Filter for current records only
         df = pl.from_arrow(dt.to_pyarrow_table()).filter(pl.col("is_current") == True)
     except Exception as e:
-        print(f"❌ Failed to load Silver table: {e}")
+        logger.critical(f"Failed to load Silver table: {e}", exc_info=True)
         return
         
     total_rows = len(df)
-    print(f"Found {total_rows} active records in Silver.")
+    logger.info(f"Found {total_rows} active records in Silver.")
     
     client = get_supabase_client()
     
     # 2. Get Soft-Deleted Jobs from App DB
     # We must NOT re-insert jobs that the user has marked as 'deleted' or 'archived'
-    print("Fetching existing deleted/archived jobs from App DB...")
+    logger.info("Fetching existing deleted/archived jobs from App DB...")
     ignored_ids = set()
     try:
         # Fetch IDs where status is NOT active
@@ -73,9 +78,9 @@ def sync_silver_to_app():
         res = client.table("jobs").select("id").neq("status", "active").execute()
         if res.data:
             ignored_ids = {r["id"] for r in res.data}
-            print(f"found {len(ignored_ids)} ignored (deleted/archived) jobs.")
+            logger.info(f"Found {len(ignored_ids)} ignored (deleted/archived) jobs.")
     except Exception as e:
-        print(f"⚠️ Warning: Could not fetch deleted jobs: {e}")
+        logger.warning(f"Could not fetch deleted jobs: {e}")
 
     # 3. Process in Batches
     processed = 0
@@ -97,13 +102,6 @@ def sync_silver_to_app():
 
         # Map Columns (Enhanced Schema using Shared Mapper)
         record = map_job_record(row) 
-        # app_sync.py iterates rows from Silver which are dicts when iter_rows(named=True) is used
-        # We need to ensure 'status' logic is consistent or handled by mapper
-        # Mapper defaults status to 'active'. 
-        # Sync logic here might have custom needs? 
-        # The original code: "status": "active", # Force to active if not ignored
-        # The mapper does: "status": "active" if is_active else "archived"
-        # So calling map_job_record(row) is sufficient as default is_active=True.
         
         batch.append(record)
         
@@ -112,10 +110,13 @@ def sync_silver_to_app():
                 # Upsert
                 client.table("jobs").upsert(batch, on_conflict="id").execute()
                 processed += len(batch)
-                print(f"Synced {processed}/{total_rows} records... (Skipped: {skipped})", end="\r")
+                # Use debug for per-batch progress to avoid log spam, or info with \r logic if running interactive
+                # Since this is likely background, debug or periodic info is better.
+                if processed % 500 == 0:
+                     logger.info(f"Synced {processed}/{total_rows} records. Skipped: {skipped}")
                 batch = []
             except Exception as e:
-                print(f"\n❌ Error syncing batch: {e}")
+                logger.error(f"Error syncing batch: {e}", exc_info=True)
                 errors += 1
                 batch = []
                 
@@ -125,7 +126,7 @@ def sync_silver_to_app():
             client.table("jobs").upsert(batch, on_conflict="id").execute()
             processed += len(batch)
         except Exception as e:
-            print(f"\n❌ Error syncing final batch: {e}")
+            logger.error(f"Error syncing final batch: {e}", exc_info=True)
             errors += 1
 
-    print(f"\n✅ App DB Sync Complete! Processed: {processed}, Skipped: {skipped}, Errors: {errors}")
+    logger.info(f"App DB Sync Complete! Processed: {processed}, Skipped: {skipped}, Errors: {errors}")

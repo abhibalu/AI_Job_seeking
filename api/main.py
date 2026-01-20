@@ -18,6 +18,8 @@ from agents.database import init_database
 
 @app.on_event("startup")
 def on_startup():
+    from backend.logging import setup_logging
+    setup_logging()
     init_database()
 
 # CORS middleware for frontend
@@ -29,8 +31,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from .middleware import LangfuseMiddleware
+from .middleware import LangfuseMiddleware, RequestLoggingMiddleware
 app.add_middleware(LangfuseMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])

@@ -212,29 +212,52 @@ def get_evaluation(job_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None) -> list[dict]:
+def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None, verdict: str | None = None, search: str | None = None) -> tuple[list[dict], int]:
     """List evaluations with pagination and filtering."""
     if _use_supabase():
         client = _get_supabase()
-        query = client.table("job_evaluations").select("*")
+        query = client.table("job_evaluations").select("*", count="exact")
         
         if action:
             query = query.eq("recommended_action", action)
+        if verdict:
+            query = query.eq("verdict", verdict)
+        if search:
+            # Search in company or title
+            query = query.or_(f"company_name.ilike.%{search}%,title_role.ilike.%{search}%")
             
         # Supabase range is inclusive
         result = query.order("evaluated_at", desc=True).range(skip, skip + limit - 1).execute()
-        return result.data
+        return result.data, result.count or 0
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
     query = "SELECT * FROM job_evaluations"
+    count_query = "SELECT COUNT(*) FROM job_evaluations"
     params = []
     
+    conditions = []
     if action:
-        query += " WHERE recommended_action = ?"
+        conditions.append("recommended_action = ?")
         params.append(action)
+    if verdict:
+        conditions.append("verdict = ?")
+        params.append(verdict)
+    if search:
+        conditions.append("(company_name LIKE ? OR title_role LIKE ?)")
+        params.extend([f"%{search}%", f"%{search}%"])
+        
+    if conditions:
+        clause = " WHERE " + " AND ".join(conditions)
+        query += clause
+        count_query += clause
     
+    # Get Count
+    cursor.execute(count_query, params)
+    total_count = cursor.fetchone()[0]
+    
+    # Get Data
     query += " ORDER BY evaluated_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, skip])
     
@@ -242,7 +265,7 @@ def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None) 
     rows = cursor.fetchall()
     conn.close()
     
-    return [dict(row) for row in rows]
+    return [dict(row) for row in rows], total_count
 
 
 def get_evaluation_statistics() -> dict:

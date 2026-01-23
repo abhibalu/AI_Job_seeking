@@ -95,11 +95,27 @@ const App: React.FC = () => {
       const statsResult = await getEvaluationStats().catch(() => null);
       setStats(statsResult);
 
-      if (viewMode === 'evaluated') {
-        const actionFilter = filters.action !== 'all' ? filters.action : undefined;
-        const evaluationsResult = await fetchEvaluations(currentPage, ITEMS_PER_PAGE, actionFilter);
+      // Determine if we should use Evaluation-first strategy (for filtered pagination correctness)
+      const isActionFilter = filters.action !== 'all';
+      const isVerdictFilter = filters.verdict !== 'all';
+      const useEvalStrategy = viewMode === 'evaluated' || isActionFilter || isVerdictFilter;
 
-        const jobsWithEvals: JobWithEvaluation[] = evaluationsResult.data.map(e => ({
+      if (useEvalStrategy) {
+        const actionFilter = filters.action !== 'all' ? filters.action : undefined;
+        const verdictFilter = filters.verdict !== 'all' ? filters.verdict : undefined;
+        // Search query as company filter
+        const searchQuery = filters.searchQuery ? filters.searchQuery : undefined;
+
+        // TS doesn't know about the new signature yet because we just updated it, but it's fine
+        const evaluationsResult = await fetchEvaluations(
+          currentPage,
+          ITEMS_PER_PAGE,
+          actionFilter as any,
+          verdictFilter as any,
+          searchQuery
+        );
+
+        const jobsWithEvals: JobWithEvaluation[] = evaluationsResult.data.map((e: any) => ({
           id: e.job_id,
           title: e.title_role,
           company_name: e.company_name,
@@ -114,9 +130,8 @@ const App: React.FC = () => {
         setJobs(jobsWithEvals);
         setTotalJobs(evaluationsResult.total);
       } else {
-        // 'all' or 'pending' view
+        // 'all' or 'pending' view WITHOUT extra filters
         const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
-        // Search query as company filter
         const companyFilter = filters.searchQuery ? filters.searchQuery : undefined;
 
         const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE, companyFilter, isEvaluatedFilter);

@@ -92,10 +92,25 @@ class ApiClient {
     }
 
     // Evaluations endpoints
-    async getEvaluations(skip: number = 0, limit: number = 20, action?: string) {
+    async getEvaluations(skip: number = 0, limit: number = 20, action?: string, verdict?: string, search?: string) {
         let url = `/api/evaluations?skip=${skip}&limit=${limit}`;
         if (action) url += `&action=${action}`;
-        return this.request<Evaluation[]>(url);
+        if (verdict) url += `&verdict=${verdict}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        // Manual fetch to access headers
+        const response = await fetch(`${this.baseUrl}${url}`, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            throw new Error(error.detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const total = parseInt(response.headers.get('X-Total-Count') || '0', 10);
+        return { data: data as Evaluation[], total };
     }
 
     async getEvaluation(jobId: string) {

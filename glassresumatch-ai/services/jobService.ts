@@ -37,7 +37,7 @@ export const fetchJobsWithEvaluations = async (
 
     // Create a map of evaluations by job_id
     const evalMap = new Map<string, Evaluation>();
-    evaluations.forEach(e => evalMap.set(e.job_id, e));
+    evaluations.data.forEach(e => evalMap.set(e.job_id, e));
 
     // Merge jobs with their evaluations
     const jobsWithEvals: JobWithEvaluation[] = jobs.map(job => ({
@@ -65,16 +65,13 @@ export const fetchJobsWithEvaluations = async (
 export const fetchEvaluations = async (
   page: number,
   limit: number,
-  action?: 'apply' | 'tailor' | 'skip'
+  action?: 'apply' | 'tailor' | 'skip',
+  verdict?: 'Strong Match' | 'Moderate Match' | 'Weak Match' | 'all',
+  search?: string
 ): Promise<{ data: Evaluation[]; total: number }> => {
   try {
-    const evaluations = await apiClient.getEvaluations((page - 1) * limit, limit, action);
-    const stats = await apiClient.getEvaluationStats();
-
-    return {
-      data: evaluations,
-      total: stats.total_evaluated,
-    };
+    const verdictFilter = verdict === 'all' ? undefined : verdict;
+    return await apiClient.getEvaluations((page - 1) * limit, limit, action, verdictFilter, search);
   } catch (error) {
     console.error('Failed to fetch evaluations:', error);
     throw error;

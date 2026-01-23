@@ -3,7 +3,7 @@ Evaluations routes - Evaluate jobs and get results.
 """
 import json
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 
 from agents.supabase_client import get_supabase_client
 
@@ -44,12 +44,18 @@ def get_job_by_id(job_id: str) -> dict | None:
 
 @router.get("", response_model=list[EvaluationResult])
 def list_evaluations(
+    response: Response,
     skip: int = 0,
     limit: int = 20,
     action: str | None = None,
+    verdict: str | None = None,
+    search: str | None = None,
 ):
     """List all evaluations."""
-    rows = list_evaluations_db(skip, limit, action)
+    rows, total_count = list_evaluations_db(skip, limit, action, verdict, search)
+    
+    # Set total count header for pagination
+    response.headers["X-Total-Count"] = str(total_count)
     
     results = []
     for row_dict in rows:

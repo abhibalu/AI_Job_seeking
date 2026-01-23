@@ -1,6 +1,3 @@
-"""
-Base Agent class for OpenRouter LLM interactions.
-"""
 import json
 import time
 import logging
@@ -9,16 +6,17 @@ from typing import Any
 
 import httpx
 import os
-from langfuse.decorators import observe
-
 from backend.settings import settings
 
 logger = logging.getLogger(__name__)
 
 # Configure Langfuse Env Vars for the SDK to pick up automatically
+# MUST be set before importing langfuse.decorators
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
 os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_SECRET_KEY
 os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
+
+from langfuse.decorators import observe, langfuse_context
 
 class BaseAgent(ABC):
     """Base class for all LLM agents."""
@@ -35,7 +33,7 @@ class BaseAgent(ABC):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = settings.OPENROUTER_BASE_URL
         
-    @observe()
+    @observe(as_type="generation")
     def _call_llm(self, user_prompt: str) -> str:
         """Make a raw LLM call and return the response text. Retries with backup model on failure."""
         if not self.api_key:
@@ -57,12 +55,13 @@ class BaseAgent(ABC):
         last_exception = None
         
         for current_model in models_to_try:
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
             payload = {
                 "model": current_model,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": messages,
                 "temperature": self.temperature,
             }
             
@@ -94,7 +93,39 @@ class BaseAgent(ABC):
                         response.raise_for_status()
                         
                     data = response.json()
-                    return data["choices"][0]["message"]["content"]
+                    content = data["choices"][0]["message"]["content"]
+                    usage = data.get("usage", {})
+                    
+                    # Log full generation details to Langfuse
+                    langfuse_context.update_current_observation(
+                        model=current_model,
+                        input=messages,
+                        output=content,
+                        usage={
+                            "input": usage.get("prompt_tokens"),
+                            "output": usage.get("completion_tokens"),
+                            "total": usage.get("total_tokens"),
+                        },
+                        metadata={
+                            "temperature": self.temperature,
+                            "agent": self.__class__.__name__,
+                            "provider": "openrouter",
+                        }
+                    )
+                    
+                    # Force flush to Langfuse (otherwise batched and may be lost)
+                    langfuse_context.flush()
+                    
+                    # Log with output preview for debugging
+                    output_preview = content[:500] + "..." if len(content) > 500 else content
+                    logger.info(f"LLM call completed", extra={
+                        "model": current_model,
+                        "prompt_tokens": usage.get("prompt_tokens"),
+                        "completion_tokens": usage.get("completion_tokens"),
+                        "output_preview": output_preview,
+                    })
+                    
+                    return content
                     
                 except Exception as e:
                     # If it's the last retry, log and break to try next model

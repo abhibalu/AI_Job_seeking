@@ -183,6 +183,15 @@ async def tailor_resume(job_id: str):
     except Exception as e:
         import traceback
         traceback.print_exc()
+        
+        # Check for rate limit / quota errors
+        error_str = str(e).lower()
+        if "429" in str(e) or "rate" in error_str or "quota" in error_str or "too many requests" in error_str:
+            raise HTTPException(
+                status_code=429, 
+                detail="Rate limit exceeded. The AI model is temporarily unavailable. Please wait 1-2 minutes and try again."
+            )
+        
         raise HTTPException(status_code=500, detail=f"Tailoring failed: {str(e)}")
 
 

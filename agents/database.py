@@ -250,34 +250,40 @@ def get_evaluation_statistics() -> dict:
     if _use_supabase():
         client = _get_supabase()
         
-        # Total count
-        # HEAD request for count is efficient
-        total = client.table("job_evaluations").select("*", count="exact", head=True).execute().count or 0
-        
-        # Average score
-        # Supabase doesn't support AVG directly in JS client easily without Rcp, 
-        # but we can fetch scores if dataset is small, or use a customized query / view.
-        # For now, fetching scores is acceptable for small scale. 
-        # Better: create a view in SQL.
-        # Fallback: fetch just scores.
-        scores = client.table("job_evaluations").select("job_match_score").execute()
-        score_list = [r["job_match_score"] for r in scores.data if r["job_match_score"] is not None]
-        avg_score = sum(score_list) / len(score_list) if score_list else 0
-        
-        # Group by action
-        actions = client.table("job_evaluations").select("recommended_action").execute()
-        by_action = {}
-        for r in actions.data:
-            act = r.get("recommended_action") or "unknown"
-            by_action[act] = by_action.get(act, 0) + 1
+        try:
+            # Total count (efficient HEAD request)
+            total_res = client.table("job_evaluations").select("*", count="exact", head=True).execute()
+            total = total_res.count or 0
             
-        # Group by verdict
-        # Group by verdict
-        verdicts = client.table("job_evaluations").select("verdict").execute()
-        by_verdict = {}
-        for r in verdicts.data:
-            v = r.get("verdict") or "unknown"
-            by_verdict[v] = by_verdict.get(v, 0) + 1
+            # Fetch all needed data in ONE query to minimize round-trips
+            res = client.table("job_evaluations").select("job_match_score, recommended_action, verdict").execute()
+            data = res.data or []
+            
+            # Average Score
+            score_list = [r["job_match_score"] for r in data if r["job_match_score"] is not None]
+            avg_score = sum(score_list) / len(score_list) if score_list else 0
+            
+            # Group by Action
+            by_action = {}
+            for r in data:
+                act = r.get("recommended_action") or "unknown"
+                by_action[act] = by_action.get(act, 0) + 1
+                
+            # Group by Verdict
+            by_verdict = {}
+            for r in data:
+                v = r.get("verdict") or "unknown"
+                by_verdict[v] = by_verdict.get(v, 0) + 1
+                
+        except Exception as e:
+            logger.error(f"Failed to fetch stats from Supabase: {e}", exc_info=True)
+            # Return empty stats on failure rather than crashing API
+            return {
+                "total_evaluated": 0,
+                "average_score": 0,
+                "by_action": {},
+                "by_verdict": {},
+            }
             
         return {
             "total_evaluated": total,

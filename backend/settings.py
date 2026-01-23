@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     USE_SUPABASE: bool = Field(default=False, env="USE_SUPABASE")
     
     # Langfuse Configuration
-    LANGFUSE_PUBLIC_KEY: str = Field(default="pk-lf-1234567890", env="LANGFUSE_PUBLIC_KEY")
-    LANGFUSE_SECRET_KEY: str = Field(default="sk-lf-1234567890", env="LANGFUSE_SECRET_KEY")
+    LANGFUSE_PUBLIC_KEY: str = Field(default="", env="LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_SECRET_KEY: str = Field(default="", env="LANGFUSE_SECRET_KEY")
     LANGFUSE_HOST: str = Field(default="http://localhost:3010", env="LANGFUSE_HOST")
     
     model_config = {

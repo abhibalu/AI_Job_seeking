@@ -12,7 +12,8 @@ interface TailorReviewProps {
 }
 
 export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailoredResume, evaluation, onClose, onStatusChange }) => {
-    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>(tailoredResume.status);
+    // Defensive: default to 'pending' if status is undefined
+    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>(tailoredResume?.status || 'pending');
     const [viewMode, setViewMode] = useState<'diff' | 'final'>('diff');
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -63,7 +64,7 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                         <h2 className="text-lg font-bold text-slate-900 flex items-center">
                             Tailored Resume
                             <span className="ml-3 text-xs font-normal px-2 py-0.5 bg-gray-100 rounded text-slate-600 border border-gray-200">
-                                V{tailoredResume.version}
+                                V{tailoredResume?.version || 1}
                             </span>
                             {status === 'approved' && (
                                 <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-slate-900 text-white rounded flex items-center">

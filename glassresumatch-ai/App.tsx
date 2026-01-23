@@ -122,7 +122,8 @@ const App: React.FC = () => {
           location: null,
           posted_at: null,
           applicants_count: null,
-          company_website: null,
+          job_url: e.job_url,
+          company_website: e.company_website,
           evaluation: e,
           isEvaluated: true,
         }));

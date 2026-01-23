@@ -272,6 +272,7 @@ export interface Evaluation {
     job_id: string;
     job_url: string | null;
     company_name: string | null;
+    company_website: string | null;
     title_role: string | null;
     verdict: 'Strong Match' | 'Moderate Match' | 'Weak Match' | null;
     job_match_score: number | null;

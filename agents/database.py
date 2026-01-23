@@ -216,7 +216,11 @@ def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None, 
     """List evaluations with pagination and filtering."""
     if _use_supabase():
         client = _get_supabase()
-        query = client.table("job_evaluations").select("*", count="exact")
+        # Prepare query filtering locally first to avoid double select issue
+        # Note: Supabase-py select builder returns a filter builder, not another select builder.
+        # We must apply the select with join at the START.
+        
+        query = client.table("job_evaluations").select("*, jobs(company_website)", count="exact")
         
         if action:
             query = query.eq("recommended_action", action)
@@ -228,7 +232,19 @@ def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None, 
             
         # Supabase range is inclusive
         result = query.order("evaluated_at", desc=True).range(skip, skip + limit - 1).execute()
-        return result.data, result.count or 0
+        
+        data = result.data or []
+        # Flatten jobs.company_website -> company_website
+        for row in data:
+            if "jobs" in row and row["jobs"]:
+                # If jobs is a list (one-to-many? shouldn't be for one job_id) or dict
+                if isinstance(row["jobs"], dict):
+                    row["company_website"] = row["jobs"].get("company_website")
+                elif isinstance(row["jobs"], list) and len(row["jobs"]) > 0:
+                    row["company_website"] = row["jobs"][0].get("company_website")
+                del row["jobs"]
+        
+        return data, result.count or 0
     
     conn = get_db_connection()
     cursor = conn.cursor()

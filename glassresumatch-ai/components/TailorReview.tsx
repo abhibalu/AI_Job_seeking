@@ -148,6 +148,7 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                     <ResumePreview
                         data={tailoredResume.content}
                         originalData={viewMode === 'diff' ? baseResume : undefined}
+                        template="ats_friendly"
                     />
                 </div>
             </div>

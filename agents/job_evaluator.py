@@ -28,7 +28,7 @@ class JobEvaluatorAgent(BaseAgent):
         try:
             db_resume = get_master_resume()
             if db_resume:
-                self.resume = db_resume
+                self.resume = self._normalize_resume(db_resume)
                 return
         except Exception as e:
             logger.warning(f"Failed to load resume from DB: {e}")
@@ -37,9 +37,66 @@ class JobEvaluatorAgent(BaseAgent):
         resume_path = Path("agent_prompts/base_resume.json")
         if resume_path.exists():
             with open(resume_path) as f:
-                self.resume = json.load(f)
+                self.resume = self._normalize_resume(json.load(f))
         else:
             raise FileNotFoundError(f"Resume not found in DB or at {resume_path}")
+    
+    def _normalize_resume(self, resume: dict) -> dict:
+        """Normalize resume to JSON Resume format.
+        
+        Handles both:
+        - Frontend format: fullName, experience, etc.
+        - JSON Resume format: basics, work, etc.
+        """
+        # If already in JSON Resume format, return as-is
+        if "basics" in resume and "work" in resume:
+            return resume
+        
+        # Transform frontend format to JSON Resume format
+        normalized = {}
+        
+        # Map basics
+        normalized["basics"] = {
+            "name": resume.get("fullName", ""),
+            "label": resume.get("title", ""),
+            "email": resume.get("email", ""),
+            "phone": resume.get("phone", ""),
+            "location": {"city": resume.get("location", "")},
+            "summary": resume.get("summary", ""),
+            "profiles": [{"url": url} for url in resume.get("websites", [])]
+        }
+        
+        # Map work experience
+        normalized["work"] = []
+        for exp in resume.get("experience", []):
+            normalized["work"].append({
+                "id": exp.get("id", ""),
+                "name": exp.get("company", ""),
+                "position": exp.get("role", ""),
+                "location": exp.get("location", ""),
+                "startDate": exp.get("period", "").split(" - ")[0] if " - " in exp.get("period", "") else exp.get("period", ""),
+                "endDate": exp.get("period", "").split(" - ")[1] if " - " in exp.get("period", "") else "",
+                "highlights": exp.get("achievements", [])
+            })
+        
+        # Map education
+        normalized["education"] = []
+        for edu in resume.get("education", []):
+            normalized["education"].append({
+                "id": edu.get("id", ""),
+                "institution": edu.get("institution", ""),
+                "studyType": edu.get("degree", ""),
+                "area": "",
+                "endDate": edu.get("period", ""),
+                "location": edu.get("location", ""),
+                "score": edu.get("score", "")
+            })
+        
+        # Map skills (already strings in frontend format)
+        normalized["skills"] = resume.get("skills", [])
+        
+        logger.info(f"Normalized resume from frontend format. Work entries: {len(normalized['work'])}")
+        return normalized
     
     def _load_approved_skills(self):
         """Load approved skills from markdown file."""

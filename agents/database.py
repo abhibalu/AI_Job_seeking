@@ -618,9 +618,16 @@ def get_task_status(task_id: str) -> dict | None:
 # ============================================
 
 def save_resume(content: dict, name: str = "Master Resume", is_master: bool = False):
-    """Save parsed resume to database."""
+    """Save parsed resume to database.
+    
+    If is_master=True, first unsets all other master resumes.
+    """
     if _use_supabase():
         client = _get_supabase()
+        
+        # If saving as master, unset all other masters first
+        if is_master:
+            client.table("resumes").update({"is_master": False}).eq("is_master", True).execute()
         
         data = {
             "name": name,
@@ -636,6 +643,10 @@ def save_resume(content: dict, name: str = "Master Resume", is_master: bool = Fa
     conn = get_db_connection()
     cursor = conn.cursor()
     import uuid
+    
+    # If saving as master, unset all other masters first
+    if is_master:
+        cursor.execute("UPDATE resumes SET is_master = 0 WHERE is_master = 1")
     
     cursor.execute("""
         INSERT INTO resumes (id, name, content, is_master, updated_at)

@@ -26,18 +26,65 @@ from agents.resume_tailor import ResumeTailorAgent
 
 APPROVED_SKILLS_PATH = "agent_prompts/approved_skills.md"
 
+def _to_frontend_format(json_resume: dict) -> dict:
+    """Transform JSON Resume format to frontend format for the Editor.
+    
+    JSON Resume uses: basics, work, highlights
+    Frontend uses: fullName, experience, achievements
+    """
+    # If already in frontend format, return as-is
+    if "fullName" in json_resume and "experience" in json_resume:
+        return json_resume
+    
+    basics = json_resume.get("basics", {})
+    location = basics.get("location", {})
+    location_str = location.get("city", "") if isinstance(location, dict) else str(location)
+    
+    return {
+        "fullName": basics.get("name", ""),
+        "title": basics.get("label", ""),
+        "email": basics.get("email", ""),
+        "phone": basics.get("phone", ""),
+        "location": location_str,
+        "summary": basics.get("summary", ""),
+        "websites": [p.get("url", "") for p in basics.get("profiles", [])],
+        "experience": [
+            {
+                "id": work.get("id", str(i)),
+                "company": work.get("name", ""),
+                "role": work.get("position", ""),
+                "period": f"{work.get('startDate', '')} - {work.get('endDate', 'Present')}",
+                "location": work.get("location", ""),
+                "achievements": work.get("highlights", [])
+            }
+            for i, work in enumerate(json_resume.get("work", []))
+        ],
+        "education": [
+            {
+                "id": edu.get("id", str(i)),
+                "institution": edu.get("institution", ""),
+                "degree": edu.get("studyType", edu.get("degree", "")),
+                "period": edu.get("endDate", edu.get("period", "")),
+                "location": edu.get("location", ""),
+                "score": edu.get("score", "")
+            }
+            for i, edu in enumerate(json_resume.get("education", []))
+        ],
+        "skills": json_resume.get("skills", [])
+    }
+
 @router.get("/master")
 def get_master_resume():
-    """Get the current master resume JSON."""
+    """Get the current master resume JSON in frontend format."""
     resume = get_db_master_resume()
     if resume:
-        return resume
+        return _to_frontend_format(resume)
         
     # Fallback to file for backward compatibility during migration
     if os.path.exists(MASTER_RESUME_PATH):
         try:
             with open(MASTER_RESUME_PATH, "r") as f:
-                return json.load(f)
+                return _to_frontend_format(json.load(f))
         except:
             pass
             
@@ -45,25 +92,77 @@ def get_master_resume():
 
 from api.schemas import ResumeData
 
+def _to_json_resume_format(data: dict) -> dict:
+    """Transform frontend resume format to JSON Resume format.
+    
+    Frontend uses: fullName, experience, achievements
+    JSON Resume uses: basics, work, highlights
+    """
+    return {
+        "$schema": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
+        "basics": {
+            "name": data.get("fullName", ""),
+            "label": data.get("title", ""),
+            "email": data.get("email", ""),
+            "phone": data.get("phone", ""),
+            "location": {"city": data.get("location", "")},
+            "summary": data.get("summary", ""),
+            "profiles": [{"url": url} for url in data.get("websites", [])]
+        },
+        "work": [
+            {
+                "id": exp.get("id", ""),
+                "name": exp.get("company", ""),
+                "position": exp.get("role", ""),
+                "location": exp.get("location", ""),
+                "startDate": exp.get("period", "").split(" - ")[0] if " - " in exp.get("period", "") else exp.get("period", ""),
+                "endDate": exp.get("period", "").split(" - ")[1] if " - " in exp.get("period", "") else "Present",
+                "highlights": exp.get("achievements", [])
+            }
+            for exp in data.get("experience", [])
+        ],
+        "education": [
+            {
+                "id": edu.get("id", ""),
+                "institution": edu.get("institution", ""),
+                "studyType": edu.get("degree", ""),
+                "area": "",
+                "endDate": edu.get("period", ""),
+                "location": edu.get("location", ""),
+                "score": edu.get("score", "")
+            }
+            for edu in data.get("education", [])
+        ],
+        "skills": data.get("skills", []),
+        "meta": {"theme": "elegant"}
+    }
+
 @router.post("/master")
 def update_master_resume(resume: ResumeData):
-    """Update (save) the master resume with new content."""
+    """Update (save) the master resume with new content.
+    
+    Converts frontend format to JSON Resume format before saving.
+    """
     try:
         # Convert Pydantic model to dict
-        content = resume.model_dump()
+        frontend_data = resume.model_dump()
+        
+        # Transform to JSON Resume format for storage
+        json_resume_content = _to_json_resume_format(frontend_data)
         
         # Save as new master version
-        save_resume(content, name="Master Resume", is_master=True)
+        save_resume(json_resume_content, name="Master Resume", is_master=True)
         
         # Also update file backup for redundancy
         if os.path.exists(MASTER_RESUME_PATH):
              with open(MASTER_RESUME_PATH, "w") as f:
-                json.dump(content, f, indent=2)
+                json.dump(json_resume_content, f, indent=2)
                 
         return {"status": "success", "message": "Resume updated successfully"}
     except Exception as e:
         print(f"Error updating resume: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 from fastapi.concurrency import run_in_threadpool
 

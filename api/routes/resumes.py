@@ -97,7 +97,13 @@ def _to_json_resume_format(data: dict) -> dict:
     
     Frontend uses: fullName, experience, achievements
     JSON Resume uses: basics, work, highlights
+    
+    If already in JSON Resume format, returns as-is.
     """
+    # Check if already in JSON Resume format
+    if "basics" in data and "work" in data:
+        return data
+        
     return {
         "$schema": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
         "basics": {
@@ -242,6 +248,12 @@ async def tailor_resume(job_id: str):
         
         if not base_resume:
             raise HTTPException(status_code=400, detail="No base resume found.")
+        
+        # Normalize to JSON Resume format (handles both frontend and JSON Resume formats)
+        base_resume = _to_json_resume_format(base_resume)
+        
+        if not base_resume:
+            raise HTTPException(status_code=400, detail="No base resume found.")
 
         # 2. Get Approved Skills
         approved_skills = ""
@@ -276,7 +288,7 @@ async def tailor_resume(job_id: str):
             "id": record_id,
             "version": version,
             "status": "pending",
-            "content": tailored_content
+            "content": _to_frontend_format(tailored_content)
         }
 
     except Exception as e:
@@ -297,7 +309,12 @@ async def tailor_resume(job_id: str):
 @router.get("/tailored/{job_id}")
 def get_tailored_versions(job_id: str):
     """Get all tailored versions for a job."""
-    return get_tailored_resumes(job_id)
+    versions = get_tailored_resumes(job_id)
+    # Convert content to frontend format for each version
+    for version in versions:
+        if version.get("content"):
+            version["content"] = _to_frontend_format(version["content"])
+    return versions
 
 
 @router.post("/tailored/{record_id}/status")

@@ -1,25 +1,17 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Evaluation, EvaluationStats } from './services/apiClient';
-import {
-  fetchJobsWithEvaluations,
-  fetchEvaluations,
-  evaluateJob,
-  deleteJobs,
-  importJob,
-  getAllJobIds,
-  getEvaluationStats,
-  getEvaluation,
-  JobWithEvaluation
-} from './services/jobService';
-import apiClient from './services/apiClient';
-import { ViewMode, FilterOptions, ResumeData, INITIAL_DATA } from './types';
+import React, { useState, useRef } from 'react';
+import { JobWithEvaluation, evaluateJob, importJob } from './services/jobService';
+import { useJobs } from './hooks/useJobs';
+import { useResumeState } from './hooks/useResumeState';
+import { useJobSelection } from './hooks/useJobSelection';
+import { sortJobs } from './utils/sort';
+import { ViewMode, FilterOptions, TemplateType } from './types';
 import { JobListItem } from './components/JobListItem';
 import { JobDetailView } from './components/JobDetailView';
 import { Pagination } from './components/Pagination';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { StatsCard } from './components/StatsCard';
-import { ResumePreview, TemplateType } from './components/ResumePreview';
+import { ResumePreview } from './components/ResumePreview';
 import { BatchEvaluate } from './components/BatchEvaluate';
 import { GlassCard } from './components/GlassCard';
 import { Editor } from './components/Editor';
@@ -31,41 +23,13 @@ import {
   Printer,
   Check,
   Briefcase,
-  ChevronRight,
-  User,
-  Eye,
   Upload,
   Download,
   Trash2
 } from 'lucide-react';
 
 const App: React.FC = () => {
-  // --- Job Board Data state ---
-  const [jobs, setJobs] = useState<JobWithEvaluation[]>([]);
-  const [stats, setStats] = useState<EvaluationStats | null>(null);
-  const [totalJobs, setTotalJobs] = useState(0);
-
-  // --- Resume Builder State ---
-  const [resumeData, setResumeData] = useState<ResumeData>(INITIAL_DATA);
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
-  const [isResumeLoading, setIsResumeLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const printRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // --- UI state ---
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [tailoringJobId, setTailoringJobId] = useState<string | null>(null);
-
-  // --- Filter state ---
+  // --- UI State ---
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [filters, setFilters] = useState<FilterOptions>({
     searchQuery: '',
@@ -74,316 +38,77 @@ const App: React.FC = () => {
     sortBy: 'date',
     sortOrder: 'desc',
   });
-
-  // --- Modals ---
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [newJobText, setNewJobText] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
+
+  // Lifted state for Resume Tailoring
+  const [tailoringJobId, setTailoringJobId] = useState<string | null>(null);
+
+  // --- Profile / Resume State (Hook) ---
+  const {
+    resumeData,
+    setResumeData,
+    isResumeLoading,
+    isUploading,
+    isGeneratingPdf,
+    fileInputRef,
+    handleFileUpload,
+    generatePdf
+  } = useResumeState();
+
+  // --- Resume Builder UI State ---
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('modern');
+  const printRef = useRef<HTMLDivElement>(null);
+
+  // --- Jobs Data (Hook) ---
+  const {
+    jobs,
+    stats,
+    totalJobs,
+    loading,
+    error,
+    currentPage,
+    setCurrentPage,
+    refresh: loadData
+  } = useJobs(viewMode, filters);
 
   const ITEMS_PER_PAGE = 9;
 
-  // --- Fetch Jobs Data ---
-  // --- Fetch Jobs Data ---
-  const loadData = useCallback(async (silent = false) => {
-    // If we are in resume view, we technically don't need to refresh jobs, 
-    // but we'll stick to the original behavior to keep state fresh or handle it gracefully.
-    if (viewMode === 'resume') return;
+  // --- Derived: Sorted Jobs ---
+  // Applying client-side sorting/filtering to the fetched page
+  // Filtering is handled by useJobs/backend mostly, but we ensure consistency here for search/local
+  const filteredJobs = React.useMemo(() => {
+    let result = [...jobs];
 
-    if (!silent) setLoading(true);
-    setError(null);
-    try {
-      const statsResult = await getEvaluationStats().catch(() => null);
-      setStats(statsResult);
-
-      // Determine if we should use Evaluation-first strategy (for filtered pagination correctness)
-      const isActionFilter = filters.action !== 'all';
-      const isVerdictFilter = filters.verdict !== 'all';
-      const useEvalStrategy = viewMode === 'evaluated' || isActionFilter || isVerdictFilter;
-
-      if (useEvalStrategy) {
-        const actionFilter = filters.action !== 'all' ? filters.action : undefined;
-        const verdictFilter = filters.verdict !== 'all' ? filters.verdict : undefined;
-        // Search query as company filter
-        const searchQuery = filters.searchQuery ? filters.searchQuery : undefined;
-
-        // TS doesn't know about the new signature yet because we just updated it, but it's fine
-        const evaluationsResult = await fetchEvaluations(
-          currentPage,
-          ITEMS_PER_PAGE,
-          actionFilter as any,
-          verdictFilter as any,
-          searchQuery
-        );
-
-        const jobsWithEvals: JobWithEvaluation[] = evaluationsResult.data.map((e: any) => ({
-          id: e.job_id,
-          title: e.title_role,
-          company_name: e.company_name,
-          location: null,
-          posted_at: null,
-          applicants_count: null,
-          job_url: e.job_url,
-          company_website: e.company_website,
-          evaluation: e,
-          isEvaluated: true,
-        }));
-
-        setJobs(jobsWithEvals);
-        setTotalJobs(evaluationsResult.total);
-      } else {
-        // 'all' or 'pending' view WITHOUT extra filters
-        const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
-        const companyFilter = filters.searchQuery ? filters.searchQuery : undefined;
-
-        const jobsResult = await fetchJobsWithEvaluations(currentPage, ITEMS_PER_PAGE, companyFilter, isEvaluatedFilter);
-        setJobs(jobsResult.data);
-        setTotalJobs(jobsResult.total);
-      }
-    } catch (err) {
-      console.error('Failed to load data:', err);
-      setError('Failed to load jobs. Make sure the API server is running.');
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [currentPage, viewMode, filters.action, filters.searchQuery]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // --- Fetch Resume Data ---
-  const fetchResume = useCallback(async () => {
-    try {
-      setIsResumeLoading(true);
-      const backendData = await apiClient.getMasterResume();
-
-      // Check if processing
-      if (backendData.status === 'processing') {
-        // Return true to indicate we should keep polling
-        return true;
-      }
-
-      // Check if error
-      if (backendData.status === 'error') {
-        console.error("Resume parsing error:", backendData.error);
-        alert(`Resume parsing failed: ${backendData.error}\n\nPlease try again or check the backend logs.`);
-        return false;
-      }
-
-
-      // 1. Saved Format (Flat ResumeData)
-      if (backendData && backendData.fullName) {
-        setResumeData(backendData);
-        setIsUploading(false);
-        return false;
-      }
-
-      // 2. Legacy/Parsed Format (JSON Resume Schema)
-      if (backendData && backendData.basics) {
-        // Map Nested JSON Resume to Flat ResumeData
-        const mappedData: ResumeData = {
-          fullName: backendData.basics.name || "Your Name",
-          title: backendData.basics.label || "Professional Title",
-          email: backendData.basics.email || "",
-          phone: backendData.basics.phone || "",
-          location: backendData.basics.location ?
-            `${backendData.basics.location.city || ''}, ${backendData.basics.location.region || ''} ${backendData.basics.location.countryCode || ''}`.replace(/^, /, '').replace(/, $/, '')
-            : "",
-          websites: [
-            backendData.basics.url || "",
-            ...(backendData.basics.profiles?.map((p: any) => p.url) || [])
-          ].filter(Boolean),
-          summary: backendData.basics.summary || "",
-          experience: backendData.work?.map((w: any) => ({
-            id: Math.random().toString(36).substr(2, 9),
-            company: w.name || "",
-            role: w.position || "",
-            period: `${w.startDate || ''} - ${w.endDate || 'Present'}`,
-            location: w.location || "",
-            achievements: w.highlights || []
-          })) || [],
-          education: backendData.education?.map((e: any) => ({
-            id: Math.random().toString(36).substr(2, 9),
-            institution: e.institution || "",
-            degree: `${e.studyType || ''} ${e.area || ''}`,
-            period: `${e.startDate || ''} - ${e.endDate || ''}`,
-            location: "",
-            score: e.score || ""
-          })) || [],
-          skills: backendData.skills?.map((s: any) =>
-            s.keywords && s.keywords.length > 0
-              ? `${s.name}: ${s.keywords.join(', ')}`
-              : s.name
-          ) || []
-        };
-        setResumeData(mappedData);
-        setIsUploading(false); // Stop loading if we were uploading
-      }
-      return false; // Stop polling
-    } catch (err) {
-      console.error("Failed to load resume", err);
-      return false; // Stop polling on error
-    } finally {
-      setIsResumeLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchResume();
-  }, [fetchResume]);
-
-  // --- Resume Upload Handler ---
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    setIsResumeLoading(true);
-
-    try {
-      await apiClient.uploadResume(file);
-
-      // Start polling for completion
-      const pollInterval = setInterval(async () => {
-        const serverStillProcessing = await fetchResume();
-        if (!serverStillProcessing) {
-          clearInterval(pollInterval);
-          setIsUploading(false);
-        }
-      }, 2000); // Check every 2 seconds
-
-      // Timeout after 60 seconds
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        setIsUploading(false);
-        setIsResumeLoading(false);
-      }, 60000);
-
-    } catch (error) {
-      console.error("Upload failed", error);
-      setIsUploading(false);
-      setIsResumeLoading(false);
-      alert("Failed to upload resume. Please try again.");
-    } finally {
-      // Clear input
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  // --- Resume Handlers ---
-  const handlePrint = () => {
-    window.focus();
-    setTimeout(() => {
-      window.print();
-    }, 150);
-  };
-
-  const handleDownloadPdf = async () => {
-    setIsGeneratingPdf(true);
-    try {
-      const blob = await apiClient.generatePdf(resumeData, selectedTemplate);
-
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${resumeData.fullName.replace(/\s+/g, '_')}_Resume.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error("PDF generation failed", error);
-      alert("Failed to generate PDF. Please ensure the backend server has 'typst' installed.");
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
-
-
-  const templates: { id: TemplateType, label: string, desc: string }[] = [
-    { id: 'modern', label: 'Modern', desc: 'Clean, balanced, standard' },
-    { id: 'classic', label: 'Classic', desc: 'Serif, traditional, formal' },
-    { id: 'compact', label: 'Compact', desc: 'Dense, single page optimized' },
-    { id: 'tech', label: 'Technical', desc: 'Monospaced, code-like' },
-    { id: 'minimal', label: 'Traditional', desc: 'Ivy League, ATS-Standard' },
-    { id: 'ats_friendly', label: 'ATS Friendly', desc: ' optimized for ATS parsing' },
-  ];
-
-  // --- Filter and sort jobs ---
-  const filteredJobs = jobs.filter(job => {
-    // viewMode filtering is now handled by backend pagination
-    if (viewMode === 'evaluated' && !job.isEvaluated) return false;
-
-    // Kept for now: if (viewMode === 'pending' && job.isEvaluated) return false;
-    // but effectively handled by backend.
+    // Basic client-side filtering cleanup if needed (e.g. strict match)
     if (filters.searchQuery) {
       const query = filters.searchQuery.toLowerCase();
-      const matchesCompany = job.company_name?.toLowerCase().includes(query);
-      const matchesTitle = job.title?.toLowerCase().includes(query);
-      if (!matchesCompany && !matchesTitle) return false;
-    }
-    if (filters.verdict !== 'all' && job.evaluation?.verdict !== filters.verdict) return false;
-    if (filters.action !== 'all' && job.evaluation?.recommended_action !== filters.action) return false;
-    return true;
-  }).sort((a, b) => {
-    const multiplier = filters.sortOrder === 'asc' ? 1 : -1;
-
-    // Smart Sort specific logic when sorting by 'score' (default)
-    if (filters.sortBy === 'score') {
-      const now = Date.now();
-      const NEW_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-
-      const aTime = new Date(a.updated_at || a.posted_at || 0).getTime();
-      const bTime = new Date(b.updated_at || b.posted_at || 0).getTime();
-
-      const aIsAnalyzing = a.id === evaluatingJobId;
-      const bIsAnalyzing = b.id === evaluatingJobId;
-      // "New" only applies to unevaluated jobs (evaluated ones jump to score tier)
-      const aIsNew = !a.isEvaluated && (now - aTime) < NEW_THRESHOLD;
-      const bIsNew = !b.isEvaluated && (now - bTime) < NEW_THRESHOLD;
-
-      const aPinned = aIsAnalyzing || aIsNew;
-      const bPinned = bIsAnalyzing || bIsNew;
-
-      // Tier 1: Pinned (Analyzing or Just Imported)
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-      if (aPinned && bPinned) return bTime - aTime; // Newest pinned first
-
-      // Tier 2: Evaluated (Score desc) vs Unevaluated
-      const aHasEval = a.isEvaluated && a.evaluation?.job_match_score != null;
-      const bHasEval = b.isEvaluated && b.evaluation?.job_match_score != null;
-
-      if (aHasEval && !bHasEval) return -1 * multiplier;
-      if (!aHasEval && bHasEval) return 1 * multiplier;
-
-      if (aHasEval && bHasEval) {
-        // Both evaluated: Sort by Score
-        const scoreA = a.evaluation?.job_match_score || 0;
-        const scoreB = b.evaluation?.job_match_score || 0;
-        if (scoreA !== scoreB) return (scoreB - scoreA) * multiplier;
-      }
-
-      // Tier 3: Both Unevaluated (or same score) -> Sort by Time
-      return (bTime - aTime) * multiplier;
+      result = result.filter(j =>
+        j.company_name?.toLowerCase().includes(query) ||
+        j.title?.toLowerCase().includes(query)
+      );
     }
 
-    // Standard sorts for other columns
-    switch (filters.sortBy) {
-      case 'company':
-        return ((a.company_name || '').localeCompare(b.company_name || '')) * multiplier;
-      case 'date':
-        return ((b.posted_at || '').localeCompare(a.posted_at || '')) * multiplier;
-      default:
-        return 0;
-    }
-  });
+    // Sorting via Utility
+    return sortJobs(result, filters.sortBy, filters.sortOrder, evaluatingJobId);
+  }, [jobs, filters, evaluatingJobId]);
 
-  const selectedJob = jobs.find(j => j.id === selectedJobId) || null;
+  // --- Selection (Hook) ---
+  const {
+    selectedIds,
+    isDeleting,
+    toggleSelectJob,
+    toggleSelectAll,
+    handleDeleteSelected
+  } = useJobSelection(totalJobs, filteredJobs, filters, () => loadData(true)); // Refresh silently on delete
 
-  const handleJobClick = async (job: JobWithEvaluation) => {
+  // --- Handlers ---
+  const handleJobClick = (job: JobWithEvaluation) => {
     setSelectedJobId(job.id);
   };
 
@@ -392,10 +117,10 @@ const App: React.FC = () => {
     try {
       await evaluateJob(jobId);
       await loadData(true);
-      // If the evaluated job is the one currently selected, reload updates it automatically via selectedJob derivation
     } catch (err) {
       console.error('Failed to evaluate job:', err);
-      setError('Failed to evaluate job. Please try again.');
+      // setError handled by hook usually, but here distinct
+      alert('Failed to evaluate job. Please try again.');
     } finally {
       setEvaluatingJobId(null);
     }
@@ -405,20 +130,12 @@ const App: React.FC = () => {
     if (!newJobText.trim()) return;
     setAnalyzing(true);
     try {
-      // Assuming text is a URL
-      // Assuming text is a URL
       const response = await importJob(newJobText.trim());
 
       if (response && response.id) {
-        // Find and select the job (it might be newly added)
         setSelectedJobId(response.id);
-
-        // Auto-start evaluation for the FIRST job (or only job)
         await evaluateJob(response.id);
-
-        await loadData(); // Reload list
-
-        // Re-select after reload
+        await loadData();
         setSelectedJobId(response.id);
 
         if (response.count && response.count > 1) {
@@ -429,7 +146,6 @@ const App: React.FC = () => {
       } else {
         throw new Error("Import returned no ID");
       }
-
     } catch (error) {
       console.error('Import/Analyze failed', error);
       alert('Failed to import/analyze job. Ensure it is a valid LinkedIn URL.');
@@ -440,54 +156,23 @@ const App: React.FC = () => {
     }
   };
 
-  // --- Selection Handlers ---
-  const toggleSelectJob = (id: string) => {
-    const newSelected = new Set(selectedIds);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedIds(newSelected);
+  const handlePrint = () => {
+    window.focus();
+    setTimeout(() => {
+      window.print();
+    }, 150);
   };
 
-  const toggleSelectAll = async () => {
-    if (selectedIds.size === totalJobs && totalJobs > 0) {
-      // If all are selected (based on count), unselect all
-      setSelectedIds(new Set());
-    } else {
-      try {
-        if (filters.searchQuery) {
-          // If filtering, select only visible for now (simplification)
-          setSelectedIds(new Set(filteredJobs.map(j => j.id)));
-        } else {
-          // Global Select All - Fetch all IDs
-          const allIds = await getAllJobIds();
-          setSelectedIds(new Set(allIds));
-        }
-      } catch (err) {
-        console.error("Failed to select all", err);
-        alert("Failed to select all jobs");
-      }
-    }
-  };
+  const selectedJob = jobs.find(j => j.id === selectedJobId) || null;
 
-  const handleDeleteSelected = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedIds.size} jobs?`)) return;
-
-    setIsDeleting(true);
-    try {
-      await deleteJobs(Array.from(selectedIds));
-      setSelectedIds(new Set());
-      await loadData();
-    } catch (err) {
-      console.error('Failed to delete jobs:', err);
-      alert('Failed to delete jobs');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
+  const templatesList: { id: TemplateType, label: string, desc: string }[] = [
+    { id: 'modern', label: 'Modern', desc: 'Clean, balanced, standard' },
+    { id: 'classic', label: 'Classic', desc: 'Serif, traditional, formal' },
+    { id: 'compact', label: 'Compact', desc: 'Dense, single page optimized' },
+    { id: 'tech', label: 'Technical', desc: 'Monospaced, code-like' },
+    { id: 'minimal', label: 'Traditional', desc: 'Ivy League, ATS-Standard' },
+    { id: 'ats_friendly', label: 'ATS Friendly', desc: ' optimized for ATS parsing' },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-blue-100 selection:text-blue-900 font-sans">
@@ -509,17 +194,14 @@ const App: React.FC = () => {
         />
       </div>
 
-      {/* Main Container - Reset padding/margins for print */}
       <main className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 print:p-0 print:m-0 print:max-w-none print:w-full">
 
-        {/* Stats Card - Show only in job views */}
         {viewMode !== 'resume' && (
           <div className="print:hidden">
             <StatsCard stats={stats} totalJobs={totalJobs} />
           </div>
         )}
 
-        {/* Filter Bar - Show only in job views */}
         {viewMode !== 'resume' && (
           <div className="print:hidden">
             <FilterBar
@@ -531,7 +213,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 flex items-center print:hidden">
             <AlertCircle className="w-5 h-5 text-rose-500 mr-3" />
@@ -545,10 +226,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* --- MAIN CONTENT AREA --- */}
         {viewMode === 'resume' ? (
           <div>
-            {/* Resume Toolbar - Hide in print */}
+            {/* Resume Toolbar */}
             <div className="mb-8 animate-in slide-in-from-top-2 relative z-40 print:hidden">
               <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between p-6 rounded-2xl bg-white border border-slate-200 shadow-xl">
 
@@ -556,7 +236,7 @@ const App: React.FC = () => {
                 <div className="flex-1 w-full lg:w-auto overflow-hidden">
                   <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select Template</h4>
                   <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-200">
-                    {templates.map(t => (
+                    {templatesList.map(t => (
                       <button
                         key={t.id}
                         onClick={() => setSelectedTemplate(t.id)}
@@ -579,10 +259,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="flex items-center gap-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
-
-                  {/* File Upload Input */}
                   <input
                     type="file"
                     accept=".pdf"
@@ -613,7 +290,7 @@ const App: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={handleDownloadPdf}
+                    onClick={() => generatePdf(selectedTemplate)}
                     disabled={isGeneratingPdf}
                     className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
@@ -643,7 +320,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Resume Preview - Position absolutely for print */}
             <div className="flex justify-center pb-12 print:pb-0 print:block">
               {isResumeLoading ? (
                 <div className="py-20 flex flex-col items-center">
@@ -660,7 +336,6 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          // --- JOB BOARD CONTENT ---
           <div className="print:hidden">
             {loading ? (
               <div className="flex flex-col items-center justify-center h-[60vh]">
@@ -728,7 +403,6 @@ const App: React.FC = () => {
                         onClick={() => handleJobClick(job)}
                       />
                     ))}
-                    {/* Pagination inside sidebar */}
                     <div className="p-4 border-t border-slate-100">
                       <Pagination
                         currentPage={currentPage}
@@ -744,17 +418,10 @@ const App: React.FC = () => {
                   {selectedJob ? (
                     <JobDetailView
                       job={selectedJob}
-                      onEvaluate={() => {
-                        // Reload data to reflect new status (silent refresh)
-                        loadData(true);
-                      }}
+                      onEvaluate={() => loadData(true)}
                       tailoringJobId={tailoringJobId}
                       onTailorStart={setTailoringJobId}
-                      onTailorEnd={() => {
-                        setTailoringJobId(null);
-                        // Refresh data just in case statuses update, though DetailView handles display
-                        // loadData(true);
-                      }}
+                      onTailorEnd={() => setTailoringJobId(null)}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
@@ -771,16 +438,14 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Batch Evaluate Modal */}
       <div className="print:hidden">
         <BatchEvaluate
           isOpen={isBatchModalOpen}
           onClose={() => setIsBatchModalOpen(false)}
-          onComplete={loadData}
+          onComplete={() => loadData(false)}
         />
       </div>
 
-      {/* Add New Job Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
           <div
@@ -806,26 +471,29 @@ const App: React.FC = () => {
                 Paste a LinkedIn job URL. We will scrape and analyze it automatically.
               </p>
             </div>
-            <div className="flex justify-end mt-4 space-x-3">
+            <div className="flex justify-end gap-3">
               <button
                 onClick={() => setIsAddModalOpen(false)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors"
                 disabled={analyzing}
-                className="px-4 py-2 rounded-lg hover:bg-slate-100 text-slate-500 font-medium transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAnalyzeNewJob}
                 disabled={analyzing || !newJobText.trim()}
-                className="px-6 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center transition-all"
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-md transition-all flex items-center gap-2"
               >
                 {analyzing ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                     Analyzing...
                   </>
                 ) : (
-                  'Analyze Match'
+                  <>
+                    Start Analysis
+                    <Sparkles className="w-4 h-4" />
+                  </>
                 )}
               </button>
             </div>
@@ -833,30 +501,23 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Editor Slide-over */}
-      <div
-        className={`
-            fixed inset-y-0 right-0 z-50 w-full md:w-[600px] bg-[#0f172a] shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-white/10 print:hidden
-            ${isEditorOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'}
-          `}
-      >
-        {isEditorOpen && (
-          <Editor
-            data={resumeData}
-            onChange={setResumeData}
-            onClose={() => setIsEditorOpen(false)}
-          />
-        )}
-      </div>
-
-      {/* Backdrop for Editor */}
       {isEditorOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity print:hidden"
-          onClick={() => setIsEditorOpen(false)}
+        <Editor
+          initialData={resumeData}
+          onSave={async (newData) => {
+            try {
+              // Note: Saving updates the Master state backend, we should refetch
+              setResumeData(newData);
+              setIsEditorOpen(false);
+              await apiClient.saveMasterResume(newData);
+            } catch (error) {
+              console.error("Failed to save resume", error);
+              alert("Failed to save resume updates.");
+            }
+          }}
+          onClose={() => setIsEditorOpen(false)}
         />
       )}
-
     </div>
   );
 };

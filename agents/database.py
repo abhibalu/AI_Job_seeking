@@ -25,6 +25,30 @@ def _use_supabase() -> bool:
     return settings.USE_SUPABASE and settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY
 
 
+def _execute_safe(query_builder):
+    """Execute a Supabase query with retry logic for connection drops."""
+    import time
+    from httpx import RemoteProtocolError
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return query_builder.execute()
+        except (RemoteProtocolError, Exception) as e:
+            is_disconnect = "disconnected" in str(e).lower() or isinstance(e, RemoteProtocolError)
+            
+            if is_disconnect and attempt < max_retries - 1:
+                wait_time = 0.5 * (2 ** attempt)
+                logger.warning(f"Supabase connection dropped. Retrying in {wait_time}s... ({attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+                
+                # If we could force client refresh here it would be better, but query_builder is bound to old client
+                # Ideally we should rebuild the query, but we can't easily.
+                # However, httpx usually reconnects on new request if pool allows.
+                continue
+            raise e
+
+
 # ============================================
 # SQLITE FUNCTIONS (Original)
 # ============================================
@@ -282,11 +306,11 @@ def get_evaluation_statistics() -> dict:
         
         try:
             # Total count (efficient HEAD request)
-            total_res = client.table("job_evaluations").select("*", count="exact", head=True).execute()
+            total_res = _execute_safe(client.table("job_evaluations").select("*", count="exact", head=True))
             total = total_res.count or 0
             
             # Fetch all needed data in ONE query to minimize round-trips
-            res = client.table("job_evaluations").select("job_match_score, recommended_action, verdict").execute()
+            res = _execute_safe(client.table("job_evaluations").select("job_match_score, recommended_action, verdict"))
             data = res.data or []
             
             # Average Score

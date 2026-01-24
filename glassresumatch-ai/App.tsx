@@ -63,6 +63,7 @@ const App: React.FC = () => {
   const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [tailoringJobId, setTailoringJobId] = useState<string | null>(null);
 
   // --- Filter state ---
   const [viewMode, setViewMode] = useState<ViewMode>('all');
@@ -746,6 +747,13 @@ const App: React.FC = () => {
                       onEvaluate={() => {
                         // Reload data to reflect new status (silent refresh)
                         loadData(true);
+                      }}
+                      tailoringJobId={tailoringJobId}
+                      onTailorStart={setTailoringJobId}
+                      onTailorEnd={() => {
+                        setTailoringJobId(null);
+                        // Refresh data just in case statuses update, though DetailView handles display
+                        // loadData(true);
                       }}
                     />
                   ) : (

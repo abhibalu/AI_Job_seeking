@@ -17,9 +17,12 @@ import { logger } from '../utils/logger';
 interface JobDetailViewProps {
     job: JobWithEvaluation;
     onEvaluate?: () => void;
+    tailoringJobId?: string | null;
+    onTailorStart?: (jobId: string) => void;
+    onTailorEnd?: () => void;
 }
 
-export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate }) => {
+export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate, tailoringJobId, onTailorStart, onTailorEnd }) => {
     const [parsedJD, setParsedJD] = useState<ParseResult | null>(null);
     const [isParsing, setIsParsing] = useState(false);
     const [showInterviewTips, setShowInterviewTips] = useState(true); // Default open in detail view
@@ -86,7 +89,11 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
 
     const handleTailorJob = async () => {
         logger.info('JobDetailView', 'Tailor resume requested', { jobId: job.id });
-        setIsGeneratingResume(true);
+
+        // Use external state if available, else local
+        if (onTailorStart) onTailorStart(job.id);
+        else setIsGeneratingResume(true);
+
         // Ensure we have base resume for Diff View
         if (!baseResume) {
             try {
@@ -109,9 +116,13 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
             const errorMessage = error?.message || error?.detail || "Failed to tailor resume. Please check the backend.";
             alert(errorMessage);
         } finally {
-            setIsGeneratingResume(false);
+            if (onTailorEnd) onTailorEnd();
+            else setIsGeneratingResume(false);
         }
     };
+
+    // Derived loading state
+    const isGenerating = (tailoringJobId === job.id) || isGeneratingResume;
 
     // Check for existing tailored versions logic
     // (Simplified: we just let them tailor if recommended)
@@ -272,10 +283,10 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
                     {isEvaluated && evaluation?.recommended_action === 'tailor' && (
                         <button
                             onClick={() => hasGeneratedResume ? setIsReviewOpen(true) : handleTailorJob()}
-                            disabled={isGeneratingResume}
+                            disabled={isGenerating}
                             className="px-6 py-2 bg-white hover:bg-slate-50 text-black font-semibold rounded-md transition-colors flex items-center gap-2 shadow-sm disabled:opacity-70 border border-black"
                         >
-                            {isGeneratingResume ? (
+                            {isGenerating ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                     Generating...

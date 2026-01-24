@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # Langfuse Configuration
     LANGFUSE_PUBLIC_KEY: str = Field(default="", env="LANGFUSE_PUBLIC_KEY")
     LANGFUSE_SECRET_KEY: str = Field(default="", env="LANGFUSE_SECRET_KEY")
-    LANGFUSE_HOST: str = Field(default="http://localhost:3010", env="LANGFUSE_HOST")
+    LANGFUSE_BASE_URL: str = Field(default="http://127.0.0.1:3010", env="LANGFUSE_BASE_URL")
     
     model_config = {
         "env_file": str(ENV_FILE),

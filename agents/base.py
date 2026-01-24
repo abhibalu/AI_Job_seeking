@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # MUST be set before importing langfuse.decorators
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
 os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_SECRET_KEY
-os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
+os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_BASE_URL
 
 from langfuse.decorators import observe, langfuse_context
 
@@ -33,19 +33,42 @@ class BaseAgent(ABC):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = settings.OPENROUTER_BASE_URL
         
+        # Initialize OpenAI client (wrapped by Langfuse)
+        # We use the standard openai client but imported from langfuse.openai to get auto-instrumentation
+        try:
+            from langfuse.openai import openai
+            
+            self.client = openai.OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/TailorAI",
+                    "X-Title": "TailorAI Job Evaluator",
+                }
+            )
+        except ImportError:
+            logger.warning("Langfuse OpenAI wrapper not found, falling back to standard openai")
+            import openai
+            self.client = openai.OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/TailorAI",
+                    "X-Title": "TailorAI Job Evaluator",
+                }
+            )
+
     @observe(as_type="generation")
     def _call_llm(self, user_prompt: str) -> str:
-        """Make a raw LLM call and return the response text. Retries with backup model on failure."""
+        """Make a LLM call using OpenAI SDK and return the response text."""
         if not self.api_key:
             logger.critical("OPENROUTER_API_KEY not set in environment")
             raise ValueError("OPENROUTER_API_KEY not set in environment")
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/TailorAI",
-            "X-Title": "TailorAI Job Evaluator",
-        }
+            
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
         
         # Primary then Backup model strategy
         models_to_try = [self.model]
@@ -55,16 +78,6 @@ class BaseAgent(ABC):
         last_exception = None
         
         for current_model in models_to_try:
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-            payload = {
-                "model": current_model,
-                "messages": messages,
-                "temperature": self.temperature,
-            }
-            
             # Retry logic for this model (e.g. 429 Rate Limits)
             max_retries = 3
             for attempt in range(max_retries):
@@ -72,76 +85,49 @@ class BaseAgent(ABC):
                     if current_model != self.model:
                         logger.warning(f"Retrying with BACKUP model: {current_model}")
 
-                    with httpx.Client(timeout=120.0) as client:
-                        base_url = self.base_url.rstrip("/")
-                        url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
-                        response = client.post(
-                            url,
-                            headers=headers,
-                            json=payload,
-                        )
-                        
-                        # Handle 429 specifically
-                        if response.status_code == 429:
-                            wait_time = 5 * (attempt + 1) # Linear backoff: 5s, 10s, 15s
-                            logger.warning(f"Rate limited (429) on {current_model}. Waiting {wait_time}s...")
-                            time.sleep(wait_time)
-                            if attempt == max_retries - 1:
-                                response.raise_for_status() # Raise on final attempt
-                            continue # Retry same model
-                            
-                        response.raise_for_status()
-                        
-                    data = response.json()
-                    content = data["choices"][0]["message"]["content"]
-                    usage = data.get("usage", {})
-                    
-                    # Log full generation details to Langfuse
-                    langfuse_context.update_current_observation(
+                    # SDK Call
+                    completion = self.client.chat.completions.create(
                         model=current_model,
-                        input=messages,
-                        output=content,
-                        usage={
-                            "input": usage.get("prompt_tokens"),
-                            "output": usage.get("completion_tokens"),
-                            "total": usage.get("total_tokens"),
+                        messages=messages,
+                        temperature=self.temperature,
+                        extra_body={
+                            "usage": { "include": True } # Critical for OpenRouter cost tracking
                         },
-                        metadata={
-                            "temperature": self.temperature,
-                            "agent": self.__class__.__name__,
-                            "provider": "openrouter",
-                        }
+                        name=f"{self.__class__.__name__}-generation"
                     )
                     
-                    # Force flush to Langfuse (otherwise batched and may be lost)
-                    langfuse_context.flush()
+                    content = completion.choices[0].message.content
                     
-                    # Log with output preview for debugging
+                    # Log with output preview
                     output_preview = content[:500] + "..." if len(content) > 500 else content
-                    logger.info(f"LLM call completed", extra={
+                    logger.info(f"LLM call completed via SDK", extra={
                         "model": current_model,
-                        "prompt_tokens": usage.get("prompt_tokens"),
-                        "completion_tokens": usage.get("completion_tokens"),
                         "output_preview": output_preview,
                     })
                     
                     return content
                     
                 except Exception as e:
-                    # If it's the last retry, log and break to try next model
-                    if attempt == max_retries - 1:
-                        logger.error(f"Model {current_model} failed after {max_retries} attempts: {e}")
-                        last_exception = e
-                    # For non-429 errors (like network/timeout), maybe retry too? 
-                    # For now we rely on the loop above for 429.
-                    # If it was a 429, we already continued in the loop. 
-                    # If it was other error, break to next model.
-                    if "429" not in str(e):
-                         break
+                    # Check for rate limit in exception message or type
+                    is_rate_limit = "429" in str(e) or "Rate limit" in str(e)
+                    
+                    if is_rate_limit:
+                         wait_time = 5 * (attempt + 1)
+                         logger.warning(f"Rate limited (429) on {current_model}. Waiting {wait_time}s...")
+                         time.sleep(wait_time)
+                         if attempt == max_retries - 1:
+                             last_exception = e
+                         continue
+                    
+                    # If not rate limit, or exhausted retries
+                    logger.error(f"Model {current_model} failed attempt {attempt+1}: {e}")
+                    last_exception = e
+                    if not is_rate_limit:
+                        break # Break retry loop for non-transient errors (usually)
             
-            # If we are here, this model failed completely. Try next model.
+            # If we get here and didn't return, we try the next model
             continue
-                
+            
         # If we get here, all models failed
         if last_exception:
             raise last_exception

@@ -60,11 +60,15 @@ export const useResumeState = () => {
                         location: "",
                         score: e.score || ""
                     })) || [],
-                    skills: backendData.skills?.map((s: any) =>
-                        s.keywords && s.keywords.length > 0
+                    skills: backendData.skills?.map((s: any) => {
+                        // Handle raw strings (if LLM returns flat array)
+                        if (typeof s === 'string') return s;
+
+                        // Handle JSON Resume object format
+                        return s.keywords && s.keywords.length > 0
                             ? `${s.name}: ${s.keywords.join(', ')}`
-                            : s.name
-                    ) || []
+                            : s.name;
+                    }) || []
                 };
                 setResumeData(mappedData);
                 setIsUploading(false);

@@ -144,9 +144,19 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                     {/* 
                         If Diff View: pass originalData 
                         If Final View: pass undefined originalData (so no highlights)
+                        
+                        CRITICAL: Normalize skills if they are objects (JSON Resume) to strings (App format)
                     */}
                     <ResumePreview
-                        data={tailoredResume.content}
+                        data={{
+                            ...tailoredResume.content,
+                            skills: tailoredResume.content.skills?.map((s: any) => {
+                                if (typeof s === 'string') return s;
+                                return s.keywords && s.keywords.length > 0
+                                    ? `${s.name}: ${s.keywords.join(', ')}`
+                                    : s.name;
+                            }) || []
+                        }}
                         originalData={viewMode === 'diff' ? baseResume : undefined}
                         template="ats_friendly"
                     />

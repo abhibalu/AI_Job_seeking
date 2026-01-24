@@ -98,6 +98,57 @@ class BaseAgent(ABC):
                     
                     content = completion.choices[0].message.content
                     
+                    # Manual usage/cost tracking for OpenRouter via Langfuse
+                    try:
+                        if hasattr(completion, 'usage') and completion.usage:
+                            # Extract usage stats
+                            usage = completion.usage
+                            
+                            # Prepare metadata update
+                            metadata_update = {
+                                "model": current_model,
+                                "usage_prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                                "usage_completion_tokens": getattr(usage, "completion_tokens", 0),
+                                "usage_total_tokens": getattr(usage, "total_tokens", 0),
+                            }
+                            
+                            # Try to extract cost if present (OpenRouter specific)
+                            # OpenRouter often sends cost in the extra fields or we might need to rely on model pricing
+                            # But sometimes it's in completion.usage (if using specific client) or extra_fields
+                            
+                            # Check for direct 'cost' attribute or within dict if it's a dict
+                            cost = getattr(usage, "cost", None)
+                            
+                            # If using standard openai client, usage is an object. 
+                            # OpenRouter might inject cost into it, but accessing it might fail if strict typing.
+                            # Let's try converting to dict if possible
+                            if hasattr(usage, "model_dump"):
+                                usage_dict = usage.model_dump()
+                                if "cost" in usage_dict:
+                                    cost = usage_dict["cost"]
+                            
+                            if cost is not None:
+                                metadata_update["cost"] = cost
+                                metadata_update["openrouter_cost"] = cost
+                                
+                            # Update Langfuse observation
+                            langfuse_context.update_current_observation(
+                                metadata=metadata_update,
+                                model=current_model,
+                                usage={
+                                    "input": getattr(usage, "prompt_tokens", 0),
+                                    "output": getattr(usage, "completion_tokens", 0),
+                                    "total": getattr(usage, "total_tokens", 0),
+                                    "unit": "TOKENS"
+                                }
+                            )
+                            
+                            if cost:
+                                logger.info(f"OpenRouter Cost captured: ${cost}")
+                                
+                    except Exception as e:
+                        logger.warning(f"Failed to extract/update Langfuse usage: {e}")
+
                     # Log with output preview
                     output_preview = content[:500] + "..." if len(content) > 500 else content
                     logger.info(f"LLM call completed via SDK", extra={

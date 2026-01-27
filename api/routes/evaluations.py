@@ -2,7 +2,8 @@
 Evaluations routes - Evaluate jobs and get results.
 """
 import json
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+import logging
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 
 from agents.supabase_client import get_supabase_client
 
@@ -18,6 +19,7 @@ from agents.database import (
 )
 from agents.job_evaluator import JobEvaluatorAgent
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -42,12 +44,18 @@ def get_job_by_id(job_id: str) -> dict | None:
 
 @router.get("", response_model=list[EvaluationResult])
 def list_evaluations(
+    response: Response,
     skip: int = 0,
     limit: int = 20,
     action: str | None = None,
+    verdict: str | None = None,
+    search: str | None = None,
 ):
     """List all evaluations."""
-    rows = list_evaluations_db(skip, limit, action)
+    rows, total_count = list_evaluations_db(skip, limit, action, verdict, search)
+    
+    # Set total count header for pagination
+    response.headers["X-Total-Count"] = str(total_count)
     
     results = []
     for row_dict in rows:
@@ -76,6 +84,7 @@ def get_evaluation_result(job_id: str):
     evaluation = get_evaluation(job_id)
     
     if not evaluation:
+        logger.warning(f"Evaluation not found for job {job_id}")
         raise HTTPException(status_code=404, detail=f"Evaluation for job {job_id} not found")
     
     # Parse JSON fields
@@ -97,8 +106,7 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
     import concurrent.futures
     import traceback
     
-    print(f"DEBUG: Starting batch evaluation task {task_id}")
-    print(f"DEBUG: Starting batch evaluation task {task_id}")
+    logger.info(f"Starting batch evaluation task {task_id}", extra={"task_id": task_id, "max_jobs": max_jobs})
     try:
         from agents.supabase_client import get_supabase_client
         client = get_supabase_client()
@@ -123,12 +131,12 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
         result = query.order("posted_at", desc=True).limit(max_jobs * 2).execute()
         
         if not result.data:
-            print("DEBUG: No jobs found in Supabase")
+            logger.info("No jobs found in Supabase for batch evaluation")
             jobs = []
         else:
             jobs = result.data
             
-        print(f"DEBUG: Loaded {len(jobs)} candidate jobs from Supabase")
+        logger.debug(f"Loaded {len(jobs)} candidate jobs from Supabase")
 
         # Collect jobs to process
         jobs_to_process = []
@@ -158,10 +166,9 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
         
         def process_singe_job(row):
             job_id = str(row.get("id", ""))
-            print(f"DEBUG: Processing job {job_id}")
+            logger.debug(f"Processing job {job_id} in batch")
             try:
                 agent = JobEvaluatorAgent()
-                print(f"DEBUG: Running agent for {job_id}")
                 result = agent.run(
                     job_id=job_id,
                     description_text=row.get("description_text", ""),
@@ -169,7 +176,6 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
                     title=row.get("title", "Unknown"),
                     job_url=row.get("link", "Unknown"),
                 )
-                print(f"DEBUG: Agent finished for {job_id}")
                 
                 # --- Smart Conditional Parsing Logic ---
                 from agents.jd_parser import run_jd_parser_task
@@ -180,13 +186,12 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
                     try:
                         run_jd_parser_task(job_id, row.get("description_text", ""))
                     except Exception as e:
-                        print(f"Error parsing JD {job_id}: {e}")
+                        logger.error(f"Error parsing JD {job_id}", exc_info=True)
                 # ---------------------------------------
 
                 return result
             except Exception as e:
-                print(f"Error evaluating {job_id}: {e}")
-                traceback.print_exc()
+                logger.error(f"Error evaluating {job_id}", exc_info=True)
                 return {"error": str(e), "job_id": job_id}
 
         # Run concurrently
@@ -207,7 +212,7 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
                 except Exception as e:
                     failed_count += 1
                     last_error = str(e)
-                    print(f"Critical error in worker: {e}")
+                    logger.critical(f"Critical error in worker: {e}", exc_info=True)
                 
                 # Update task progress
                 save_task_status(task_id, "running", {
@@ -221,6 +226,8 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
         status = "completed" if failed_count < total_jobs else "failed"
         final_error = last_error if status == "failed" else None
         
+        logger.info(f"Batch task {task_id} finished. Status: {status}")
+        
         save_task_status(task_id, status, {
             "completed": processed_count, 
             "total": total_jobs, 
@@ -229,7 +236,7 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
         }, error=final_error)
 
     except Exception as e:
-        print(f"Fatal batch error: {e}")
+        logger.critical(f"Fatal batch error in task {task_id}: {e}", exc_info=True)
         save_task_status(task_id, "failed", {"error": str(e)}, error=str(e))
 
 
@@ -240,6 +247,7 @@ def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
     from agents.database import save_task_status
     
     task_id = str(uuid.uuid4())
+    logger.info(f"Received batch evaluation request. Jobs: {request.max_jobs}, TaskID: {task_id}")
     
     # Save initial task status
     save_task_status(task_id, "queued", {"completed": 0, "total": request.max_jobs})
@@ -264,16 +272,19 @@ def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = F
     """Evaluate a single job (synchronous)."""
     # Check if already evaluated
     if is_job_evaluated(job_id) and not force:
+        logger.debug(f"Job {job_id} already evaluated, skipping.")
         return {"message": "Job already evaluated", "job_id": job_id}
     
     # Get job from Supabase (Primary Source now)
     job = get_job_by_id(job_id)
     
     if not job:
+        logger.warning(f"Job {job_id} not found in Supabase for evaluation")
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Supabase")
     
     # Run evaluation
     try:
+        logger.info(f"Starting evaluation suitable for job {job_id}")
         agent = JobEvaluatorAgent()
         result = agent.run(
             job_id=job_id,
@@ -301,6 +312,7 @@ def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = F
             "job_id": job_id,
         }
     except Exception as e:
+        logger.error(f"Single job evaluation failed for {job_id}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
 
 

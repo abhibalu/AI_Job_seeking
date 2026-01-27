@@ -66,6 +66,7 @@ class EvaluationResult(BaseModel):
     job_id: str
     job_url: str | None = None
     company_name: str | None = None
+    company_website: str | None = None
     title_role: str | None = None
     verdict: str | None = None
     job_match_score: int | None = None

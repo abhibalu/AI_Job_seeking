@@ -12,7 +12,8 @@ interface TailorReviewProps {
 }
 
 export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailoredResume, evaluation, onClose, onStatusChange }) => {
-    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>(tailoredResume.status);
+    // Defensive: default to 'pending' if status is undefined
+    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>(tailoredResume?.status || 'pending');
     const [viewMode, setViewMode] = useState<'diff' | 'final'>('diff');
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -63,7 +64,7 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                         <h2 className="text-lg font-bold text-slate-900 flex items-center">
                             Tailored Resume
                             <span className="ml-3 text-xs font-normal px-2 py-0.5 bg-gray-100 rounded text-slate-600 border border-gray-200">
-                                V{tailoredResume.version}
+                                V{tailoredResume?.version || 1}
                             </span>
                             {status === 'approved' && (
                                 <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-slate-900 text-white rounded flex items-center">
@@ -143,10 +144,21 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                     {/* 
                         If Diff View: pass originalData 
                         If Final View: pass undefined originalData (so no highlights)
+                        
+                        CRITICAL: Normalize skills if they are objects (JSON Resume) to strings (App format)
                     */}
                     <ResumePreview
-                        data={tailoredResume.content}
+                        data={{
+                            ...tailoredResume.content,
+                            skills: tailoredResume.content.skills?.map((s: any) => {
+                                if (typeof s === 'string') return s;
+                                return s.keywords && s.keywords.length > 0
+                                    ? `${s.name}: ${s.keywords.join(', ')}`
+                                    : s.name;
+                            }) || []
+                        }}
                         originalData={viewMode === 'diff' ? baseResume : undefined}
+                        template="ats_friendly"
                     />
                 </div>
             </div>

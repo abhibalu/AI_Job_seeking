@@ -12,12 +12,17 @@ import { ResumePreview } from './ResumePreview';
 import { JobWithEvaluation } from '../services/jobService';
 import { formatTimeAgo } from '../utils/format';
 
+import { logger } from '../utils/logger';
+
 interface JobDetailViewProps {
     job: JobWithEvaluation;
     onEvaluate?: () => void;
+    tailoringJobId?: string | null;
+    onTailorStart?: (jobId: string) => void;
+    onTailorEnd?: () => void;
 }
 
-export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate }) => {
+export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate, tailoringJobId, onTailorStart, onTailorEnd }) => {
     const [parsedJD, setParsedJD] = useState<ParseResult | null>(null);
     const [isParsing, setIsParsing] = useState(false);
     const [showInterviewTips, setShowInterviewTips] = useState(true); // Default open in detail view
@@ -29,6 +34,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
 
     // Simulation State
     const [isSimulatedModalOpen, setIsSimulatedModalOpen] = useState(false);
+    const [isReviewOpen, setIsReviewOpen] = useState(false); // Controls TailorReview visibility
     const [isGeneratingResume, setIsGeneratingResume] = useState(false);
     const [hasGeneratedResume, setHasGeneratedResume] = useState(false);
     const [simulationStatus, setSimulationStatus] = useState<'pending' | 'approved'>('pending');
@@ -39,6 +45,8 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
 
     // Reset states when job changes
     useEffect(() => {
+        logger.info('JobDetailView', 'Job selected/changed', { jobId: job.id, title: job.title });
+
         setParsedJD(null);
         setTailoredResume(null);
         setHasGeneratedResume(false);
@@ -46,34 +54,75 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
         setSimulationStatus('pending');
         setViewMode('diff');
         setIsReEvaluating(false);
+        setIsReviewOpen(false); // Fix: Ensure modal is closed by default
+
+        // Check for existing tailored resume in Supabase
+        const checkExistingTailored = async () => {
+            try {
+                logger.debug('JobDetailView', 'Checking for existing tailored resumes', { jobId: job.id });
+                const versions = await apiClient.getTailoredVersions(job.id);
+                if (versions && versions.length > 0) {
+                    logger.info('JobDetailView', 'Found existing tailored resume', { version: versions[0].version });
+                    // Use the most recent version
+                    const latest = versions[0];
+                    setTailoredResume(latest);
+                    setHasGeneratedResume(true);
+
+                    // Also fetch base resume for diff view
+                    const base = await apiClient.getMasterResume();
+                    setBaseResume(base);
+                } else {
+                    logger.debug('JobDetailView', 'No tailored resume found');
+                }
+            } catch (e) {
+                // No existing tailored resume, that's fine
+                logger.warn('JobDetailView', 'Error checking tailored resumes', e);
+            }
+        };
+
+        if (job.id) {
+            checkExistingTailored();
+        }
     }, [job.id]);
 
 
 
     const handleTailorJob = async () => {
-        setIsGeneratingResume(true);
+        logger.info('JobDetailView', 'Tailor resume requested', { jobId: job.id });
+
+        // Use external state if available, else local
+        if (onTailorStart) onTailorStart(job.id);
+        else setIsGeneratingResume(true);
+
         // Ensure we have base resume for Diff View
         if (!baseResume) {
             try {
                 const base = await apiClient.getMasterResume();
                 setBaseResume(base);
             } catch (e) {
-                console.error("Could not fetch base resume", e);
+                logger.error('JobDetailView', "Could not fetch base resume", e);
             }
         }
 
         try {
             const result = await apiClient.tailorResume(job.id);
+            logger.info('JobDetailView', 'Tailoring successful', { id: result.id, version: result.version });
             setTailoredResume(result);
             setHasGeneratedResume(true);
-            setIsSimulatedModalOpen(true);
-        } catch (error) {
-            console.error("Tailoring failed:", error);
-            alert("Failed to tailor resume. Please check the backend.");
+            setIsReviewOpen(true); // Open the review modal
+        } catch (error: any) {
+            logger.error('JobDetailView', "Tailoring failed", error);
+            // Try to get error message from API response
+            const errorMessage = error?.message || error?.detail || "Failed to tailor resume. Please check the backend.";
+            alert(errorMessage);
         } finally {
-            setIsGeneratingResume(false);
+            if (onTailorEnd) onTailorEnd();
+            else setIsGeneratingResume(false);
         }
     };
+
+    // Derived loading state
+    const isGenerating = (tailoringJobId === job.id) || isGeneratingResume;
 
     // Check for existing tailored versions logic
     // (Simplified: we just let them tailor if recommended)
@@ -160,12 +209,12 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
 
     return (
         <div className="h-full flex flex-col bg-white">
-            {tailoredResume && baseResume && evaluation && (
+            {isReviewOpen && tailoredResume && baseResume && evaluation && (
                 <TailorReview
                     baseResume={baseResume}
                     tailoredResume={tailoredResume}
                     evaluation={evaluation}
-                    onClose={() => setTailoredResume(null)}
+                    onClose={() => setIsReviewOpen(false)}
                     onStatusChange={() => { }}
                 />
             )}
@@ -233,11 +282,11 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate })
                 <div className="flex items-center gap-3 mt-6">
                     {isEvaluated && evaluation?.recommended_action === 'tailor' && (
                         <button
-                            onClick={() => hasGeneratedResume ? setIsSimulatedModalOpen(true) : handleTailorJob()}
-                            disabled={isGeneratingResume}
+                            onClick={() => hasGeneratedResume ? setIsReviewOpen(true) : handleTailorJob()}
+                            disabled={isGenerating}
                             className="px-6 py-2 bg-white hover:bg-slate-50 text-black font-semibold rounded-md transition-colors flex items-center gap-2 shadow-sm disabled:opacity-70 border border-black"
                         >
-                            {isGeneratingResume ? (
+                            {isGenerating ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                     Generating...

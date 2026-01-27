@@ -18,6 +18,9 @@ export { type JobWithEvaluation } from './services/jobService';
 // View mode for the app
 export type ViewMode = 'all' | 'evaluated' | 'pending' | 'resume';
 
+// Template Type
+export type TemplateType = 'modern' | 'classic' | 'compact' | 'tech' | 'minimal' | 'ats_friendly';
+
 // Filter options
 export interface FilterOptions {
   searchQuery: string;

@@ -18,6 +18,8 @@ from agents.database import init_database
 
 @app.on_event("startup")
 def on_startup():
+    from backend.logging import setup_logging
+    setup_logging()
     init_database()
 
 # CORS middleware for frontend
@@ -27,10 +29,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
-from .middleware import LangfuseMiddleware
+from .middleware import LangfuseMiddleware, RequestLoggingMiddleware
 app.add_middleware(LangfuseMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 # Include routers
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
@@ -41,6 +45,9 @@ app.include_router(resumes.router, prefix="/api/resumes", tags=["Resumes"])
 
 from .routes import pdf
 app.include_router(pdf.router, prefix="/api/pdf", tags=["PDF Generation"])
+
+from .routes import logs
+app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 
 
 @app.get("/")

@@ -26,6 +26,7 @@ class LangfuseMiddleware(BaseHTTPMiddleware):
             }
         )
         
+
         try:
             response = await call_next(request)
             
@@ -35,4 +36,48 @@ class LangfuseMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as e:
             trace.update(level="ERROR", status_message=str(e))
+            raise e
+
+
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to log every request and response in structured JSON.
+    """
+    async def dispatch(self, request: Request, call_next) -> Response:
+        start_time = time.time()
+        
+        try:
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            
+            logger.info(
+                "Request processed",
+                extra={
+                    "method": request.method,
+                    "url": str(request.url),
+                    "client_ip": request.client.host if request.client else "unknown",
+                    "duration": f"{process_time:.4f}s",
+                    "status_code": response.status_code
+                }
+            )
+            
+            return response
+        except Exception as e:
+            process_time = time.time() - start_time
+            logger.error(
+                "Request failed",
+                extra={
+                    "method": request.method,
+                    "url": str(request.url),
+                    "client_ip": request.client.host if request.client else "unknown",
+                    "duration": f"{process_time:.4f}s",
+                    "error": str(e)
+                },
+                exc_info=True
+            )
             raise e

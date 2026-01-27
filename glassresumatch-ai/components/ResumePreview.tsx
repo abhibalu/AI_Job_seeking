@@ -310,9 +310,16 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData
 
                                         {/* Hanging Indent Bullets */}
                                         <ul style={{ paddingLeft: '1.2em', listStylePosition: 'outside' }} className="mt-0.5 mb-0 list-disc space-y-0 text-[12px] leading-snug">
-                                            {exp.achievements.map((point, index) => (
-                                                <li key={index} className="mb-0">{point}</li>
-                                            ))}
+                                            {exp.achievements.map((point, index) => {
+                                                const originalExp = originalData?.experience.find(e => e.id === exp.id);
+                                                const changed = isBulletChanged(point, originalExp?.achievements);
+
+                                                return (
+                                                    <li key={index} className={`mb-0 ${changed ? 'bg-yellow-100 px-1 rounded transition-colors duration-1000' : ''}`}>
+                                                        {point}
+                                                    </li>
+                                                );
+                                            })}
                                         </ul>
                                     </div>
                                 );

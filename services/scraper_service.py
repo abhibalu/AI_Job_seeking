@@ -1,10 +1,13 @@
 import json
 import http.client
+import logging
 from typing import Optional, Dict, Any, List
 from backend.settings import settings
 from services.job_mapper import map_job_record
 from agents.supabase_client import get_supabase_client
 from lakehouse.silver import parse_raw_json
+
+logger = logging.getLogger(__name__)
 
 class ScraperService:
     ACTOR_ID = "hKByXkMQaC5Qt9UMN"
@@ -17,14 +20,15 @@ class ScraperService:
         Maps and upserts all found jobs to Supabase.
         Returns a summary of the operation.
         """
-        print(f"Scraping URL: {url}")
+        logger.info(f"Scraping URL: {url}")
         
         # 1. Scrape via Apify
         raw_data = cls._run_apify_sync(url)
         if not raw_data:
+            logger.error("Failed to scrape data from Apify via synchronous run")
             raise Exception("Failed to scrape data from Apify.")
             
-        print(f"Scrape successful. Found {len(raw_data)} items.")
+        logger.info(f"Scrape successful. Found {len(raw_data)} items.")
         
         # 2. Iterate and Import
         imported_ids = []
@@ -59,10 +63,11 @@ class ScraperService:
                     }
                     
             except Exception as e:
-                print(f"Failed to import a job item: {e}")
+                logger.error(f"Failed to import a job item: {e}", exc_info=True)
                 continue
 
         if not imported_ids:
+             logger.warning("No valid jobs imported from scrape result")
              raise Exception("No valid jobs imported from scrape result.")
 
         return {
@@ -78,7 +83,7 @@ class ScraperService:
         """Run Apify actor synchronously."""
         # Mock Mode for Verification
         if "mock" in url:
-            print("DEBUG: Running in MOCK MODE")
+            logger.warning("Running in MOCK MODE for scraper")
             return [{
                 "id": "1234567890",
                 "trackingId": "track123",
@@ -102,6 +107,7 @@ class ScraperService:
             }]
 
         if not settings.APIFY_TOKEN:
+            logger.critical("APIFY_TOKEN not configured")
             raise Exception("APIFY_TOKEN not configured.")
 
         payload = json.dumps({
@@ -125,10 +131,11 @@ class ScraperService:
             data = res.read()
             
             if res.status not in (200, 201):
+                logger.error(f"Apify API error {res.status}: {data.decode('utf-8')}")
                 raise Exception(f"Apify API error {res.status}: {data.decode('utf-8')}")
                 
             decoded_data = data.decode('utf-8')
-            print(f"DEBUG: Apify Response: {decoded_data}")
+            logger.debug(f"Apify Response: {len(decoded_data)} bytes")
             return json.loads(decoded_data)
         finally:
             conn.close()

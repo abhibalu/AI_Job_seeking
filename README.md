@@ -1,6 +1,6 @@
 # TailorAI: Autonomous Job Seeking Agent
 
-TailorAI is a full-stack opensource AI agent designed to revolutionize the job application process. It acts as a tireless personal recruiter, autonomously discovering, analyzing, and tailoring your resume for the perfect job fit.
+TailorAI is a full-stack AI agent designed to revolutionize the job application process. It acts as a tireless personal recruiter, autonomously discovering, analyzing, and tailoring your resume for the perfect job fit.
 
 ## 🏗️ Core Architecture
 TailorAI is built on a modern, event-driven **Data Lakehouse** pattern tailored for AI workloads.
@@ -18,7 +18,7 @@ The intelligence layer is composed of specialized AI agents:
 *   **JD Parser**: Extracts structured signals (Must-haves, Tech Stack, Seniority) from unstructured job descriptions to standardize evaluation.
 
 ### 3. 🔌 Core Services
-*   **Scraper Service** (`services/scraper_service.py`): Integrating **Apify** to reliably fetch real-time job listings from complex, JS-heavy platforms (LinkedIn, Glassdoor), bypassing bot detection.
+*   **Scraper Service** (`services/scraper_service.py`): Integrating **Apify** to reliably fetch real-time job listings from **LinkedIn**, bypassing advanced bot detection.
 *   **API Backend** (`/api`): Built with **FastAPI**, serving RESTful endpoints for the React frontend (`GET /jobs`, `POST /resumes/tailor`).
 
 ### 4. 🔭 Observability
@@ -27,17 +27,17 @@ Native integration with **Langfuse** provides complete traceability of Agent rea
 *   **Cost Management**: Token usage tracking per-model (GPT-4o vs Claude 3.5) to optimize operational costs.
 
 ## 💻 Tech Stack
-*   **Frontend**: React, TypeScript, TailwindCSS (Glassmorphism UI), Framer Motion.
-*   **Backend**: Python, FastAPI, Supabase (PostgreSQL + pgvector).
+*   **Frontend**: React, TypeScript, TailwindCSS (Glassmorphism UI).
+*   **Backend**: Python, FastAPI, Supabase (PostgreSQL).
 *   **LLM Orchestration**: OpenRouter (Claude 3.5 Sonnet, GPT-4o), Langfuse.
 *   **Infrastructure**: Docker, Apify Cloud.
 
 ## 🚀 Key Features
-*   **Vector Search**: Semantic search over job descriptions using `pgvector`.
+*   **AI Resume Tailoring**: Context-aware rewriting of Summary and Experience sections to align with specific JD keywords (`agents/resume_tailor.py`).
+*   **Advanced Search**: Full-text search and filtering over job descriptions.
 *   **Dynamic Layout Engine**: Parametric resume styling (Margins, Spacing) via CSS variables.
 *   **Resume Normalization**: Robust parsing of complex PDF layouts to JSON Resume standard.
 *   **Automated Gap Analysis**: Visual diff of what your resume is missing vs. what the job description requires.
 
 ---
-*Built with ❤️ by Abhijith Sivadas* and Agentic Coding Experts :)
-
+*Built with ❤️ by Abhijith Sivadas* and Agentic Coding Expert

@@ -1,6 +1,6 @@
 # TailorAI: Autonomous Job Seeking Agent
 
-TailorAI is a full-stack AI agent designed to revolutionize the job application process. It acts as a tireless personal recruiter, autonomously discovering, analyzing, and tailoring your resume for the perfect job fit.
+TailorAI is a full-stack opensource AI agent designed to revolutionize the job application process. It acts as a tireless personal recruiter, autonomously discovering, analyzing, and tailoring your resume for the perfect job fit.
 
 ## 🏗️ Core Architecture
 TailorAI is built on a modern, event-driven **Data Lakehouse** pattern tailored for AI workloads.

@@ -24,12 +24,12 @@ The intelligence layer is composed of specialized AI agents:
 ### 4. 🔭 Observability
 Native integration with **Langfuse** provides complete traceability of Agent reasoning:
 *   **Trace Tracing**: Every decision (Score: 85/100) is backed by a trace showing *why* the AI made that choice.
-*   **Cost Management**: Token usage tracking per-model (GPT-4o vs Claude 3.5) to optimize operational costs.
+*   **Cost Management**: Token usage tracking per-model (Openrouter Models) to optimize operational costs.
 
 ## 💻 Tech Stack
 *   **Frontend**: React, TypeScript, TailwindCSS (Glassmorphism UI).
 *   **Backend**: Python, FastAPI, Supabase (PostgreSQL).
-*   **LLM Orchestration**: OpenRouter (Claude 3.5 Sonnet, GPT-4o), Langfuse.
+*   **LLM Orchestration**: OpenRouter (Any Openrouter Models), Langfuse.
 *   **Infrastructure**: Docker, Apify Cloud.
 
 ## 🚀 Key Features

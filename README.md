@@ -39,5 +39,5 @@ Native integration with **Langfuse** provides complete traceability of Agent rea
 *   **Automated Gap Analysis**: Visual diff of what your resume is missing vs. what the job description requires.
 
 ---
-*Built with ❤️ by Abhijith Sivadas*
+*Built with ❤️ by Abhijith Sivadas* and Agentic Coding Experts :)
 

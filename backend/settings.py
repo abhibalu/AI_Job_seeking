@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     EVAL_DB_PATH: str = Field("data/evaluations.db", env="EVAL_DB_PATH")
     CANDIDATE_EXPERIENCE_YEARS: str = Field("8 Years", env="CANDIDATE_EXPERIENCE_YEARS")
     BATCH_EVAL_WORKERS: int = Field(5, env="BATCH_EVAL_WORKERS")
+    EVAL_HIGH_MATCH_THRESHOLD: int = Field(70, env="EVAL_HIGH_MATCH_THRESHOLD")
+    EVAL_MAX_JOBS_PER_RUN: int = Field(50, env="EVAL_MAX_JOBS_PER_RUN")
+    
+    # LinkedIn search URLs (comma-separated for multiple)
+    LINKEDIN_SEARCH_URLS: str = Field(default="", env="LINKEDIN_SEARCH_URLS")
     
     # Supabase Configuration
     SUPABASE_URL: str = Field(default="", env="SUPABASE_URL")
@@ -40,6 +45,15 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = Field(default="", env="LANGFUSE_PUBLIC_KEY")
     LANGFUSE_SECRET_KEY: str = Field(default="", env="LANGFUSE_SECRET_KEY")
     LANGFUSE_BASE_URL: str = Field(default="http://127.0.0.1:3010", env="LANGFUSE_BASE_URL")
+    
+    # Telegram Notifications
+    TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
+    
+    # Scheduler Configuration
+    SCRAPE_INTERVAL_HOURS: int = Field(12, env="SCRAPE_INTERVAL_HOURS")
+    EVAL_INTERVAL_HOURS: int = Field(1, env="EVAL_INTERVAL_HOURS")
+    SCHEDULER_ENABLED: bool = Field(True, env="SCHEDULER_ENABLED")
     
     model_config = {
         "env_file": str(ENV_FILE),

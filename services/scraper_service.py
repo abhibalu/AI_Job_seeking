@@ -51,6 +51,10 @@ class ScraperService:
                 if not job_id:
                     continue
 
+                # Persist raw_json alongside the mapped record (Bronze-layer safety net)
+                # Allows future reprocessing without re-scraping
+                app_record["raw_json"] = job_item
+
                 # Upsert to Supabase
                 client.table("jobs").upsert(app_record, on_conflict="id").execute()
                 imported_ids.append(job_id)

@@ -2,14 +2,23 @@
 APScheduler integration for TailorAI background automation.
 
 Registered in FastAPI on_startup. Runs:
-  - ScrapeWorker  every SCRAPE_INTERVAL_HOURS  (default: 12h)
-  - EvalWorker    every EVAL_INTERVAL_HOURS     (default: 1h)
+  - ScrapeWorker  — controlled by SCRAPE_CRON (cron expr) or SCRAPE_INTERVAL_HOURS
+  - EvalWorker    — controlled by EVAL_CRON (cron expr) or EVAL_INTERVAL_HOURS
 
-Set SCHEDULER_ENABLED=false in .env to disable entirely (e.g., for testing).
+Cron expressions take priority when set. Format: 'minute hour day month day_of_week'
+  Examples:
+    '* * * * *'      — every minute  (great for testing)
+    '*/5 * * * *'    — every 5 minutes
+    '0 */12 * * *'   — every 12 hours at :00
+    '0 8,20 * * *'   — at 08:00 and 20:00 daily
+    '0 9 * * 1-5'    — 09:00 on weekdays only
+
+Set SCHEDULER_ENABLED=false in .env to disable entirely (e.g., for CI).
 """
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.settings import settings
@@ -29,6 +38,33 @@ def get_scheduler() -> BackgroundScheduler:
     return _scheduler
 
 
+def _build_trigger(cron_expr: str, interval_hours: int, label: str):
+    """
+    Return a CronTrigger if cron_expr is non-empty and valid,
+    otherwise fall back to an IntervalTrigger with interval_hours.
+    """
+    if cron_expr.strip():
+        try:
+            parts = cron_expr.strip().split()
+            if len(parts) != 5:
+                raise ValueError("Cron expression must have exactly 5 fields")
+            minute, hour, day, month, day_of_week = parts
+            trigger = CronTrigger(
+                minute=minute, hour=hour, day=day,
+                month=month, day_of_week=day_of_week,
+                timezone="UTC",
+            )
+            logger.info(f"[Scheduler] {label}: using CronTrigger '{cron_expr}'")
+            return trigger
+        except Exception as e:
+            logger.warning(
+                f"[Scheduler] Invalid cron expression for {label} ('{cron_expr}'): {e}. "
+                f"Falling back to interval of {interval_hours}h."
+            )
+    logger.info(f"[Scheduler] {label}: using IntervalTrigger every {interval_hours}h")
+    return IntervalTrigger(hours=interval_hours)
+
+
 def start_scheduler() -> None:
     """Start the background scheduler and register jobs. Called from FastAPI startup."""
     if not settings.SCHEDULER_ENABLED:
@@ -41,13 +77,12 @@ def start_scheduler() -> None:
         logger.warning("[Scheduler] Already running — skipping start.")
         return
 
-    # Import workers here to avoid circular imports at module load time
     from services.scraper_worker import run_scrape_worker
     from services.eval_worker import run_eval_worker
 
     scheduler.add_job(
         run_scrape_worker,
-        trigger=IntervalTrigger(hours=settings.SCRAPE_INTERVAL_HOURS),
+        trigger=_build_trigger(settings.SCRAPE_CRON, settings.SCRAPE_INTERVAL_HOURS, "ScrapeWorker"),
         id="scrape_worker",
         name="LinkedIn Scraper",
         replace_existing=True,
@@ -55,18 +90,14 @@ def start_scheduler() -> None:
 
     scheduler.add_job(
         run_eval_worker,
-        trigger=IntervalTrigger(hours=settings.EVAL_INTERVAL_HOURS),
+        trigger=_build_trigger(settings.EVAL_CRON, settings.EVAL_INTERVAL_HOURS, "EvalWorker"),
         id="eval_worker",
         name="Job Evaluator",
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info(
-        f"[Scheduler] Started. "
-        f"ScrapeWorker every {settings.SCRAPE_INTERVAL_HOURS}h, "
-        f"EvalWorker every {settings.EVAL_INTERVAL_HOURS}h."
-    )
+    logger.info("[Scheduler] Started.")
 
 
 def stop_scheduler() -> None:

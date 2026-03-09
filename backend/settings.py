@@ -51,8 +51,13 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
     
     # Scheduler Configuration
-    SCRAPE_INTERVAL_HOURS: int = Field(12, env="SCRAPE_INTERVAL_HOURS")
-    EVAL_INTERVAL_HOURS: int = Field(1, env="EVAL_INTERVAL_HOURS")
+    # Cron expressions take priority over interval hours when set.
+    # Format: 'minute hour day month day_of_week'  e.g. '0 */12 * * *' = every 12h
+    # Set to empty string to use interval hours instead.
+    SCRAPE_CRON: str = Field("", env="SCRAPE_CRON")          # e.g. '0 8,20 * * *'
+    EVAL_CRON:   str = Field("", env="EVAL_CRON")            # e.g. '*/30 * * * *'
+    SCRAPE_INTERVAL_HOURS: int = Field(12, env="SCRAPE_INTERVAL_HOURS")  # fallback
+    EVAL_INTERVAL_HOURS:   int = Field(1,  env="EVAL_INTERVAL_HOURS")    # fallback
     SCHEDULER_ENABLED: bool = Field(True, env="SCHEDULER_ENABLED")
     
     model_config = {

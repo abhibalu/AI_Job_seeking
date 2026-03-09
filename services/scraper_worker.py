@@ -94,9 +94,8 @@ def run_scrape_worker() -> None:
             status="failed" if total_found == 0 else "completed",
             jobs_found=total_found,
             jobs_processed=total_found,
-            jobs_new=total_new,
             error_detail="; ".join(errors[:3]),
-            metadata={"urls": urls},
+            metadata={"urls": urls, "new_jobs": total_new},
         )
     else:
         finish_run(

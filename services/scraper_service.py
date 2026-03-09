@@ -1,7 +1,7 @@
 import json
-import http.client
 import logging
 from typing import Optional, Dict, Any, List
+import httpx
 from backend.settings import settings
 from services.job_mapper import map_job_record
 from agents.supabase_client import get_supabase_client
@@ -114,32 +114,62 @@ class ScraperService:
             logger.critical("APIFY_TOKEN not configured")
             raise Exception("APIFY_TOKEN not configured.")
 
-        payload = json.dumps({
+        # Always use polling instead of run-sync to avoid RemoteDisconnected timeouts
+        url_run = f"https://{cls.API_HOST}/v2/acts/{cls.ACTOR_ID}/runs"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {settings.APIFY_TOKEN}",
+        }
+        payload = {
             "urls": [url],
             "scrapeCompany": True,
             "count": 100,
-        })
-        
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {settings.APIFY_TOKEN}'
         }
-        
-        conn = http.client.HTTPSConnection(cls.API_HOST)
-        endpoint = f"/v2/acts/{cls.ACTOR_ID}/run-sync-get-dataset-items"
-        
+
+        import time
         try:
-            conn.request("POST", endpoint, payload, headers)
-            res = conn.getresponse()
-            data = res.read()
-            
-            if res.status not in (200, 201):
-                logger.error(f"Apify API error {res.status}: {data.decode('utf-8')}")
-                raise Exception(f"Apify API error {res.status}: {data.decode('utf-8')}")
+            with httpx.Client(timeout=30.0) as client:
+                # 1. Start the run
+                resp = client.post(url_run, json=payload, headers=headers)
+                if resp.status_code not in (200, 201):
+                    logger.error(f"Apify start error {resp.status_code}: {resp.text[:300]}")
+                    raise Exception(f"Apify start error {resp.status_code}: {resp.text[:300]}")
+
+                run_data = resp.json()["data"]
+                run_id = run_data["id"]
+                dataset_id = run_data["defaultDatasetId"]
+                logger.info(f"Apify async run started: {run_id}. Polling for completion...")
+
+                # 2. Poll for completion
+                max_polls = 60 # 60 * 5s = 5 mins timeout
+                url_status = f"https://{cls.API_HOST}/v2/actor-runs/{run_id}"
                 
-            decoded_data = data.decode('utf-8')
-            logger.debug(f"Apify Response: {len(decoded_data)} bytes")
-            return json.loads(decoded_data)
-        finally:
-            conn.close()
+                for _ in range(max_polls):
+                    time.sleep(5)
+                    poll_resp = client.get(url_status, headers=headers)
+                    if poll_resp.status_code == 200:
+                        status = poll_resp.json()["data"]["status"]
+                        if status == "SUCCEEDED":
+                            break
+                        elif status in ("FAILED", "ABORTED", "TIMED-OUT"):
+                            raise Exception(f"Apify run {run_id} failed with status: {status}")
+                    else:
+                        logger.warning(f"Apify poll error: {poll_resp.status_code}")
+                else:
+                    raise Exception(f"Apify run {run_id} timed out after 5 minutes of polling.")
+
+                # 3. Fetch the results
+                logger.info(f"Apify run {run_id} succeeded. Fetching dataset...")
+                url_items = f"https://{cls.API_HOST}/v2/datasets/{dataset_id}/items"
+                ds_resp = client.get(url_items, headers=headers)
+                
+                if ds_resp.status_code != 200:
+                    raise Exception(f"Failed to fetch Apify dataset: {ds_resp.status_code}")
+                
+                items = ds_resp.json()
+                logger.debug(f"Apify dataset fetched: {len(items)} items")
+                return items
+
+        except httpx.RequestError as e:
+            raise Exception(f"Apify connection error during polling: {e}") from e

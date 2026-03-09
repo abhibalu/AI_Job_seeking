@@ -10,19 +10,17 @@ Flow:
 """
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from backend.settings import settings
-from agents.database import is_job_evaluated, save_evaluation
-from agents.job_evaluator import JobEvaluatorAgent
-from agents.jd_parser import run_jd_parser_task
+from agents.database import save_evaluation
 from agents.supabase_client import get_supabase_client
+from agents.pipeline_graph import build_pipeline_graph
+from agents.supabase_checkpointer import SupabaseSaver
 from services.pipeline_runs import start_run, finish_run
-from services.telegram_notifier import notify_eval_complete, notify_high_match, notify_pipeline_error
+from services.telegram_notifier import notify_eval_complete, notify_pipeline_error
 
 logger = logging.getLogger(__name__)
 
-HIGH_MATCH_THRESHOLD = int(getattr(settings, "EVAL_HIGH_MATCH_THRESHOLD", 70))
 MAX_JOBS_PER_RUN = int(getattr(settings, "EVAL_MAX_JOBS_PER_RUN", 50))
 DELAY_BETWEEN_CALLS = float(getattr(settings, "EVAL_DELAY_SECONDS", 1.0))
 
@@ -60,76 +58,82 @@ def _get_unevaluated_jobs(limit: int) -> list[dict]:
         return []
 
 
-def _evaluate_single_job(agent: JobEvaluatorAgent, job: dict) -> tuple[str, str | None]:
+def _process_single_job_graph(graph, job: dict) -> tuple[str, str | None]:
     """
-    Evaluate one job. Returns (action, error_message).
-    action is one of: 'apply' | 'tailor' | 'skip' | 'error'
+    Process one job through the LangGraph state machine.
+    Returns (action, error_message) where action is 'apply', 'tailor', 'skip', or 'error'.
     """
     job_id = job["id"]
     try:
-        if is_job_evaluated(job_id):
-            return "skip", None
+        # Initialize state
+        initial_state = {
+            "job_id": job_id,
+            "job_details": {
+                "title": job.get("title"),
+                "company_name": job.get("company_name"),
+                "description_text": job.get("description_text"),
+                "job_url": job.get("job_url"),
+            },
+        }
+        
+        # We use the job_id as the thread_id so SupabaseSaver can resume if needed
+        config = {"configurable": {"thread_id": job_id}}
+        
+        final_state = graph.invoke(initial_state, config=config)
+        
+        # If there were errors in the graph execution
+        if final_state.get("errors"):
+            return "error", "; ".join(final_state["errors"])
+            
+        # The graph successfully completed.
+        # We also want to save the evaluation to the old job_evaluations table for dashboard compat
+        if final_state.get("evaluation"):
+            try:
+                save_evaluation(final_state["evaluation"])
+            except Exception as e:
+                logger.warning(f"[GraphWorker] Failed to save evaluation to DB for {job_id}: {e}")
 
-        result = agent.run(
-            job_id=job_id,
-            description_text=job.get("description_text", ""),
-            company_name=job.get("company_name", "Unknown"),
-            title=job.get("title", "Unknown"),
-            job_url=job.get("job_url", "Unknown"),
-        )
-        save_evaluation(result)
-
-        # Kick off JD parsing in background (fire and forget)
-        try:
-            run_jd_parser_task(job_id, job.get("description_text", ""))
-        except Exception:
-            pass  # non-critical
-
-        score = result.get("job_match_score", 0)
-        action = result.get("recommended_action", "skip")
-
-        # Send high-match alert immediately
-        if score >= HIGH_MATCH_THRESHOLD:
-            notify_high_match(
-                company=result.get("company_name", "Unknown"),
-                title=result.get("title_role", "Unknown"),
-                score=score,
-                job_id=job_id,
-                action=action,
-            )
-
+        # Determine the action taken based on the status / evaluation
+        eval_dict = final_state.get("evaluation") or {}
+        action = eval_dict.get("recommended_action", "skip").lower()
         return action, None
 
     except Exception as e:
-        logger.error(f"[EvalWorker] Error evaluating job {job_id}: {e}", exc_info=True)
+        logger.error(f"[GraphWorker] Error orchestrating job {job_id}: {e}", exc_info=True)
         return "error", str(e)
 
 
 def run_eval_worker() -> None:
     """
     Main entry point called by APScheduler after each scrape cycle.
-    Processes up to MAX_JOBS_PER_RUN unevaluated jobs.
+    Processes up to MAX_JOBS_PER_RUN unevaluated jobs through LangGraph.
     """
-    logger.info(f"[EvalWorker] Starting evaluation batch (max={MAX_JOBS_PER_RUN})")
+    logger.info(f"[GraphWorker] Starting LangGraph batch (max={MAX_JOBS_PER_RUN})")
 
-    run_id = start_run("evaluate", metadata={"max_jobs": MAX_JOBS_PER_RUN})
+    run_id = start_run("evaluate", metadata={"max_jobs": MAX_JOBS_PER_RUN, "orchestration": "langgraph"})
 
     try:
         jobs = _get_unevaluated_jobs(MAX_JOBS_PER_RUN)
         if not jobs:
-            logger.info("[EvalWorker] No unevaluated jobs found. Nothing to do.")
+            logger.info("[GraphWorker] No unevaluated jobs found. Nothing to do.")
             finish_run(run_id, status="skipped", jobs_found=0, jobs_processed=0)
             return
 
-        logger.info(f"[EvalWorker] Found {len(jobs)} unevaluated jobs.")
-        agent = JobEvaluatorAgent()
+        logger.info(f"[GraphWorker] Found {len(jobs)} unevaluated jobs.")
+        
+        # Build graph and checkpointer
+        supabase_client = get_supabase_client()
+        checkpointer = SupabaseSaver(supabase_client)
+        graph = build_pipeline_graph().compile(checkpointer=checkpointer)
 
         counters = {"apply": 0, "tailor": 0, "skip": 0, "error": 0}
         processed = 0
 
         for job in jobs:
-            action, error = _evaluate_single_job(agent, job)
-            counters[action] = counters.get(action, 0) + 1
+            action, error = _process_single_job_graph(graph, job)
+            if action not in counters:
+                action = "skip" # normalize unexpected strings
+            counters[action] += 1
             processed += 1
             time.sleep(DELAY_BETWEEN_CALLS)
 
@@ -149,9 +153,9 @@ def run_eval_worker() -> None:
             skipped=counters.get("skip", 0),
         )
 
-        logger.info(f"[EvalWorker] Batch complete. {processed} processed. Results: {counters}")
+        logger.info(f"[GraphWorker] Batch complete. {processed} processed. Results: {counters}")
 
     except Exception as e:
-        logger.error(f"[EvalWorker] Unhandled error: {e}", exc_info=True)
+        logger.error(f"[GraphWorker] Unhandled error: {e}", exc_info=True)
         finish_run(run_id, status="failed", error_detail=str(e))
-        notify_pipeline_error("EvaluationWorker", str(e))
+        notify_pipeline_error("GraphWorker", str(e))

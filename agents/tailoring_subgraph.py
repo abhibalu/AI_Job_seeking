@@ -41,6 +41,7 @@ def node_draft(state: TailoringState) -> dict:
         # When agent.run returns, it's a dict containing the drafted resume.
         return {
             "draft_resume": result,
+            "revision_count": state.get("revision_count", 0) + 1,
             "status": "drafted"
         }
     except Exception as e:
@@ -81,7 +82,11 @@ def node_save(state: TailoringState) -> dict:
         # Make sure we don't save our backend metadata into the actual resume PDF JSON
         clean_resume = {k: v for k, v in final_resume.items() if not k.startswith('_')}
         
-        record_id = save_tailored_resume(state["job_id"], clean_resume)
+        record_id = save_tailored_resume(
+            job_id=state["job_id"],
+            version=state.get("revision_count", 0),
+            content=clean_resume
+        )
         return {
             "final_resume_id": record_id,
             "status": "saved"
@@ -108,8 +113,6 @@ def route_critique(state: TailoringState) -> Literal["revise", "save", "error"]:
         return "save"
     else:
         logger.info(f"[SubGraph] Critic found {len(critique)} flaws. Routing back to draft.")
-        # Increment revision count
-        state["revision_count"] = revision_count + 1
         return "revise"
 
 

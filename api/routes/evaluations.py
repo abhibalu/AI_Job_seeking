@@ -164,51 +164,39 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
         # Save initial count
         save_task_status(task_id, "running", {"completed": 0, "total": total_jobs, "failed": 0})
         
-        def process_singe_job(row):
-            job_id = str(row.get("id", ""))
-            logger.debug(f"Processing job {job_id} in batch")
-            try:
-                agent = JobEvaluatorAgent()
-                result = agent.run(
-                    job_id=job_id,
-                    description_text=row.get("description_text", ""),
-                    company_name=row.get("company_name", "Unknown"),
-                    title=row.get("title", "Unknown"),
-                    job_url=row.get("link", "Unknown"),
-                )
-                
-                # --- Smart Conditional Parsing Logic ---
-                from agents.jd_parser import run_jd_parser_task
-                action = result.get("recommended_action")
-                # User Policy: Only parse 'tailor' jobs. 'Apply' jobs are good enough as-is.
-                if action == "tailor":
-                    # Run synchronously in this thread since it's already a background worker
-                    try:
-                        run_jd_parser_task(job_id, row.get("description_text", ""))
-                    except Exception as e:
-                        logger.error(f"Error parsing JD {job_id}", exc_info=True)
-                # ---------------------------------------
+        from services.eval_worker import _process_single_job_graph
+        from agents.pipeline_graph import build_pipeline_graph
+        from agents.supabase_checkpointer import SupabaseSaver
+        from agents.supabase_client import get_supabase_client
+        
+        supabase_client = get_supabase_client()
+        checkpointer = SupabaseSaver(supabase_client)
+        shared_graph = build_pipeline_graph().compile(checkpointer=checkpointer)
 
-                return result
+        def process_single_job(row):
+            job_id = str(row.get("id", ""))
+            logger.debug(f"Processing job {job_id} in batch via LangGraph")
+            try:
+                action, error = _process_single_job_graph(shared_graph, row)
+                if error:
+                    return {"error": error, "job_id": job_id}
+                return {"action": action, "job_id": job_id}
             except Exception as e:
                 logger.error(f"Error evaluating {job_id}", exc_info=True)
                 return {"error": str(e), "job_id": job_id}
 
         # Run concurrently
         with concurrent.futures.ThreadPoolExecutor(max_workers=settings.BATCH_EVAL_WORKERS) as executor:
-            futures = {executor.submit(process_singe_job, row): row for row in jobs_to_process}
+            futures = {executor.submit(process_single_job, row): row for row in jobs_to_process}
             
             for future in concurrent.futures.as_completed(futures):
                 try:
                     result = future.result()
                     processed_count += 1
                     
-                    if result and "error" not in result:
-                        save_evaluation(result)
-                    else:
+                    if result and "error" in result:
                         failed_count += 1
-                        if result and "error" in result:
-                            last_error = result["error"]
+                        last_error = result["error"]
                 except Exception as e:
                     failed_count += 1
                     last_error = str(e)
@@ -282,38 +270,29 @@ def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = F
         logger.warning(f"Job {job_id} not found in Supabase for evaluation")
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found in Supabase")
     
-    # Run evaluation
+    # Run evaluation via LangGraph
     try:
-        logger.info(f"Starting evaluation suitable for job {job_id}")
-        agent = JobEvaluatorAgent()
-        result = agent.run(
-            job_id=job_id,
-            description_text=job.get("description_text", ""),
-            company_name=job.get("company_name", "Unknown"),
-            title=job.get("title", "Unknown"),
-            job_url=job.get("link", "Unknown"),
-        )
-        save_evaluation(result)
+        logger.info(f"Starting LangGraph orchestration for manual job {job_id}")
+        from services.eval_worker import _process_single_job_graph
+        from agents.pipeline_graph import build_pipeline_graph
+        from agents.supabase_checkpointer import SupabaseSaver
         
-        # --- Smart Conditional Parsing Logic ---
-        from agents.jd_parser import run_jd_parser_task
-        action = result.get("recommended_action")
-        # User Policy: Only parse 'tailor' jobs. 'Apply' jobs are good enough as-is.
-        if action == "tailor":
-            background_tasks.add_task(
-                run_jd_parser_task, 
-                job_id, 
-                job.get("description_text", "")
-            )
-        # ---------------------------------------
+        supabase_client = get_supabase_client()
+        checkpointer = SupabaseSaver(supabase_client)
+        graph = build_pipeline_graph().compile(checkpointer=checkpointer)
+
+        action, error = _process_single_job_graph(graph, job)
         
+        if error:
+            raise Exception(error)
+            
         return {
-            "message": f"Evaluation complete: {result.get('Verdict')} (Score: {result.get('job_match_score')})",
+            "message": f"Orchestration complete. Action taken: {action}",
             "job_id": job_id,
         }
     except Exception as e:
-        logger.error(f"Single job evaluation failed for {job_id}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+        logger.error(f"Single job orchestration failed for {job_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Orchestration failed: {str(e)}")
 
 
 

@@ -54,7 +54,16 @@ def node_parse(state: JobApplicationState) -> dict:
     logger.info(f"[Graph] Parsing JD for job {state['job_id']}")
     agent = JDParserAgent()
     try:
-        result = agent.run(state["job_details"].get("description_text", ""))
+        result = agent.run(
+            job_id=state["job_id"],
+            description_text=state["job_details"].get("description_text", ""),
+        )
+        # Also save parsed JD to the database for dashboard compatibility
+        try:
+            from agents.database import save_jd_parsed
+            save_jd_parsed(result)
+        except Exception as e:
+            logger.warning(f"[Graph] Failed to save parsed JD to DB: {e}")
         return {"parsed_jd": result, "status": "parsed"}
     except Exception as e:
         logger.error(f"[Graph] JD Parsing failed: {e}")
@@ -66,11 +75,12 @@ def node_tailor(state: JobApplicationState) -> dict:
     
     # We load the base resume / approved skills from the db/files (ResumeTailorAgent does this)
     # JD Context is simplified for the tailor prompt
+    parsed_jd = state.get("parsed_jd", {})
     jd_context = {
         "title": state["job_details"].get("title", "Unknown"),
         "company": state["job_details"].get("company_name", "Unknown"),
-        "must_haves": state["parsed_jd"].get("must_haves", []),
-        "keywords": state["parsed_jd"].get("keywords_to_include", []),
+        "must_haves": parsed_jd.get("must_haves", []),
+        "keywords": parsed_jd.get("keywords_to_include", []),
         "evaluation_score": state["evaluation"].get("job_match_score", 0),
         "evaluation_gaps": state["evaluation"].get("gaps", {}),
     }
@@ -158,7 +168,19 @@ def build_pipeline_graph() -> StateGraph:
         }
     )
 
-    workflow.add_edge("parse", "tailor")
+    def route_after_parse(state: JobApplicationState) -> str:
+        if state.get("errors"):
+            return "error"
+        return "tailor"
+
+    workflow.add_conditional_edges(
+        "parse",
+        route_after_parse,
+        {
+            "tailor": "tailor",
+            "error": END,
+        }
+    )
     workflow.add_edge("tailor", "notify_tailored")
     workflow.add_edge("notify_apply", END)
     workflow.add_edge("notify_tailored", END)

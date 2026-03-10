@@ -5,7 +5,7 @@ Implements `BaseCheckpointSaver` to persist graph state in Supabase.
 This allows the graph to pause, resume, and survive server restarts without losing state.
 """
 import logging
-from typing import Iterator, Optional, Any
+from typing import Iterator, Optional, Any, Tuple, Dict, List
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     Checkpoint,
@@ -71,12 +71,12 @@ class SupabaseSaver(BaseCheckpointSaver):
             (
                 w["task_id"],
                 w["channel"],
-                self.serde.loads_typed((w["type"], bytes.fromhex(w["blob"]))),
+                self.serde.loads_typed((w["type"], bytes.fromhex(w["blob"].replace("\\x", "", 1)))),
             )
             for w in (writes_query.data or [])
         ]
 
-        checkpoint = self.serde.loads_typed((row["type"], bytes.fromhex(row["checkpoint"])))
+        checkpoint = self.serde.loads_typed((row["type"], bytes.fromhex(row["checkpoint"].replace("\\x", "", 1))))
         metadata = row.get("metadata", {})
         
         parent_config = None
@@ -107,7 +107,7 @@ class SupabaseSaver(BaseCheckpointSaver):
         self,
         config: dict,
         *,
-        filter: Optional[dict[str, Any]] = None,
+        filter: Optional[Dict[str, Any]] = None,
         before: Optional[dict] = None,
         limit: Optional[int] = None,
     ) -> Iterator[CheckpointTuple]:
@@ -144,7 +144,7 @@ class SupabaseSaver(BaseCheckpointSaver):
         config: dict,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
-        new_versions: dict[str, str],
+        new_versions: Dict[str, str],
     ) -> dict:
         """Store a checkpoint to the database."""
         thread_id = config["configurable"]["thread_id"]
@@ -172,7 +172,7 @@ class SupabaseSaver(BaseCheckpointSaver):
             }
         }
 
-    def put_writes(self, config: dict, writes: list[tuple[str, str, Any]], task_id: str) -> None:
+    def put_writes(self, config: dict, writes: List[Tuple[str, str, Any]], task_id: str) -> None:
         """Store intermediate writes to the database."""
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")

@@ -81,19 +81,24 @@ def _process_single_job_graph(graph, job: dict) -> tuple[str, str | None]:
         
         final_state = graph.invoke(initial_state, config=config)
         
-        # If there were errors in the graph execution
-        if final_state.get("errors"):
-            return "error", "; ".join(final_state["errors"])
-            
-        # The graph successfully completed.
-        # We also want to save the evaluation to the old job_evaluations table for dashboard compat
+        # ALWAYS save the evaluation to the job_evaluations table for dashboard compatibility,
+        # even if later nodes (parse/tailor) failed. The evaluation itself succeeded.
         if final_state.get("evaluation"):
             try:
                 save_evaluation(final_state["evaluation"])
             except Exception as e:
                 logger.warning(f"[GraphWorker] Failed to save evaluation to DB for {job_id}: {e}")
 
-        # Determine the action taken based on the status / evaluation
+        # If there were errors in the graph execution (e.g., parse or tailor failed)
+        if final_state.get("errors"):
+            logger.warning(f"[GraphWorker] Graph completed with errors for {job_id}: {final_state['errors']}")
+            # Still return the action from the evaluation, not 'error',
+            # because the evaluation DID succeed and was saved.
+            eval_dict = final_state.get("evaluation") or {}
+            action = eval_dict.get("recommended_action", "skip").lower()
+            return action, None
+
+        # Determine the action taken based on the evaluation
         eval_dict = final_state.get("evaluation") or {}
         action = eval_dict.get("recommended_action", "skip").lower()
         return action, None

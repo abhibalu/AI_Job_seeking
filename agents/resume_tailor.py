@@ -20,9 +20,9 @@ class ResumeTailorAgent(BaseAgent):
                 return f.read()
         return "You are an expert Resume Tailor." # Fallback
 
-    def build_user_prompt(self, base_resume: dict, jd_context: dict, approved_skills: str) -> str:
-        return f"""
-        ### BASE RESUME (JSON):
+    def build_user_prompt(self, base_resume: dict, jd_context: dict, approved_skills: str, critique: str = None) -> str:
+        prompt = f"""
+        ### BASE RESUME (JSON) / CURRENT DRAFT:
         {json.dumps(base_resume, indent=2)}
         
         ### JD CONTEXT (Structured):
@@ -36,9 +36,20 @@ class ResumeTailorAgent(BaseAgent):
         1. Maintain Bullet Counts.
         2. Integrate 'ats_keywords' from JD Context where truthful.
         3. Fill 'strategic_gaps' using 'APPROVED SKILLS' only.
-        
-        Return VALID JSON only.
         """
+        
+        if critique:
+            prompt += f"""
+            
+        ### CRITIQUE TO ADDRESS (URGENT):
+        The Hiring Manager reviewed your previous draft and found the following flaws:
+        {critique}
+        
+        You MUST revise the resume to fix these specific issues. Do not ignore this feedback.
+        """
+        
+        prompt += "\n        Return VALID JSON only."
+        return prompt
 
     def run_tailoring(self, job_id: str, base_resume: dict, approved_skills: str) -> dict:
         """

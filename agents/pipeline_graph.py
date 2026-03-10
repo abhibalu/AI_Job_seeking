@@ -14,8 +14,9 @@ from langgraph.graph import StateGraph, START, END
 
 from agents.job_evaluator import JobEvaluatorAgent
 from agents.jd_parser import JDParserAgent
-from agents.resume_tailor import ResumeTailorAgent
+from agents.tailoring_subgraph import build_tailoring_subgraph
 from services.telegram_notifier import notify_high_match
+from agents.database import get_canonical_resume, get_approved_skills
 
 logger = logging.getLogger(__name__)
 
@@ -71,34 +72,55 @@ def node_parse(state: JobApplicationState) -> dict:
 
 
 def node_tailor(state: JobApplicationState) -> dict:
-    logger.info(f"[Graph] Tailoring resume for job {state['job_id']}")
+    logger.info(f"[Graph] Launching Tailoring Sub-Graph for job {state['job_id']}")
     
-    # We load the base resume / approved skills from the db/files (ResumeTailorAgent does this)
-    # JD Context is simplified for the tailor prompt
     parsed_jd = state.get("parsed_jd", {})
     jd_context = {
-        "title": state["job_details"].get("title", "Unknown"),
+        "role": state["job_details"].get("title", "Unknown"),
         "company": state["job_details"].get("company_name", "Unknown"),
+        "summary": state["evaluation"].get("summary", ""),
         "must_haves": parsed_jd.get("must_haves", []),
-        "keywords": parsed_jd.get("keywords_to_include", []),
-        "evaluation_score": state["evaluation"].get("job_match_score", 0),
-        "evaluation_gaps": state["evaluation"].get("gaps", {}),
+        "ats_keywords": parsed_jd.get("keywords_to_include", []),
+        "strategic_gaps": state["evaluation"].get("gaps", {}),
+        "improvement_suggestions": state["evaluation"].get("improvement_suggestions", []),
     }
-
-    # IMPORTANT: The current ResumeTailorAgent expects specific args based on its run() signature.
-    # Its `run_tailoring` method in `resume_tailor.py` takes job_id and handles DB fetching.
-    # We'll use the orchestrator wrapper to avoid duplicate DB calls if possible, or just call run_tailoring.
-    agent = ResumeTailorAgent()
+    
     try:
-        # We rely on the internal run_tailoring which saves to DB and returns the tailored resume ID
-        record_id = agent.run_tailoring(state["job_id"])
+        # Load necessary ground-truth data from DB to feed the subgraph
+        base_resume = get_canonical_resume()
+        approved_skills = get_approved_skills()
+        if not base_resume:
+            raise Exception("No canonical resume found in DB")
+            
+        initial_subgraph_state = {
+            "job_id": state["job_id"],
+            "base_resume": base_resume,
+            "jd_context": jd_context,
+            "approved_skills": approved_skills,
+            "revision_count": 0,
+            "critique": [],
+        }
+        
+        # Compile and invoke the subgraph
+        subgraph = build_tailoring_subgraph().compile()
+        logger.info(f"[Graph] Sub-graph compiled, invoking...")
+        
+        # We don't need a dedicated checkpointer here because the top-level 
+        # graph's checkpointer will persist the overarching state.
+        final_sub_state = subgraph.invoke(initial_subgraph_state)
+        
+        if final_sub_state.get("errors"):
+            raise Exception("; ".join(final_sub_state["errors"]))
+            
+        record_id = final_sub_state.get("final_resume_id")
         if not record_id:
-            raise Exception("Tailoring returned no record ID")
+            raise Exception("Tailoring subgraph returned no final_resume_id")
             
         return {"tailored_resume_id": record_id, "status": "tailored"}
+        
     except Exception as e:
-        logger.error(f"[Graph] Tailoring failed: {e}")
-        return {"errors": [f"Tailoring failed: {str(e)}"], "status": "error"}
+        logger.error(f"[Graph] Tailoring Sub-Graph failed: {e}", exc_info=True)
+        return {"errors": [f"Tailoring Sub-Graph failed: {str(e)}"], "status": "error"}
 
 
 def node_notify_apply(state: JobApplicationState) -> dict:

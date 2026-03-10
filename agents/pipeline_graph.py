@@ -16,7 +16,8 @@ from agents.job_evaluator import JobEvaluatorAgent
 from agents.jd_parser import JDParserAgent
 from agents.tailoring_subgraph import build_tailoring_subgraph
 from services.telegram_notifier import notify_high_match
-from agents.database import get_canonical_resume, get_approved_skills
+from agents.database import get_master_resume
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +88,17 @@ def node_tailor(state: JobApplicationState) -> dict:
     
     try:
         # Load necessary ground-truth data from DB to feed the subgraph
-        base_resume = get_canonical_resume()
-        approved_skills = get_approved_skills()
+        base_resume = get_master_resume()
+        
+        # Load approved skills
+        approved_skills = ""
+        skills_path = Path("agent_prompts/approved_skills.md")
+        if skills_path.exists():
+            with open(skills_path) as f:
+                approved_skills = f.read()
+                
         if not base_resume:
-            raise Exception("No canonical resume found in DB")
+            raise Exception("No master resume found in DB")
             
         initial_subgraph_state = {
             "job_id": state["job_id"],

@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # Telegram Notifications
     TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
+
+    # Google Drive
+    GOOGLE_DRIVE_FOLDER_ID: str = Field(default="", env="GOOGLE_DRIVE_FOLDER_ID")
     
     # Scheduler Configuration
     # Cron expressions take priority over interval hours when set.

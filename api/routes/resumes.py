@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 import shutil
 from typing import Annotated
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 import pdfplumber
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from agents.resume_parser import ResumeParserAgent
 
@@ -23,6 +26,8 @@ from agents.database import (
     update_tailored_resume_status
 )
 from agents.resume_tailor import ResumeTailorAgent
+from agents.tailoring_subgraph import build_tailoring_subgraph
+from agents.database import get_evaluation, get_jd_parsed
 
 APPROVED_SKILLS_PATH = "agent_prompts/approved_skills.md"
 
@@ -263,27 +268,52 @@ async def tailor_resume(job_id: str):
         else:
             print("Warning: Approved skills file not found.")
 
-        # 3. Run Agent
-        agent = ResumeTailorAgent()
-        # Note: Run synchronously for now as it's a critical User-initiated action, 
-        # but could be backgrounded if slow (>20s). 
-        # Given "Conservative Editor" (40% rule), it should be fast-ish.
-        # But to be safe on timeouts, let's allow it to block or use run_in_threadpool.
+        # 3. Construct JD Context
+        eval_res = get_evaluation(job_id) or {}
+        jd_parsed = get_jd_parsed(job_id) or {}
+
+        jd_context = {
+            "role": eval_res.get("title_role", "Unknown"),
+            "company": eval_res.get("company_name", "Unknown"),
+            "summary": eval_res.get("summary", ""),
+            "must_haves": jd_parsed.get("must_haves", []),
+            "ats_keywords": jd_parsed.get("keywords_to_include", []),
+            "strategic_gaps": eval_res.get("gaps", {}),
+            "improvement_suggestions": eval_res.get("improvement_suggestions", []),
+        }
+
+        # 4. Construct Initial State for Sub-Graph
+        initial_state = {
+            "job_id": job_id,
+            "base_resume": base_resume,
+            "jd_context": jd_context,
+            "approved_skills": approved_skills,
+            "revision_count": 0,
+            "critique": [],
+        }
+
+        # 5. Compile and Invoke Sub-Graph
+        subgraph = build_tailoring_subgraph().compile()
         
-        tailored_content = await run_in_threadpool(
-            agent.run_tailoring, 
-            job_id=job_id, 
-            base_resume=base_resume, 
-            approved_skills=approved_skills
+        # Run the subgraph synchronously
+        final_state = await run_in_threadpool(
+            subgraph.invoke,
+            initial_state
         )
-        
-        # 4. Save Result
-        # Determine version number
-        existing = get_tailored_resumes(job_id)
-        version = len(existing) + 1
-        
-        record_id = save_tailored_resume(job_id, version, tailored_content, status="pending")
-        
+
+        if final_state.get("errors"):
+            raise HTTPException(status_code=500, detail="; ".join(final_state["errors"]))
+            
+        record_id = final_state.get("final_resume_id")
+        if not record_id:
+            raise HTTPException(status_code=500, detail="Tailoring subgraph returned no final_resume_id")
+
+        # 6. Return Result
+        # We need to fetch the newly saved tailored resume from DB to return it,
+        # or we could return draft_resume from final_state. Let's return draft_resume.
+        tailored_content = final_state.get("draft_resume", {})
+        version = final_state.get("revision_count", 0) # This is roughly the version
+
         return {
             "id": record_id,
             "version": version,
@@ -325,3 +355,41 @@ def update_status(record_id: str, status: str):
          
     update_tailored_resume_status(record_id, status)
     return {"status": "success"}
+
+@router.post("/export-gdoc/{job_id}")
+async def export_to_google_docs(job_id: str):
+    """Export the latest tailored resume for a job to a Google Doc."""
+    try:
+        from services.google_docs import create_tailored_resume_doc
+        
+        # 1. Fetch latest tailored resume for this job
+        versions = get_tailored_resumes(job_id)
+        if not versions:
+            raise HTTPException(status_code=404, detail="No tailored resume found to export")
+            
+        latest_version = versions[0]
+        resume_data = _to_frontend_format(latest_version.get("content", {}))
+        
+        # 2. Get Job Details for the Doc Title
+        eval_res = get_evaluation(job_id) or {}
+        job_title = eval_res.get("title_role", "Unknown Role")
+        company = eval_res.get("company_name", "Unknown Company")
+        
+        # 3. Get Drive Folder ID from settings
+        from backend.settings import settings
+        folder_id = settings.GOOGLE_DRIVE_FOLDER_ID or None
+        
+        # 4. Generate Google Doc
+        doc_url = await run_in_threadpool(
+            create_tailored_resume_doc,
+            job_title=job_title,
+            company=company,
+            resume_data=resume_data,
+            folder_id=folder_id
+        )
+        
+        return {"status": "success", "url": doc_url}
+        
+    except Exception as e:
+        logger.error(f"Failed to export Google Doc: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")

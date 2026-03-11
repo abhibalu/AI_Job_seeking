@@ -193,6 +193,12 @@ class ApiClient {
         return this.request<TailoredResume[]>(`/api/resumes/tailored/${jobId}`);
     }
 
+    async exportToGoogleDocs(jobId: string) {
+        return this.request<{ status: string; url: string }>(`/api/resumes/export-gdoc/${jobId}`, {
+            method: 'POST',
+        });
+    }
+
     async updateTailoredStatus(recordId: string, status: string) {
         return this.request<any>(`/api/resumes/tailored/${recordId}/status?status=${status}`, {
             method: 'POST',

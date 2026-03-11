@@ -1,0 +1,45 @@
+# TailorAI Architecture & Features Overview
+
+## 1. System Components
+TailorAI is a split-stack application:
+- **Frontend**: A React application (GlassResumatch-AI) built with TypeScript. It provides a review interface (`TailorReview.tsx`) for users to compare their base resume against the tailored output, switch views, and export to PDF/Google Docs.
+- **Backend**: A FastAPI server running Python. It orchestrates complex Natural Language pipelines using autonomous agents and connects to a Supabase PostgreSQL database for persistent storage.
+
+## 2. Multi-Agent Tailoring Pipeline
+The core value proposition of TailorAI is generating highly specific resumes tailored to a single Job Description (JD). The application achieves this not with a single LLM call, but through an orchestrated pipeline (`pipeline_graph.py`) that utilizes three specialized subagents before and during the tailoring process.
+
+### 2.1 The Pre-Tailoring Subagents
+Before a resume is rewritten, two analytical subagents run to build a strict context profile of the job:
+1. **The Job Evaluator Subagent (`JobEvaluatorAgent`)**
+   - **Role:** The harsh screener.
+   - **Input:** Candidate's Base Resume (JSON), raw Job Description text, and the candidate's `approved_skills.md`.
+   - **Task:** Scores the candidate's Base Resume against the raw JD text. 
+   - **Output:** It determines if the job is a "Strong Match", "Moderate Match", or "Weak Match". Most importantly for tailoring, it generates explicit structural `gaps` (technical, domain, soft skills) and `improvement_suggestions`.
+2. **The JD Parser Subagent (`JDParserAgent`)**
+   - **Role:** The signal extractor.
+   - **Input:** Raw Job Description text and the candidate's `approved_skills.md`.
+   - **Task:** Normalizes the raw JD text against the candidate's `approved_skills` dictionary.
+   - **Output:** It strictly returns lists of canonical `ats_keywords` and explicit `must_haves` hidden in the job posting.
+
+### 2.2 The Tailoring Loop Subagents (Actor-Critic)
+Once the job is deemed worth tailoring for, those analytical signals are injected into a specialized `tailoring_subgraph.py` which runs an Actor-Critic loop:
+1. **The Actor Subagent (`ResumeTailorAgent`)**
+   - **Role:** The "Conservative Editor".
+   - **Input:** Base Resume (JSON), the candidate's `approved_skills.md`, the extracted JD context (`ats_keywords`, `gaps`), and any `critique` from previous graph iterations.
+   - **Task:** It receives the JD context and drafts a JSON resume. Crucially, it is instructed to preserve bullet counts and IDs while only rewriting ~40% of the content.
+2. **The Critic Subagent (`ResumeCriticAgent`)**
+   - **Role:** The strict Hiring Manager.
+   - **Input:** The Actor's newly drafted Resume (JSON), the extracted JD context, and the candidate's `approved_skills.md`.
+   - **Task:** It reviews the Actor's newly generated draft against the established JD requirements and the candidate's actual approved skills. 
+   - **Output:** It outputs an array of actionable critiques (e.g., "You hallucinated a skill," or "You missed an ATS keyword").
+3. **Routing:** 
+   - If the Critic array is empty (~0 flaws found), the graph routes to **Save**.
+   - If flaws are found, it routes back to the Actor for a retry, appending the critique to the prompt.
+   - *Failsafe*: A `MAX_REVISIONS = 2` counter prevents infinite LLM loops.
+5. **Save Node**: Cleans up internal metadata (e.g. keys starting with `_`) and saves the final JSON layout to the Supabase database.
+
+## 3. Google Docs Export Service
+Users can export their structured JSON resume into a fully formatted Google Doc.
+- **Service (`google_docs.py`)**: Uses OAuth2 (`google-authentication.json`) for authorization.
+- **Organization**: Automatically attempts to find or create a master folder (via `GOOGLE_DRIVE_FOLDER_ID`), then nests a subfolder named after the *Company*.
+- **Sync/Replace Logic**: If an export already exists for the specific role at that company, the service clears the content via a `deleteContentRange` API request and injects the updated resume text, maintaining the same Document URL.

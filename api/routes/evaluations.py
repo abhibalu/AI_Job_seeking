@@ -10,7 +10,6 @@ from agents.supabase_client import get_supabase_client
 from backend.settings import settings
 from api.schemas import EvaluationResult, EvaluationStats, BatchRequest, MessageResponse
 from agents.database import (
-    get_db_connection,
     is_job_evaluated,
     save_evaluation,
     get_evaluation,

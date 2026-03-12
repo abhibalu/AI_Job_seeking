@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agents.supabase_client import get_supabase_client
-from backend.settings import settings
 from services.scraper_service import ScraperService
 from api.schemas import JobBase, JobDetail, JobStats, DeleteRequest
 
@@ -22,10 +21,6 @@ def list_jobs(
     is_evaluated: bool | None = Query(None, description="Filter by evaluation status"),
 ):
     """List jobs from App DB (paginated)."""
-    if not settings.USE_SUPABASE:
-        logger.error("Supabase backend not enabled in settings but route accessed")
-        raise HTTPException(status_code=503, detail="Supabase backend not enabled")
-
     client = get_supabase_client()
     
     # Base query: Active jobs only
@@ -77,9 +72,6 @@ def get_job_stats(
     is_evaluated: bool | None = Query(None, description="Filter by evaluation status"),
 ):
     """Get aggregate job statistics."""
-    if not settings.USE_SUPABASE:
-        raise HTTPException(status_code=503, detail="Supabase backend not enabled")
-        
     client = get_supabase_client()
     
     # Base query
@@ -120,9 +112,6 @@ def get_job_stats(
 @router.get("/{job_id}", response_model=JobDetail)
 def get_job(job_id: str):
     """Get single job details."""
-    if not settings.USE_SUPABASE:
-        raise HTTPException(status_code=503, detail="Supabase backend not enabled")
-        
     client = get_supabase_client()
     
     result = client.table("jobs").select("*").eq("id", job_id).execute()
@@ -137,9 +126,6 @@ def get_job(job_id: str):
 @router.delete("", status_code=204)
 def delete_jobs(request: DeleteRequest):
     """Bulk soft-delete jobs."""
-    if not settings.USE_SUPABASE:
-        raise HTTPException(status_code=503, detail="Supabase backend not enabled")
-
     client = get_supabase_client()
     
     # Update status to 'deleted' for all IDs

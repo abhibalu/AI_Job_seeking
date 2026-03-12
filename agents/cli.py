@@ -17,13 +17,13 @@ from deltalake import DeltaTable
 
 from backend.settings import settings
 from .database import (
-    init_database, 
-    is_job_evaluated, 
+    init_database,
+    is_job_evaluated,
     is_job_parsed,
-    save_evaluation, 
+    save_evaluation,
     save_jd_parsed,
     get_evaluation,
-    get_db_connection,
+    get_evaluation_statistics,
 )
 from .job_evaluator import JobEvaluatorAgent
 from .jd_parser import JDParserAgent
@@ -238,32 +238,16 @@ def cmd_run(args):
 
 def cmd_status(args):
     """Show evaluation statistics."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Count evaluations
-    cursor.execute("SELECT COUNT(*) FROM job_evaluations")
-    total_evals = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT recommended_action, COUNT(*) FROM job_evaluations GROUP BY recommended_action")
-    action_counts = dict(cursor.fetchall())
-    
-    cursor.execute("SELECT AVG(job_match_score) FROM job_evaluations")
-    avg_score = cursor.fetchone()[0] or 0
-    
-    # Count parsed
-    cursor.execute("SELECT COUNT(*) FROM jd_parsed")
-    total_parsed = cursor.fetchone()[0]
-    
-    conn.close()
-    
+    stats = get_evaluation_statistics()
+
+    action_counts = stats.get("by_action", {})
+
     print(f"\n📊 Evaluation Status:")
-    print(f"   Total evaluated: {total_evals}")
-    print(f"   Average score: {avg_score:.1f}")
+    print(f"   Total evaluated: {stats.get('total_evaluated', 0)}")
+    print(f"   Average score: {stats.get('average_score', 0):.1f}")
     print(f"   - Apply: {action_counts.get('apply', 0)}")
     print(f"   - Tailor: {action_counts.get('tailor', 0)}")
     print(f"   - Skip: {action_counts.get('skip', 0)}")
-    print(f"\n   JDs parsed: {total_parsed}")
 
 
 def main():

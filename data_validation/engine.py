@@ -33,46 +33,24 @@ class ValidationEngine:
     def load_app_table(self, table_name: str, alias: str = None):
         """Load an Application Database table into DuckDB (as alias)."""
         target_name = alias or table_name
-        
-        if settings.USE_SUPABASE:
-            # Hybrid approach: Fetch data via API -> Arrow -> DuckDB
-            try:
-                from agents.supabase_client import get_supabase_client
-                client = get_supabase_client()
-                
-                # Fetch all rows (warning: large tables might need pagination)
-                # Using csv export from supabase might be faster, but API is easiest
-                response = client.table(table_name).select("*").execute()
-                
-                if response.data:
-                    import polars as pl
-                    df = pl.DataFrame(response.data)
-                    # Register as virtual table
-                    self.conn.register(target_name, df)
-                    print(f"Registered Supabase table '{table_name}' as '{target_name}' via API ({len(df)} rows)")
-                else:
-                    print(f"Warning: Table '{table_name}' is empty or not found.")
-            except Exception as e:
-                print(f"Error loading Supabase table: {e}")
-        else:
-            # SQLite approach: Attach DB file directly
-            db_path = settings.EVAL_DB_PATH
-            try:
-                # Install sqlite extension if not present - duckdb usually builds it in
-                self.conn.install_extension("sqlite") 
-                self.conn.load_extension("sqlite")
-                
-                # Attach ONLY once
-                try:
-                    self.conn.sql(f"ATTACH '{db_path}' AS app_db (TYPE SQLITE)")
-                except duckdb.BinderException:
-                    pass # Already attached
-                
-                # Create view/alias to simplify access
-                self.conn.sql(f"CREATE OR REPLACE VIEW {target_name} AS SELECT * FROM app_db.{table_name}")
-                print(f"Attached SQLite table '{table_name}' as '{target_name}'")
-            except Exception as e:
-                 print(f"Error attaching SQLite DB: {e}")
+
+        # Fetch data via Supabase API -> Polars -> DuckDB
+        try:
+            from agents.supabase_client import get_supabase_client
+            client = get_supabase_client()
+
+            response = client.table(table_name).select("*").execute()
+
+            if response.data:
+                import polars as pl
+                df = pl.DataFrame(response.data)
+                # Register as virtual table
+                self.conn.register(target_name, df)
+                print(f"Registered Supabase table '{table_name}' as '{target_name}' via API ({len(df)} rows)")
+            else:
+                print(f"Warning: Table '{table_name}' is empty or not found.")
+        except Exception as e:
+            print(f"Error loading Supabase table: {e}")
 
     def register_gold_table(self, table_name: str, s3_path: str):
         """Register a Delta Table from S3 as a view."""

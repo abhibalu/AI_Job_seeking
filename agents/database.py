@@ -1,14 +1,11 @@
 """
 Database module for storing agent evaluation results.
 
-Supports both SQLite (local) and Supabase (cloud) backends.
-Toggle with USE_SUPABASE environment variable.
+Uses Supabase (PostgreSQL) as the backend.
 """
 import json
-import sqlite3
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from backend.settings import settings
@@ -16,157 +13,25 @@ from backend.settings import settings
 logger = logging.getLogger(__name__)
 
 
-# ============================================
-# BACKEND SELECTION
-# ============================================
-
-def _use_supabase() -> bool:
-    """Check if Supabase should be used."""
-    return settings.USE_SUPABASE and settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY
-
-
 def _execute_safe(query_builder):
     """Execute a Supabase query with retry logic for connection drops."""
     import time
     from httpx import RemoteProtocolError
-    
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
             return query_builder.execute()
         except (RemoteProtocolError, Exception) as e:
             is_disconnect = "disconnected" in str(e).lower() or isinstance(e, RemoteProtocolError)
-            
+
             if is_disconnect and attempt < max_retries - 1:
                 wait_time = 0.5 * (2 ** attempt)
                 logger.warning(f"Supabase connection dropped. Retrying in {wait_time}s... ({attempt + 1}/{max_retries})")
                 time.sleep(wait_time)
-                
-                # If we could force client refresh here it would be better, but query_builder is bound to old client
-                # Ideally we should rebuild the query, but we can't easily.
-                # However, httpx usually reconnects on new request if pool allows.
                 continue
             raise e
 
-
-# ============================================
-# SQLITE FUNCTIONS (Original)
-# ============================================
-
-def get_db_path() -> Path:
-    """Get the database path, creating parent directories if needed."""
-    db_path = Path(settings.EVAL_DB_PATH)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return db_path
-
-
-def get_db_connection() -> sqlite3.Connection:
-    """Get a SQLite database connection."""
-    conn = sqlite3.connect(get_db_path())
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_database():
-    """Initialize the SQLite database schema."""
-    if _use_supabase():
-        logger.info("Using Supabase - SQLite init skipped")
-        return
-    
-    logger.info(f"Using SQLite at {get_db_path()}")
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Job evaluations table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS job_evaluations (
-            job_id TEXT PRIMARY KEY,
-            company_name TEXT,
-            title_role TEXT,
-            job_url TEXT,
-            
-            verdict TEXT,
-            job_match_score INTEGER,
-            summary TEXT,
-            required_exp TEXT,
-            recommended_action TEXT,
-            
-            gaps TEXT,
-            improvement_suggestions TEXT,
-            interview_tips TEXT,
-            jd_keywords TEXT,
-            matched_keywords TEXT,
-            missing_keywords TEXT,
-            
-            model_used TEXT,
-            evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            raw_response TEXT
-        )
-    """)
-    
-    # JD parsed signals table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS jd_parsed (
-            job_id TEXT PRIMARY KEY,
-            must_haves TEXT,
-            nice_to_haves TEXT,
-            domain TEXT,
-            seniority TEXT,
-            location_constraints TEXT,
-            ats_keywords TEXT,
-            normalized_skills TEXT,
-            
-            model_used TEXT,
-            parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            raw_response TEXT,
-            
-            FOREIGN KEY (job_id) REFERENCES job_evaluations(job_id)
-        )
-    """)
-    
-    # Tasks table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            task_id TEXT PRIMARY KEY,
-            status TEXT,
-            progress TEXT,
-            error TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP
-        )
-    """)
-
-    # Resumes table (Unified)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS resumes (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            content TEXT,
-            status TEXT DEFAULT 'pending',
-            job_id TEXT,
-            version INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Indexes
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_resumes_job_id ON resumes(job_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_resumes_status ON resumes(status)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_verdict ON job_evaluations(verdict)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_score ON job_evaluations(job_match_score)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_action ON job_evaluations(recommended_action)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_status ON tasks(status)")
-    
-    conn.commit()
-    conn.close()
-    
-    print(f"SQLite database initialized at: {get_db_path()}")
-
-
-# ============================================
-# SUPABASE FUNCTIONS
-# ============================================
 
 def _get_supabase():
     """Get Supabase client (lazy import to avoid circular deps)."""
@@ -177,10 +42,10 @@ def _get_supabase():
 def _ensure_job_exists(job_id: str, company_name: str = "", title: str = "", job_url: str = ""):
     """Ensure a job record exists in the jobs table (for foreign key)."""
     client = _get_supabase()
-    
+
     # Check if job exists
     result = client.table("jobs").select("id").eq("id", job_id).execute()
-    
+
     if not result.data:
         # Insert minimal job record
         client.table("jobs").insert({
@@ -191,178 +56,103 @@ def _ensure_job_exists(job_id: str, company_name: str = "", title: str = "", job
         }).execute()
 
 
+def init_database():
+    """Validate Supabase connection on startup."""
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+        raise RuntimeError(
+            "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set. "
+            "SQLite fallback has been removed."
+        )
+    logger.info("Using Supabase backend")
+
+
 # ============================================
 # EVALUATION FUNCTIONS
 # ============================================
 
 def is_job_evaluated(job_id: str) -> bool:
     """Check if a job has already been evaluated."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("job_evaluations").select("job_id").eq("job_id", job_id).execute()
-        return len(result.data) > 0
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM job_evaluations WHERE job_id = ?", (job_id,))
-    result = cursor.fetchone() is not None
-    conn.close()
-    return result
+    client = _get_supabase()
+    result = client.table("job_evaluations").select("job_id").eq("job_id", job_id).execute()
+    return len(result.data) > 0
 
 
 def get_evaluation(job_id: str) -> dict | None:
     """Get evaluation for a job."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("job_evaluations").select("*").eq("job_id", job_id).execute()
-        if result.data:
-            return result.data[0]
-        return None
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM job_evaluations WHERE job_id = ?", (job_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
+    client = _get_supabase()
+    result = client.table("job_evaluations").select("*").eq("job_id", job_id).execute()
+    if result.data:
+        return result.data[0]
+    return None
 
 
 def list_evaluations(skip: int = 0, limit: int = 20, action: str | None = None, verdict: str | None = None, search: str | None = None) -> tuple[list[dict], int]:
     """List evaluations with pagination and filtering."""
-    if _use_supabase():
-        client = _get_supabase()
-        # Prepare query filtering locally first to avoid double select issue
-        # Note: Supabase-py select builder returns a filter builder, not another select builder.
-        # We must apply the select with join at the START.
-        
-        query = client.table("job_evaluations").select("*, jobs(company_website)", count="exact")
-        
-        if action:
-            query = query.eq("recommended_action", action)
-        if verdict:
-            query = query.eq("verdict", verdict)
-        if search:
-            # Search in company or title
-            query = query.or_(f"company_name.ilike.%{search}%,title_role.ilike.%{search}%")
-            
-        # Supabase range is inclusive
-        result = query.order("evaluated_at", desc=True).range(skip, skip + limit - 1).execute()
-        
-        data = result.data or []
-        # Flatten jobs.company_website -> company_website
-        for row in data:
-            if "jobs" in row and row["jobs"]:
-                # If jobs is a list (one-to-many? shouldn't be for one job_id) or dict
-                if isinstance(row["jobs"], dict):
-                    row["company_website"] = row["jobs"].get("company_website")
-                elif isinstance(row["jobs"], list) and len(row["jobs"]) > 0:
-                    row["company_website"] = row["jobs"][0].get("company_website")
-                del row["jobs"]
-        
-        return data, result.count or 0
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    query = "SELECT * FROM job_evaluations"
-    count_query = "SELECT COUNT(*) FROM job_evaluations"
-    params = []
-    
-    conditions = []
+    client = _get_supabase()
+
+    query = client.table("job_evaluations").select("*, jobs(company_website)", count="exact")
+
     if action:
-        conditions.append("recommended_action = ?")
-        params.append(action)
+        query = query.eq("recommended_action", action)
     if verdict:
-        conditions.append("verdict = ?")
-        params.append(verdict)
+        query = query.eq("verdict", verdict)
     if search:
-        conditions.append("(company_name LIKE ? OR title_role LIKE ?)")
-        params.extend([f"%{search}%", f"%{search}%"])
-        
-    if conditions:
-        clause = " WHERE " + " AND ".join(conditions)
-        query += clause
-        count_query += clause
-    
-    # Get Count
-    cursor.execute(count_query, params)
-    total_count = cursor.fetchone()[0]
-    
-    # Get Data
-    query += " ORDER BY evaluated_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, skip])
-    
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
-    
-    return [dict(row) for row in rows], total_count
+        query = query.or_(f"company_name.ilike.%{search}%,title_role.ilike.%{search}%")
+
+    # Supabase range is inclusive
+    result = query.order("evaluated_at", desc=True).range(skip, skip + limit - 1).execute()
+
+    data = result.data or []
+    # Flatten jobs.company_website -> company_website
+    for row in data:
+        if "jobs" in row and row["jobs"]:
+            if isinstance(row["jobs"], dict):
+                row["company_website"] = row["jobs"].get("company_website")
+            elif isinstance(row["jobs"], list) and len(row["jobs"]) > 0:
+                row["company_website"] = row["jobs"][0].get("company_website")
+            del row["jobs"]
+
+    return data, result.count or 0
 
 
 def get_evaluation_statistics() -> dict:
     """Get evaluation statistics."""
-    if _use_supabase():
-        client = _get_supabase()
-        
-        try:
-            # Total count (efficient HEAD request)
-            total_res = _execute_safe(client.table("job_evaluations").select("*", count="exact", head=True))
-            total = total_res.count or 0
-            
-            # Fetch all needed data in ONE query to minimize round-trips
-            res = _execute_safe(client.table("job_evaluations").select("job_match_score, recommended_action, verdict"))
-            data = res.data or []
-            
-            # Average Score
-            score_list = [r["job_match_score"] for r in data if r["job_match_score"] is not None]
-            avg_score = sum(score_list) / len(score_list) if score_list else 0
-            
-            # Group by Action
-            by_action = {}
-            for r in data:
-                act = r.get("recommended_action") or "unknown"
-                by_action[act] = by_action.get(act, 0) + 1
-                
-            # Group by Verdict
-            by_verdict = {}
-            for r in data:
-                v = r.get("verdict") or "unknown"
-                by_verdict[v] = by_verdict.get(v, 0) + 1
-                
-        except Exception as e:
-            logger.error(f"Failed to fetch stats from Supabase: {e}", exc_info=True)
-            # Return empty stats on failure rather than crashing API
-            return {
-                "total_evaluated": 0,
-                "average_score": 0,
-                "by_action": {},
-                "by_verdict": {},
-            }
-            
+    client = _get_supabase()
+
+    try:
+        # Total count (efficient HEAD request)
+        total_res = _execute_safe(client.table("job_evaluations").select("*", count="exact", head=True))
+        total = total_res.count or 0
+
+        # Fetch all needed data in ONE query to minimize round-trips
+        res = _execute_safe(client.table("job_evaluations").select("job_match_score, recommended_action, verdict"))
+        data = res.data or []
+
+        # Average Score
+        score_list = [r["job_match_score"] for r in data if r["job_match_score"] is not None]
+        avg_score = sum(score_list) / len(score_list) if score_list else 0
+
+        # Group by Action
+        by_action = {}
+        for r in data:
+            act = r.get("recommended_action") or "unknown"
+            by_action[act] = by_action.get(act, 0) + 1
+
+        # Group by Verdict
+        by_verdict = {}
+        for r in data:
+            v = r.get("verdict") or "unknown"
+            by_verdict[v] = by_verdict.get(v, 0) + 1
+
+    except Exception as e:
+        logger.error(f"Failed to fetch stats from Supabase: {e}", exc_info=True)
         return {
-            "total_evaluated": total,
-            "average_score": round(avg_score, 1),
-            "by_action": by_action,
-            "by_verdict": by_verdict,
+            "total_evaluated": 0,
+            "average_score": 0,
+            "by_action": {},
+            "by_verdict": {},
         }
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT COUNT(*) FROM job_evaluations")
-    total = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT AVG(job_match_score) FROM job_evaluations")
-    avg_score = cursor.fetchone()[0] or 0
-    
-    cursor.execute("SELECT recommended_action, COUNT(*) FROM job_evaluations GROUP BY recommended_action")
-    by_action = dict(cursor.fetchall())
-    
-    cursor.execute("SELECT verdict, COUNT(*) FROM job_evaluations GROUP BY verdict")
-    by_verdict = dict(cursor.fetchall())
-    
-    conn.close()
-    
     return {
         "total_evaluated": total,
         "average_score": round(avg_score, 1),
@@ -377,76 +167,38 @@ def save_evaluation(result: dict):
     company_name = result.get("company_name", "")
     title_role = result.get("title_role", "")
     job_url = result.get("job_url", "")
-    
-    if _use_supabase():
-        client = _get_supabase()
-        
-        # Ensure job exists for FK
-        _ensure_job_exists(job_id, company_name, title_role, job_url)
-        
-        data = {
-            "job_id": job_id,
-            "company_name": company_name,
-            "title_role": title_role,
-            "job_url": job_url,
-            "verdict": result.get("Verdict", result.get("verdict", "")),
-            "job_match_score": result.get("job_match_score", 0),
-            "summary": result.get("summary", ""),
-            "required_exp": result.get("required_exp", ""),
-            "recommended_action": result.get("recommended_action", ""),
-            "gaps": result.get("gaps", {}),
-            "improvement_suggestions": result.get("improvement_suggestions", {}),
-            "interview_tips": result.get("interview_tips", {}),
-            "jd_keywords": result.get("jd_keywords", []),
-            "matched_keywords": result.get("matched_keywords", []),
-            "missing_keywords": result.get("missing_keywords", []),
-            "model_used": result.get("_model_used", ""),
-            "raw_response": result,
-            "evaluated_at": datetime.now().isoformat(),
-        }
-        
-        # Upsert (insert or update on conflict)
-        client.table("job_evaluations").upsert(
-            data,
-            on_conflict="job_id"
-        ).execute()
-        return
-    
-    # SQLite fallback
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        INSERT OR REPLACE INTO job_evaluations (
-            job_id, company_name, title_role, job_url,
-            verdict, job_match_score, summary, required_exp, recommended_action,
-            gaps, improvement_suggestions, interview_tips,
-            jd_keywords, matched_keywords, missing_keywords,
-            model_used, raw_response, evaluated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        job_id,
-        company_name,
-        title_role,
-        job_url,
-        result.get("Verdict", result.get("verdict", "")),
-        result.get("job_match_score", 0),
-        result.get("summary", ""),
-        result.get("required_exp", ""),
-        result.get("recommended_action", ""),
-        json.dumps(result.get("gaps", {})),
-        json.dumps(result.get("improvement_suggestions", {})),
-        json.dumps(result.get("interview_tips", {})),
-        json.dumps(result.get("jd_keywords", [])),
-        json.dumps(result.get("matched_keywords", [])),
-        json.dumps(result.get("missing_keywords", [])),
-        result.get("_model_used", ""),
-        json.dumps(result),
-        datetime.now()
-    ))
-    
-    conn.commit()
-    conn.close()
+
+    client = _get_supabase()
+
+    # Ensure job exists for FK
+    _ensure_job_exists(job_id, company_name, title_role, job_url)
+
+    data = {
+        "job_id": job_id,
+        "company_name": company_name,
+        "title_role": title_role,
+        "job_url": job_url,
+        "verdict": result.get("Verdict", result.get("verdict", "")),
+        "job_match_score": result.get("job_match_score", 0),
+        "summary": result.get("summary", ""),
+        "required_exp": result.get("required_exp", ""),
+        "recommended_action": result.get("recommended_action", ""),
+        "gaps": result.get("gaps", {}),
+        "improvement_suggestions": result.get("improvement_suggestions", {}),
+        "interview_tips": result.get("interview_tips", {}),
+        "jd_keywords": result.get("jd_keywords", []),
+        "matched_keywords": result.get("matched_keywords", []),
+        "missing_keywords": result.get("missing_keywords", []),
+        "model_used": result.get("_model_used", ""),
+        "raw_response": result,
+        "evaluated_at": datetime.now().isoformat(),
+    }
+
+    # Upsert (insert or update on conflict)
+    client.table("job_evaluations").upsert(
+        data,
+        on_conflict="job_id"
+    ).execute()
 
 
 # ============================================
@@ -455,76 +207,39 @@ def save_evaluation(result: dict):
 
 def is_job_parsed(job_id: str) -> bool:
     """Check if a job's JD has been parsed."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("jd_parsed").select("job_id").eq("job_id", job_id).execute()
-        return len(result.data) > 0
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM jd_parsed WHERE job_id = ?", (job_id,))
-    result = cursor.fetchone() is not None
-    conn.close()
-    return result
+    client = _get_supabase()
+    result = client.table("jd_parsed").select("job_id").eq("job_id", job_id).execute()
+    return len(result.data) > 0
 
 
 def save_jd_parsed(result: dict):
     """Save JD parsed signals to database."""
     job_id = str(result.get("job_id", ""))
-    
-    if _use_supabase():
-        client = _get_supabase()
-        
-        # Ensure job exists for FK
-        _ensure_job_exists(job_id)
-        
-        data = {
-            "job_id": job_id,
-            "must_haves": result.get("must_haves", []),
-            "nice_to_haves": result.get("nice_to_haves", []),
-            "domain": result.get("domain", ""),
-            "seniority": result.get("seniority") if result.get("seniority") in ('junior', 'mid', 'senior', 'lead', 'unspecified') else None,
-            "location_constraints": result.get("location_constraints", []),
-            "ats_keywords": result.get("ats_keywords", []),
-            "normalized_skills": result.get("normalized_skills", {}),
-            "model_used": result.get("_model_used", ""),
-            "raw_response": result,
-            "parsed_at": datetime.now().isoformat(),
-        }
-        
-        # Upsert
-        client.table("jd_parsed").upsert(
-            data,
-            on_conflict="job_id"
-        ).execute()
-        return
-    
-    # SQLite fallback
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        INSERT OR REPLACE INTO jd_parsed (
-            job_id, must_haves, nice_to_haves, domain, seniority,
-            location_constraints, ats_keywords, normalized_skills,
-            model_used, raw_response, parsed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        job_id,
-        json.dumps(result.get("must_haves", [])),
-        json.dumps(result.get("nice_to_haves", [])),
-        result.get("domain", ""),
-        result.get("seniority", ""),
-        json.dumps(result.get("location_constraints", [])),
-        json.dumps(result.get("ats_keywords", [])),
-        json.dumps(result.get("normalized_skills", {})),
-        result.get("_model_used", ""),
-        json.dumps(result),
-        datetime.now()
-    ))
-    
-    conn.commit()
-    conn.close()
+
+    client = _get_supabase()
+
+    # Ensure job exists for FK
+    _ensure_job_exists(job_id)
+
+    data = {
+        "job_id": job_id,
+        "must_haves": result.get("must_haves", []),
+        "nice_to_haves": result.get("nice_to_haves", []),
+        "domain": result.get("domain", ""),
+        "seniority": result.get("seniority") if result.get("seniority") in ('junior', 'mid', 'senior', 'lead', 'unspecified') else None,
+        "location_constraints": result.get("location_constraints", []),
+        "ats_keywords": result.get("ats_keywords", []),
+        "normalized_skills": result.get("normalized_skills", {}),
+        "model_used": result.get("_model_used", ""),
+        "raw_response": result,
+        "parsed_at": datetime.now().isoformat(),
+    }
+
+    # Upsert
+    client.table("jd_parsed").upsert(
+        data,
+        on_conflict="job_id"
+    ).execute()
 
 
 # ============================================
@@ -533,98 +248,42 @@ def save_jd_parsed(result: dict):
 
 def list_tasks(limit: int = 20) -> list[dict]:
     """List recent tasks."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("tasks").select("*").order("created_at", desc=True).limit(limit).execute()
-        return result.data
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,))
-    rows = cursor.fetchall()
-    conn.close()
-    
-    return [dict(row) for row in rows]
+    client = _get_supabase()
+    result = client.table("tasks").select("*").order("created_at", desc=True).limit(limit).execute()
+    return result.data
+
 
 def save_task_status(task_id: str, status: str, progress: dict | None = None, error: str | None = None):
     """Save or update task status."""
-    if _use_supabase():
-        client = _get_supabase()
-        
-        # Check if task exists
-        result = client.table("tasks").select("task_id").eq("task_id", task_id).execute()
-        
-        data = {
-            "task_id": task_id,
-            "status": status,
-            "progress": progress or {},
-            "error": error,
-        }
-        
-        if status in ("completed", "failed"):
-            data["completed_at"] = datetime.now().isoformat()
-        
-        if result.data:
-            # Update
-            client.table("tasks").update(data).eq("task_id", task_id).execute()
-        else:
-            # Insert
-            client.table("tasks").insert(data).execute()
-        return
-    
-    # SQLite fallback
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,))
-    exists = cursor.fetchone() is not None
-    
-    if exists:
-        if status in ("completed", "failed"):
-            cursor.execute("""
-                UPDATE tasks 
-                SET status = ?, progress = ?, error = ?, completed_at = ?
-                WHERE task_id = ?
-            """, (status, json.dumps(progress) if progress else None, error, datetime.now(), task_id))
-        else:
-            cursor.execute("""
-                UPDATE tasks 
-                SET status = ?, progress = ?, error = ?
-                WHERE task_id = ?
-            """, (status, json.dumps(progress) if progress else None, error, task_id))
+    client = _get_supabase()
+
+    # Check if task exists
+    result = client.table("tasks").select("task_id").eq("task_id", task_id).execute()
+
+    data = {
+        "task_id": task_id,
+        "status": status,
+        "progress": progress or {},
+        "error": error,
+    }
+
+    if status in ("completed", "failed"):
+        data["completed_at"] = datetime.now().isoformat()
+
+    if result.data:
+        # Update
+        client.table("tasks").update(data).eq("task_id", task_id).execute()
     else:
-        cursor.execute("""
-            INSERT INTO tasks (task_id, status, progress, error)
-            VALUES (?, ?, ?, ?)
-        """, (task_id, status, json.dumps(progress) if progress else None, error))
-    
-    conn.commit()
-    conn.close()
+        # Insert
+        client.table("tasks").insert(data).execute()
 
 
 def get_task_status(task_id: str) -> dict | None:
     """Get task status by ID."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("tasks").select("*").eq("task_id", task_id).execute()
-        if result.data:
-            return result.data[0]
-        return None
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
-        result = dict(row)
-        if result.get("progress"):
-            try:
-                result["progress"] = json.loads(result["progress"])
-            except:
-                pass
-        return result
+    client = _get_supabase()
+    result = client.table("tasks").select("*").eq("task_id", task_id).execute()
+    if result.data:
+        return result.data[0]
     return None
 
 
@@ -634,7 +293,7 @@ def get_task_status(task_id: str) -> dict | None:
 
 def save_resume(content: dict, name: str = "Master Resume", is_master: bool = False, status: str = None, job_id: str = None, version: int = None) -> str:
     """Save parsed resume to database (United Resumes Table).
-    
+
     Args:
         is_master: Legacy flag, if True implies status='master' and job_id=None.
         status: 'master', 'pending', 'approved', 'rejected'.
@@ -642,7 +301,7 @@ def save_resume(content: dict, name: str = "Master Resume", is_master: bool = Fa
     """
     import uuid
     record_id = str(uuid.uuid4())
-    
+
     # Normalize inputs
     if is_master:
         status = 'master'
@@ -650,97 +309,33 @@ def save_resume(content: dict, name: str = "Master Resume", is_master: bool = Fa
         version = None
     elif status is None:
         status = 'pending'
-        
-    if _use_supabase():
-        client = _get_supabase()
-        
-        # If saving as master, unset all other masters first
-        if status == 'master':
-            try:
-                # Update any existing masters to not be master (or just leave them as historical 'master' but we want one active)
-                # Strategy: We don't have 'is_master' anymore, so we rely on status='master'.
-                # Strict interpretation: Only one 'master' allowed? Or just latest one is used?
-                # Let's keep multiple 'master' records as history, but maybe we want to mark old ones 'archived'?
-                # For now: We just insert. get_master_resume() gets the latest one.
-                pass 
-            except Exception:
-                pass
-        
-        data = {
-            "id": record_id,
-            "name": name,
-            "content": content,
-            "status": status,
-            "job_id": job_id,
-            "version": version,
-            "updated_at": datetime.now().isoformat(),
-        }
-        
-        client.table("resumes").insert(data).execute()
-        return record_id
 
-    # SQLite fallback
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        INSERT INTO resumes (id, name, content, status, job_id, version, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        record_id,
-        name,
-        json.dumps(content),
-        status,
-        job_id,
-        version,
-        datetime.now()
-    ))
-    
-    conn.commit()
-    conn.close()
+    client = _get_supabase()
+
+    data = {
+        "id": record_id,
+        "name": name,
+        "content": content,
+        "status": status,
+        "job_id": job_id,
+        "version": version,
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    client.table("resumes").insert(data).execute()
     return record_id
 
 
 def get_master_resume() -> dict | None:
     """Get the latest master resume."""
-    if _use_supabase():
-        client = _get_supabase()
-        # Get latest status='master' or is_master=true (legacy migration fallback handled by query if possible?)
-        # Let's assume migration ran and we rely on status='master'
-        try:
-            result = client.table("resumes").select("content").eq("status", "master").order("created_at", desc=True).limit(1).execute()
-            if result.data:
-                return result.data[0]["content"]
-        except Exception:
-            # Fallback for unmigrated DB (transient state)
-            pass
-            
-        return None
-        
-    # SQLite fallback
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
+    client = _get_supabase()
     try:
-        cursor.execute("""
-            SELECT content FROM resumes 
-            WHERE status = 'master'
-            ORDER BY created_at DESC 
-            LIMIT 1
-        """)
-        row = cursor.fetchone()
+        result = client.table("resumes").select("content").eq("status", "master").order("created_at", desc=True).limit(1).execute()
+        if result.data:
+            return result.data[0]["content"]
     except Exception:
-        # Tables might not be migrated in SQLite yet
-        conn.close()
-        return None
+        pass
 
-    conn.close()
-    
-    if row and row[0]:
-        try:
-            return json.loads(row[0])
-        except:
-            return None
     return None
 
 
@@ -762,77 +357,21 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
 
 def get_tailored_resumes(job_id: str) -> list[dict]:
     """Get all tailored versions for a job."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("resumes").select("*").eq("job_id", job_id).order("version", desc=True).execute()
-        return result.data
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("""
-            SELECT * FROM resumes 
-            WHERE job_id = ? 
-            ORDER BY version DESC
-        """, (job_id,))
-        rows = cursor.fetchall()
-    except Exception:
-        rows = []
-        
-    conn.close()
-    
-    results = []
-    for row in rows:
-        d = dict(row)
-        try:
-            d["content"] = json.loads(d["content"])
-        except:
-            pass
-        results.append(d)
-    return results
+    client = _get_supabase()
+    result = client.table("resumes").select("*").eq("job_id", job_id).order("version", desc=True).execute()
+    return result.data
 
 
 def update_tailored_resume_status(record_id: str, status: str):
     """Update status (approved/rejected)."""
-    if _use_supabase():
-        client = _get_supabase()
-        client.table("resumes").update({"status": status}).eq("id", record_id).execute()
-        return
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("UPDATE resumes SET status = ? WHERE id = ?", (status, record_id))
-        conn.commit()
-    except Exception:
-        pass
-    conn.close()
+    client = _get_supabase()
+    client.table("resumes").update({"status": status}).eq("id", record_id).execute()
 
 
 def get_jd_parsed(job_id: str) -> dict | None:
     """Get parsed signals for a job."""
-    if _use_supabase():
-        client = _get_supabase()
-        result = client.table("jd_parsed").select("*").eq("job_id", job_id).execute()
-        if result.data:
-            return result.data[0]
-        return None
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM jd_parsed WHERE job_id = ?", (job_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
-        result = dict(row)
-        # Parse JSON fields
-        for f in ["must_haves", "nice_to_haves", "ats_keywords", "normalized_skills"]:
-             if result.get(f):
-                 try:
-                     result[f] = json.loads(result[f])
-                 except:
-                     pass
-        return result
+    client = _get_supabase()
+    result = client.table("jd_parsed").select("*").eq("job_id", job_id).execute()
+    if result.data:
+        return result.data[0]
     return None

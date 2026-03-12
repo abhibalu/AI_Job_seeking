@@ -45,10 +45,6 @@ def clean_value(val):
 
 def sync_silver_to_app():
     logger.info("Starting Sync: Silver Jobs -> App Database (Upsert)")
-    
-    if not settings.USE_SUPABASE:
-        logger.warning("USE_SUPABASE is False. Skipping Sync.")
-        return
 
     # 1. Load Silver Table
     silver_path = f"s3://{settings.DELTA_LAKEHOUSE_BUCKET}/silver/jobs"

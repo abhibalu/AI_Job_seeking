@@ -10,15 +10,7 @@ class Settings(BaseSettings):
     APIFY_TOKEN: str = Field(default="", env="APIFY_TOKEN")
     LINKEDIN_URL: str = Field(default="", env="LINKEDIN_URL")
     DEBUG: bool = Field(False, env="DEBUG")
-    
-    # MinIO Configuration
-    MINIO_ENDPOINT: str = Field("localhost:9000", env="MINIO_ENDPOINT")
-    MINIO_ACCESS_KEY: str = Field("minioadmin", env="MINIO_ACCESS_KEY")
-    MINIO_SECRET_KEY: str = Field("minioadmin", env="MINIO_SECRET_KEY")
-    MINIO_BUCKET: str = Field("scraped-jobs", env="MINIO_BUCKET")
-    MINIO_SECURE: bool = Field(False, env="MINIO_SECURE")
-    DELTA_LAKEHOUSE_BUCKET: str = Field("delta-lakehouse", env="DELTA_LAKEHOUSE_BUCKET")
-    
+
     # OpenRouter Configuration
     OPENROUTER_API_KEY: str = Field(default="", env="OPENROUTER_API_KEY")
     OPENROUTER_MODEL: str = Field(default="", env="OPENROUTER_MODEL")

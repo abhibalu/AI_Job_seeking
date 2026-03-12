@@ -20,8 +20,6 @@ tiktoken>=0.7
 # ── Database / Storage ──
 supabase>=2.0.0
 psycopg2-binary>=2.9.0
-minio>=7.0.0
-deltalake>=0.17.0
 duckdb>=0.10.0
 polars>=1.0.0
 
@@ -49,9 +47,6 @@ apscheduler>=3.10.0
 # ── Background / Utilities ──
 python-dotenv>=1.0.0
 structlog>=24.0.0
-
-# ── Streamlit (Dashboard) ──
-streamlit>=1.30.0
 
 # ── Dev / Testing ──
 pytest>=7.4.0

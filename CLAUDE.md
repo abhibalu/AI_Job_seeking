@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TailorAI is an autonomous job-seeking agent that discovers, evaluates, and tailors resumes to job descriptions using a multi-agent LLM pipeline. It combines a React frontend, FastAPI backend, LangGraph orchestration, and a Data Lakehouse (Bronze-Silver-Gold medallion pattern).
+TailorAI is an autonomous job-seeking agent that discovers, evaluates, and tailors resumes to job descriptions using a multi-agent LLM pipeline. It combines a React frontend, FastAPI backend, LangGraph orchestration, and Supabase (PostgreSQL).
 
 ## Commands
 
@@ -37,7 +37,6 @@ npm run build  # Production build
 
 ### Infrastructure
 ```bash
-docker-compose up -d                          # MinIO (object storage)
 docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse (observability)
 ```
 
@@ -67,7 +66,7 @@ All agents extend `BaseAgent` (`agents/base.py`), which wraps the OpenAI SDK poi
 
 ### Data Flow
 
-1. **Scraper** (Apify → LinkedIn) → **Bronze** (raw ingest) → **Silver** (normalized) → **Gold** (analytical OBT) → **Supabase** (app DB)
+1. **Scraper** (Apify → LinkedIn) → `parse_raw_json()` → `map_job_record()` → **Supabase** (with `raw_json` preserved for reprocessing)
 2. Frontend reads from Supabase via FastAPI endpoints; tailoring writes back to Supabase
 
 ### Key Directories
@@ -75,8 +74,7 @@ All agents extend `BaseAgent` (`agents/base.py`), which wraps the OpenAI SDK poi
 - `agents/` — LangGraph graphs, agent classes, DB layer, checkpointer
 - `api/` — FastAPI app, routes, Pydantic schemas, middleware
 - `glassresumatch-ai/` — React + TypeScript + TailwindCSS frontend
-- `lakehouse/` — Bronze/Silver/Gold DeltaLake transformations
-- `services/` — Background workers (scraper, eval), scheduler, Google Docs export, Telegram notifications
+- `services/` — Background workers (scraper, eval), scheduler, job mapper, Google Docs export, Telegram notifications
 - `agent_prompts/` — System prompts and approved skills dictionary
 - `backend/` — Settings (Pydantic), logging config
 - `docs/` — Layered documentation (logic → architecture → implementation)
@@ -113,5 +111,4 @@ Key env vars (configured in `.env`, loaded via `backend/settings.py`):
 
 - Frontend: 3000
 - Backend API: 8000
-- MinIO: 9000 (API), 9001 (Console)
 - Langfuse: 3010

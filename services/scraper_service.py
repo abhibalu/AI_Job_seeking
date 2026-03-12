@@ -3,9 +3,8 @@ import logging
 from typing import Optional, Dict, Any, List
 import httpx
 from backend.settings import settings
-from services.job_mapper import map_job_record
+from services.job_mapper import map_job_record, parse_raw_json
 from agents.supabase_client import get_supabase_client
-from lakehouse.silver import parse_raw_json
 
 logger = logging.getLogger(__name__)
 

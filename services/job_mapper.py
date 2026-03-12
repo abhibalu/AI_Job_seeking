@@ -1,5 +1,68 @@
+import json
 from datetime import date, datetime
 from typing import Any, Dict, Optional
+
+
+def parse_raw_json(raw_json: str) -> dict:
+    """Parse raw Apify JSON string and extract/flatten fields into Silver schema."""
+    job = json.loads(raw_json)
+
+    # Extract company address (flatten)
+    address = job.get("companyAddress", {}) or {}
+
+    return {
+        # Core identifiers
+        "id": job.get("id"),
+        "tracking_id": job.get("trackingId"),
+
+        # Job details
+        "title": job.get("title"),
+        "description_text": job.get("descriptionText"),
+        "description_html": job.get("descriptionHtml"),
+        "seniority_level": job.get("seniorityLevel"),
+        "employment_type": job.get("employmentType"),
+        "job_function": job.get("jobFunction"),
+        "industries": job.get("industries"),
+
+        # Company info
+        "company_name": job.get("companyName"),
+        "company_linkedin_url": job.get("companyLinkedinUrl"),
+        "company_logo": job.get("companyLogo"),
+        "company_website": job.get("companyWebsite"),
+        "company_description": job.get("companyDescription"),
+        "company_slogan": job.get("companySlogan"),
+        "company_employees_count": job.get("companyEmployeesCount"),
+
+        # Flattened address
+        "company_street_address": address.get("streetAddress"),
+        "company_city": address.get("addressLocality"),
+        "company_state": address.get("addressRegion"),
+        "company_postal_code": address.get("postalCode"),
+        "company_country": address.get("addressCountry"),
+
+        # Location & salary
+        "location": job.get("location"),
+        "salary": job.get("salary"),
+        "salary_info": job.get("salaryInfo"),
+
+        # Posting info
+        "posted_at": job.get("postedAt"),
+        "applicants_count": job.get("applicantsCount"),
+
+        # URLs
+        "link": job.get("link"),
+        "apply_url": job.get("applyUrl"),
+        "input_url": job.get("inputUrl"),
+
+        # Job poster info (optional)
+        "job_poster_name": job.get("jobPosterName"),
+        "job_poster_title": job.get("jobPosterTitle"),
+        "job_poster_profile_url": job.get("jobPosterProfileUrl"),
+
+        # Benefits
+        "benefits": job.get("benefits"),
+    }
+
 
 def clean_value(val: Any) -> Any:
     """Clean value for JSON serialization."""

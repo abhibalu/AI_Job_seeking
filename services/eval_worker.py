@@ -26,32 +26,22 @@ DELAY_BETWEEN_CALLS = float(getattr(settings, "EVAL_DELAY_SECONDS", 1.0))
 
 
 def _get_unevaluated_jobs(limit: int) -> list[dict]:
-    """
-    Fetch active jobs from Supabase that haven't been evaluated yet.
-    Uses a LEFT JOIN approach: get all active job IDs, then exclude evaluated ones.
-    """
+    """Fetch active jobs from Supabase that haven't been evaluated yet."""
     try:
         client = get_supabase_client()
 
-        # Get all evaluated job IDs
-        evaluated_result = client.table("job_evaluations").select("job_id").execute()
-        evaluated_ids = {r["job_id"] for r in (evaluated_result.data or [])}
-
-        # Get active jobs not in evaluated list
-        query = (
-            client.table("jobs")
+        # Single query via enriched view — no double round-trip or client-side filtering
+        result = (
+            client.table("v_jobs_enriched")
             .select("id, title, company_name, description_text, job_url")
             .eq("status", "active")
+            .eq("is_evaluated", False)
             .not_.is_("description_text", "null")
             .order("posted_at", desc=True)
-            .limit(limit * 3)  # overfetch to account for client-side filtering
+            .limit(limit)
+            .execute()
         )
-        result = query.execute()
-        all_jobs = result.data or []
-
-        # Filter out already evaluated
-        unevaluated = [j for j in all_jobs if j["id"] not in evaluated_ids]
-        return unevaluated[:limit]
+        return result.data or []
 
     except Exception as e:
         logger.error(f"[EvalWorker] Failed to fetch unevaluated jobs: {e}", exc_info=True)

@@ -4,7 +4,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-import httpx
 import os
 from backend.settings import settings
 

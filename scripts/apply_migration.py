@@ -3,7 +3,6 @@ import os
 import sys
 import psycopg2
 from dotenv import load_dotenv
-from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()

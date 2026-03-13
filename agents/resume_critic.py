@@ -12,7 +12,7 @@ class ResumeCriticAgent(BaseAgent):
     """
 
     def __init__(self, model: str = None):
-        super().__init__(model)
+        super().__init__(model, temperature=0.2)
 
     def get_system_prompt(self) -> str:
         prompt_path = Path("agent_prompts/resume_critic.md")

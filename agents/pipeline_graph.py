@@ -81,7 +81,7 @@ def node_tailor(state: JobApplicationState) -> dict:
         "company": state["job_details"].get("company_name", "Unknown"),
         "summary": state["evaluation"].get("summary", ""),
         "must_haves": parsed_jd.get("must_haves", []),
-        "ats_keywords": parsed_jd.get("keywords_to_include", []),
+        "ats_keywords": parsed_jd.get("ats_keywords", []),
         "strategic_gaps": state["evaluation"].get("gaps", {}),
         "improvement_suggestions": state["evaluation"].get("improvement_suggestions", []),
     }

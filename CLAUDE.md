@@ -119,3 +119,4 @@ Architecture decisions are recorded in `docs/decisions/`. Key decisions:
 - [ADR-0001](docs/decisions/0001-remove-sqlite-fallback.md) — Removed SQLite fallback, consolidated on Supabase
 - [ADR-0002](docs/decisions/0002-remove-lakehouse-subsystem.md) — Removed lakehouse subsystem (MinIO, Delta Lake, Bronze/Silver/Gold)
 - [ADR-0003](docs/decisions/0003-fix-eval-filter-latency.md) — Fixed eval filter latency with database view (eliminated double round-trip)
+- [ADR-0004](docs/decisions/0004-tailoring-quality-phase1.md) — Tailoring quality Phase 1: ATS bug fix, temperatures, structural validation

@@ -4,6 +4,7 @@ from langgraph.graph import StateGraph, START, END
 
 from agents.resume_tailor import ResumeTailorAgent
 from agents.resume_critic import ResumeCriticAgent
+from agents.resume_validator import validate_structure
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,40 @@ def node_draft(state: TailoringState) -> dict:
         return {"errors": [f"Drafting failed: {str(e)}"], "status": "error"}
 
 
+def node_validate(state: TailoringState) -> dict:
+    """Programmatic structural validation — no LLM call needed."""
+    logger.info(f"[SubGraph] Validating draft structure for job {state['job_id']}")
+
+    violations = validate_structure(state["base_resume"], state["draft_resume"])
+    if violations:
+        logger.warning(f"[SubGraph] Structural violations found: {violations}")
+    else:
+        logger.info("[SubGraph] Draft passed structural validation.")
+
+    return {"critique": violations, "status": "validated"}
+
+
+def route_validate(state: TailoringState) -> Literal["critique", "revise", "error"]:
+    """Route after validation: if structural issues, skip critic and revise directly."""
+    if state.get("errors"):
+        return "error"
+
+    critique = state.get("critique", [])
+    revision_count = state.get("revision_count", 0)
+    MAX_REVISIONS = 2
+
+    if not critique:
+        # Structurally valid — proceed to LLM critic for content review
+        return "critique"
+    elif revision_count >= MAX_REVISIONS:
+        # Can't revise further — let it through to critic anyway
+        logger.warning("[SubGraph] Structural issues persist at max revisions. Proceeding to critic.")
+        return "critique"
+    else:
+        # Structural issues found — send back to draft without wasting a critic LLM call
+        return "revise"
+
+
 def node_critique(state: TailoringState) -> dict:
     """The Critic reviews the draft against the JD limits and approved skills."""
     logger.info(f"[SubGraph] Critiquing draft for job {state['job_id']}")
@@ -77,15 +112,21 @@ def node_save(state: TailoringState) -> dict:
     from agents.database import save_tailored_resume
     
     try:
-        # Wrap it similarly to how run_tailoring did it
         final_resume = state["draft_resume"]
-        # Make sure we don't save our backend metadata into the actual resume PDF JSON
+        # Strip backend metadata from the resume JSON
         clean_resume = {k: v for k, v in final_resume.items() if not k.startswith('_')}
-        
+
+        # Differentiate force-saved (unresolved flaws) from critic-approved
+        is_force_save = bool(state.get("critique", []))
+        save_status = "needs_review" if is_force_save else "pending"
+        if is_force_save:
+            logger.info(f"[SubGraph] Force-saving with status='needs_review' ({len(state['critique'])} unresolved flaws)")
+
         record_id = save_tailored_resume(
             job_id=state["job_id"],
             version=state.get("revision_count", 0),
-            content=clean_resume
+            content=clean_resume,
+            status=save_status
         )
         return {
             "final_resume_id": record_id,
@@ -121,12 +162,24 @@ def build_tailoring_subgraph() -> StateGraph:
     workflow = StateGraph(TailoringState)
     
     workflow.add_node("draft", node_draft)
+    workflow.add_node("validate", node_validate)
     workflow.add_node("critique", node_critique)
     workflow.add_node("save", node_save)
-    
+
+    # Flow: draft → validate → (critique or revise) → ...
     workflow.add_edge(START, "draft")
-    workflow.add_edge("draft", "critique")
-    
+    workflow.add_edge("draft", "validate")
+
+    workflow.add_conditional_edges(
+        "validate",
+        route_validate,
+        {
+            "critique": "critique",
+            "revise": "draft",
+            "error": END,
+        }
+    )
+
     workflow.add_conditional_edges(
         "critique",
         route_critique,
@@ -136,7 +189,7 @@ def build_tailoring_subgraph() -> StateGraph:
             "error": END,
         }
     )
-    
+
     workflow.add_edge("save", END)
     
     return workflow

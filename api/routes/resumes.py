@@ -277,7 +277,7 @@ async def tailor_resume(job_id: str):
             "company": eval_res.get("company_name", "Unknown"),
             "summary": eval_res.get("summary", ""),
             "must_haves": jd_parsed.get("must_haves", []),
-            "ats_keywords": jd_parsed.get("keywords_to_include", []),
+            "ats_keywords": jd_parsed.get("ats_keywords", []),
             "strategic_gaps": eval_res.get("gaps", {}),
             "improvement_suggestions": eval_res.get("improvement_suggestions", []),
         }

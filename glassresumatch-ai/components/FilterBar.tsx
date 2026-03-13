@@ -49,18 +49,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                     </div>
                 </div>
 
-                {/* Verdict Filter */}
-                <select
-                    value={filters.verdict}
-                    onChange={(e) => onFiltersChange({ ...filters, verdict: e.target.value as FilterOptions['verdict'] })}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                    <option value="all">All Verdicts</option>
-                    <option value="Strong Match">Strong Match</option>
-                    <option value="Moderate Match">Moderate Match</option>
-                    <option value="Weak Match">Weak Match</option>
-                </select>
-
                 {/* Action Filter */}
                 <select
                     value={filters.action}

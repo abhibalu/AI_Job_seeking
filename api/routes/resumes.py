@@ -237,6 +237,33 @@ async def upload_resume(background_tasks: BackgroundTasks, file: UploadFile = Fi
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from api.schemas import GDocImportRequest
+
+@router.post("/import-gdoc")
+async def import_from_google_doc(request: GDocImportRequest, background_tasks: BackgroundTasks):
+    """Import resume from a Google Doc, parse via LLM, save as master."""
+    from services.google_docs import read_google_doc
+
+    try:
+        doc_text = read_google_doc(request.document_id)
+        if not doc_text.strip():
+            raise HTTPException(400, "Google Doc is empty")
+
+        # Save immediate "processing" state
+        processing_status = {"status": "processing", "uploaded_at": datetime.now().isoformat()}
+        save_resume(processing_status, name="Master Resume", is_master=True)
+
+        # Reuse existing background parsing flow
+        background_tasks.add_task(process_resume_background, doc_text)
+        return {"status": "processing", "message": "Parsing Google Doc content..."}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to import Google Doc: {e}")
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
 @router.post("/tailor/{job_id}")
 async def tailor_resume(job_id: str):
     """
@@ -288,6 +315,7 @@ async def tailor_resume(job_id: str):
             "base_resume": base_resume,
             "jd_context": jd_context,
             "approved_skills": approved_skills,
+            "edit_plan": {},
             "revision_count": 0,
             "critique": [],
         }

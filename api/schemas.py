@@ -141,6 +141,10 @@ class Education(BaseModel):
     location: Optional[str] = ""
     score: Optional[str] = None
 
+class GDocImportRequest(BaseModel):
+    document_id: str  # The Google Doc ID from the URL
+
+
 class ResumeData(BaseModel):
     fullName: str
     title: Optional[str] = ""

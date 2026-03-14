@@ -162,6 +162,27 @@ def create_tailored_resume_doc(job_title: str, company: str, resume_data: dict, 
     return f"https://docs.google.com/document/d/{document_id}/edit"
 
 
+def read_google_doc(document_id: str) -> str:
+    """Read plain text content from a Google Doc."""
+    creds = get_credentials()
+    if not creds:
+        raise ValueError("Google API credentials are not configured.")
+
+    docs_service = build('docs', 'v1', credentials=creds)
+    doc = docs_service.documents().get(documentId=document_id).execute()
+
+    # Extract text from document body
+    text_parts = []
+    for element in doc.get('body', {}).get('content', []):
+        paragraph = element.get('paragraph', {})
+        for run in paragraph.get('elements', []):
+            text_run = run.get('textRun', {})
+            if text_run.get('content'):
+                text_parts.append(text_run['content'])
+
+    return ''.join(text_parts)
+
+
 def _build_resume_text(data: dict) -> str:
     """Build plain text resume content from the resume data dict."""
     lines = []

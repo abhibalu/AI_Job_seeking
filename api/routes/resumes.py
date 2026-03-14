@@ -75,7 +75,21 @@ def _to_frontend_format(json_resume: dict) -> dict:
             }
             for i, edu in enumerate(json_resume.get("education", []))
         ],
-        "skills": json_resume.get("skills", [])
+        "skills": [
+            f"{s['name']}: {', '.join(s.get('keywords', []))}" if isinstance(s, dict) and s.get('keywords')
+            else (s.get('name', str(s)) if isinstance(s, dict) else str(s))
+            for s in json_resume.get("skills", [])
+        ],
+        "projects": [
+            {
+                "id": proj.get("id", str(i)),
+                "name": proj.get("name", ""),
+                "description": proj.get("description", ""),
+                "highlights": proj.get("highlights", []),
+                "url": proj.get("url", "")
+            }
+            for i, proj in enumerate(json_resume.get("projects", []))
+        ]
     }
 
 @router.get("/master")
@@ -183,17 +197,19 @@ async def process_resume_background(full_text: str):
         agent = ResumeParserAgent()
         result = await run_in_threadpool(agent.run, resume_text=full_text)
         
-        if "error" not in result:
-             # Save final results
-             save_resume(result, name="Master Resume", is_master=True)
-             
-             # Also update file backup
-             with open(MASTER_RESUME_PATH, "w") as f:
-                json.dump(result, f, indent=2)
-        else:
-            print(f"Background parsing failed: {result.get('error')}")
-            # Save error status so UI can show it
+        if "error" in result:
+            logger.error(f"Background parsing failed: {result.get('error')}")
             save_resume({"status": "error", "error": result.get("error")}, is_master=True)
+        elif result.get("_validation_failed"):
+            logger.error(f"Resume parsed but failed schema validation: {result.get('_validation_error')}")
+            save_resume({"status": "error", "error": f"Resume parsed but failed schema validation: {result.get('_validation_error', 'Unknown')}"}, is_master=True)
+        else:
+            # Save final results
+            save_resume(result, name="Master Resume", is_master=True)
+
+            # Also update file backup
+            with open(MASTER_RESUME_PATH, "w") as f:
+                json.dump(result, f, indent=2)
             
     except Exception as e:
         print(f"Background parsing exception: {e}")

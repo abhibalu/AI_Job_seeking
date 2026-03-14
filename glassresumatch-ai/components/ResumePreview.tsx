@@ -1,5 +1,5 @@
 import React from 'react';
-import { ResumeData } from '../types';
+import { ResumeData, Project } from '../types';
 
 export type TemplateType = 'ats_friendly' | 'modern' | 'classic' | 'minimal' | 'tech' | 'compact';
 
@@ -367,6 +367,62 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ data, originalData
                         })}
                     </div>
                 </section>
+
+                {/* --- PROJECTS --- */}
+                {data.projects && data.projects.length > 0 && (
+                    <section className={template === 'compact' ? "mb-4" : "mb-6"}>
+                        <h3 className={activeStyle.sectionTitle}>Technical Projects</h3>
+                        <div className="space-y-3">
+                            {data.projects.map((proj: Project) => {
+                                if (template === 'ats_friendly') {
+                                    return (
+                                        <div key={proj.id} className="mb-2">
+                                            <h3 className="mb-0 text-[12px] font-normal leading-normal">
+                                                {proj.url && (
+                                                    <span className="float-right font-normal text-[12px]">
+                                                        <a href={proj.url} target="_blank" rel="noreferrer" className="hover:underline">{proj.url.replace(/^https?:\/\//, '')}</a>
+                                                    </span>
+                                                )}
+                                                <span className="font-bold">{proj.name}</span>
+                                            </h3>
+                                            {proj.description && (
+                                                <p className="text-[12px] leading-snug mb-0.5 opacity-90">{proj.description}</p>
+                                            )}
+                                            {proj.highlights.length > 0 && (
+                                                <ul style={{ paddingLeft: '1.2em', listStylePosition: 'outside' }} className="mt-0.5 list-disc space-y-0 text-[12px] leading-snug">
+                                                    {proj.highlights.map((point, index) => (
+                                                        <li key={index} className="mb-0">{point}</li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    );
+                                }
+
+                                return (
+                                    <div key={proj.id} className={activeStyle.expItem}>
+                                        <div className="flex flex-col sm:flex-row justify-between sm:items-baseline mb-1">
+                                            <span className={activeStyle.expRole}>{proj.name}</span>
+                                            {proj.url && (
+                                                <a href={proj.url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">{proj.url.replace(/^https?:\/\//, '')}</a>
+                                            )}
+                                        </div>
+                                        {proj.description && (
+                                            <p className="text-sm opacity-80 mb-1 leading-snug">{proj.description}</p>
+                                        )}
+                                        {proj.highlights.length > 0 && (
+                                            <ul className="list-disc list-outside ml-4 text-sm opacity-90 space-y-1 marker:text-gray-400">
+                                                {proj.highlights.map((point, index) => (
+                                                    <li key={index} className="leading-snug pl-1">{point}</li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </section>
+                )}
 
                 {/* --- SKILLS (Swapped) --- */}
                 <section>

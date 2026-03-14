@@ -215,7 +215,13 @@ const App: React.FC = () => {
       const poll = setInterval(async () => {
         try {
           const resume = await apiClient.getMasterResume();
-          if (resume && resume.status !== 'processing') {
+          if (resume && resume.status === 'error') {
+            clearInterval(poll);
+            setIsImportingGDoc(false);
+            alert(`Resume parsing failed: ${resume.error || 'Unknown error'}\n\nPlease try again.`);
+            return;
+          }
+          if (resume && resume.status !== 'processing' && resume.fullName) {
             clearInterval(poll);
             setResumeData(resume);
             setIsImportingGDoc(false);
@@ -230,7 +236,10 @@ const App: React.FC = () => {
       // Timeout after 60s
       setTimeout(() => {
         clearInterval(poll);
-        setIsImportingGDoc(false);
+        if (isImportingGDoc) {
+          setIsImportingGDoc(false);
+          alert('Import timed out. The resume may still be processing — try refreshing the page.');
+        }
       }, 60000);
     } catch (error) {
       console.error('Google Doc import failed:', error);

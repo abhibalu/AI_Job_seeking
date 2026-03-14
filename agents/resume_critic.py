@@ -21,18 +21,23 @@ class ResumeCriticAgent(BaseAgent):
                 return f.read()
         return "You are a strict Resume Critic. Return a JSON list of strings containing critiques."
 
-    def build_user_prompt(self, draft_resume: dict, jd_context: dict, approved_skills: str) -> str:
+    def build_user_prompt(self, draft_resume: dict, base_resume: dict, edit_plan: dict, approved_skills: str) -> str:
         return f"""
         ### DRAFT RESUME TO REVIEW (JSON):
         {json.dumps(draft_resume, indent=2)}
-        
-        ### JOB DESCRIPTION CONTEXT:
-        {json.dumps(jd_context, indent=2)}
-        
+
+        ### BASE RESUME (Original, for comparison):
+        {json.dumps(base_resume, indent=2)}
+
+        ### EDIT PLAN (What was supposed to change):
+        {json.dumps(edit_plan, indent=2)}
+
         ### CANDIDATE'S ACTUAL APPROVED SKILLS (Source of Truth):
         {approved_skills}
-        
-        Review the draft. Return a JSON array of strings containing your critique. 
+
+        Review the draft for naturalness, authenticity, and AI patterns.
+        Structural validation has already passed — focus on content quality only.
+        Return a JSON array of strings containing your critique.
         If the draft is perfect, return `[]`.
         """
         

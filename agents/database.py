@@ -343,9 +343,9 @@ def get_master_resume() -> dict | None:
 # TAILORED RESUME FUNCTIONS
 # ============================================
 
-def save_tailored_resume(job_id: str, version: int, content: dict, status: str = "pending") -> str:
-    """Save a tailored resume (wrapper around save_resume)."""
-    return save_resume(
+def save_tailored_resume(job_id: str, version: int, content: dict, status: str = "pending", edit_plan: dict = None) -> str:
+    """Save a tailored resume (wrapper around save_resume), optionally with edit plan."""
+    record_id = save_resume(
         content=content,
         name=f"Tailored Resume V{version}",
         is_master=False,
@@ -353,6 +353,16 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
         job_id=job_id,
         version=version
     )
+
+    # Store edit plan if provided
+    if edit_plan:
+        try:
+            client = _get_supabase()
+            client.table("resumes").update({"edit_plan": edit_plan}).eq("id", record_id).execute()
+        except Exception as e:
+            logger.warning(f"Failed to save edit_plan for resume {record_id}: {e}")
+
+    return record_id
 
 
 def get_tailored_resumes(job_id: str) -> list[dict]:

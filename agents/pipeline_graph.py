@@ -105,6 +105,7 @@ def node_tailor(state: JobApplicationState) -> dict:
             "base_resume": base_resume,
             "jd_context": jd_context,
             "approved_skills": approved_skills,
+            "edit_plan": {},
             "revision_count": 0,
             "critique": [],
         }

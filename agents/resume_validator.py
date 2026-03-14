@@ -78,3 +78,56 @@ def validate_structure(base_resume: dict, draft_resume: dict) -> list[str]:
         )
 
     return violations
+
+
+def validate_planned_edits(base_resume: dict, draft_resume: dict, edit_plan: dict) -> list[str]:
+    """
+    Verify that only locations specified in the edit plan were modified.
+    Returns a list of violation strings (empty = valid).
+    """
+    violations = []
+
+    if not edit_plan or not edit_plan.get("edits"):
+        return violations
+
+    # Build set of planned edit locations
+    planned_locations = set()
+    for edit in edit_plan.get("edits", []):
+        loc = edit.get("location", "")
+        # Normalize: extract the top-level path for comparison
+        # e.g., "work[0].highlights[4]" -> we track work entry index
+        planned_locations.add(loc)
+
+    # Check which work entry highlights were modified vs planned
+    base_work = base_resume.get("work", [])
+    draft_work = draft_resume.get("work", [])
+
+    for i, (base_job, draft_job) in enumerate(zip(base_work, draft_work)):
+        base_highlights = base_job.get("highlights", [])
+        draft_highlights = draft_job.get("highlights", [])
+
+        for j, (base_h, draft_h) in enumerate(zip(base_highlights, draft_highlights)):
+            if base_h != draft_h:
+                location = f"work[{i}].highlights[{j}]"
+                # Check if this location was planned
+                is_planned = any(
+                    location in loc or
+                    f"work[{i}].highlights[{j}]" in loc or
+                    f"work.{base_job.get('id', '')}.highlights[{j}]" in loc
+                    for loc in planned_locations
+                )
+                if not is_planned:
+                    violations.append(
+                        f"Unplanned edit at {location}: "
+                        f"'{base_h[:60]}...' was changed but not in the edit plan"
+                    )
+
+    # Check summary changes
+    base_summary = base_resume.get("basics", {}).get("summary", "")
+    draft_summary = draft_resume.get("basics", {}).get("summary", "")
+    if base_summary != draft_summary:
+        summary_planned = any("summary" in loc for loc in planned_locations)
+        if not summary_planned:
+            violations.append("Summary was changed but not in the edit plan")
+
+    return violations

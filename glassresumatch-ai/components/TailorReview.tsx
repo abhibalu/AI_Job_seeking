@@ -13,7 +13,7 @@ interface TailorReviewProps {
 
 export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailoredResume, evaluation, onClose, onStatusChange }) => {
     // Defensive: default to 'pending' if status is undefined
-    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>(tailoredResume?.status || 'pending');
+    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'needs_review'>(tailoredResume?.status || 'pending');
     const [viewMode, setViewMode] = useState<'diff' | 'final'>('diff');
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);

@@ -192,6 +192,7 @@ def save_evaluation(result: dict):
         "model_used": result.get("_model_used", ""),
         "raw_response": result,
         "evaluated_at": datetime.now().isoformat(),
+        "recruiter_email": result.get("recruiter_email") if result.get("recruiter_email") not in (None, "", "Unknown") else None,
     }
 
     # Upsert (insert or update on conflict)

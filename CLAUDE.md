@@ -53,13 +53,14 @@ START → Evaluate (JobEvaluatorAgent)
         └→ needs tailoring: Parse (JDParserAgent) → Tailoring SubGraph → Notify → END
 ```
 
-The tailoring subgraph (`agents/tailoring_subgraph.py`) implements an Actor-Critic loop:
+The tailoring subgraph (`agents/tailoring_subgraph.py`) implements a Plan-then-Execute loop:
 
 ```
-Draft (ResumeTailorAgent) → Critique (ResumeCriticAgent)
-        ├→ no issues: Save → END
-        ├→ issues & revision_count < 2: → back to Draft
-        └→ max revisions reached: force Save → END
+Plan (ChangePlannerAgent) → Draft (ResumeTailorAgent) → Validate (Python) → Critique (ResumeCriticAgent)
+                                     ↑ revise (structural) ─────────────────┘         │
+                                     ↑ revise (content) ──────────────────────────────┘
+                                     ├→ no issues: Save → END
+                                     └→ max revisions: force Save (status=needs_review) → END
 ```
 
 All agents extend `BaseAgent` (`agents/base.py`), which wraps the OpenAI SDK pointed at OpenRouter and integrates Langfuse tracing. Agent system prompts live in `agent_prompts/`.
@@ -120,3 +121,4 @@ Architecture decisions are recorded in `docs/decisions/`. Key decisions:
 - [ADR-0002](docs/decisions/0002-remove-lakehouse-subsystem.md) — Removed lakehouse subsystem (MinIO, Delta Lake, Bronze/Silver/Gold)
 - [ADR-0003](docs/decisions/0003-fix-eval-filter-latency.md) — Fixed eval filter latency with database view (eliminated double round-trip)
 - [ADR-0004](docs/decisions/0004-tailoring-quality-phase1.md) — Tailoring quality Phase 1: ATS bug fix, temperatures, structural validation
+- [ADR-0005](docs/decisions/0005-plan-then-execute-and-gdoc-import.md) — Phase 2: Plan-then-Execute architecture, Google Docs import, UI navigation fix

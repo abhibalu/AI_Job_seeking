@@ -1,26 +1,40 @@
-# Level 1 (Logic): Google Doc Base Resume Ingestion
+# Level 1 (Logic): Google Docs Resume Integration
 
 [Go Up to README](../../README.md)
 
 ## The Mental Model
-The "Base Resume" is the single source of truth for the candidate's professional identity. Historically, this was a static file requiring a specialized editor. This feature shifts that ownership to a live, external document. 
+The "Base Resume" is the single source of truth for the candidate's professional identity. This feature provides bidirectional integration with Google Docs:
 
-Instead of treating the resume as a database record, the system treats it as a **Dynamic Stream**. We disconnect the storage of the resume from the transformation logic, allowing the user to iterate on their professional history in a native word-processing environment while the system consumes the latest snapshot in real-time for tailoring.
+- **Import**: Pull a resume from Google Docs, parse it via LLM, and save as the master resume
+- **Export**: Push a tailored resume to Google Docs for final editing and sharing
+
+Instead of treating the resume as a static file requiring a specialized editor, the system treats Google Docs as a **Collaborative Workspace** — the user maintains their resume in a familiar word processor, and the system can read from and write to it.
 
 ## System State Transition
 
 | Phase | State |
 | :--- | :--- |
-| **Pre-Condition** | System has a globally configured pointer (External Reference) to a valid user-owned document. |
-| **Process** | The "Extractor" fetches the raw contents, normalizes the structure into a universal text format, and prepares the "Professional Context" buffer. |
-| **Post-Condition** | The internal Agent Pipeline receives a fresh, unstructured markdown payload representing the candidate's history, replacing the legacy structured JSON requirement. |
+| **Pre-Condition (Import)** | User has a resume in Google Docs. OAuth credentials are configured. |
+| **Process (Import)** | The Extractor reads plain text from the doc, the ResumeParserAgent converts it to JSON Resume format, and it's saved as the master resume. |
+| **Post-Condition (Import)** | A new master resume is available for the tailoring pipeline. |
+| **Pre-Condition (Export)** | A tailored resume exists for a specific job. |
+| **Process (Export)** | The system creates/updates a Google Doc in the configured Drive folder with the formatted resume content. |
+| **Post-Condition (Export)** | A shareable Google Doc URL is available for the user. |
 
 ## Workflow Chain
-1. **The External Reference**: The system identifies the remote location of the document.
-2. **The Extraction Bridge**: A bridge is established using the user's identity to pull the raw document structure.
-3. **The Semantic Normalization**: The complex document hierarchy (headers, lists, tables) is compressed into a simplified Markdown format to ensure semantic intent is preserved for the AI.
-4. **Context Provision**: The resulting text is fed into the downstream Tailoring orchestrators.
+
+### Import Flow
+1. **URL/ID Input**: User provides a Google Doc URL or document ID via the frontend.
+2. **Text Extraction**: `read_google_doc()` traverses the document body, concatenating `textRun` content.
+3. **AI Parsing**: `process_resume_background()` runs `ResumeParserAgent` to convert plain text to JSON Resume format.
+4. **Master Save**: Parsed resume is saved as the new master resume in Supabase.
+
+### Export Flow
+1. **Trigger**: User clicks "Export to Google Docs" on a tailored resume.
+2. **Folder Resolution**: System finds/creates a company subfolder in the configured Drive folder.
+3. **Doc Creation**: Resume content is formatted as plain text and inserted into a new/existing Google Doc.
+4. **URL Return**: The Google Doc URL is returned to the frontend.
 
 ## Drill Down
-- [Level 2 (Architecture): Component Boundaries and Extraction Contracts](./architecture.md)
-- [Level 3 (Implementation): Google API & Markdown Compilers](./implementation.md)
+- [Level 2 (Architecture): Component Boundaries and Contracts](./architecture.md)
+- [Level 3 (Implementation): Google API Integration](./implementation.md)

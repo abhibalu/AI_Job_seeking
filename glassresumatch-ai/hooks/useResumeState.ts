@@ -24,6 +24,16 @@ export const useResumeState = () => {
 
             // 1. Saved Format (Flat ResumeData)
             if (backendData && backendData.fullName) {
+                // Normalize skills — API may return {name, keywords}[] objects
+                // but ResumeData.skills expects string[]
+                if (backendData.skills && backendData.skills.length > 0 && typeof backendData.skills[0] !== 'string') {
+                    backendData.skills = backendData.skills.map((s: any) => {
+                        if (typeof s === 'string') return s;
+                        return s.keywords && s.keywords.length > 0
+                            ? `${s.name}: ${s.keywords.join(', ')}`
+                            : s.name || String(s);
+                    });
+                }
                 setResumeData(backendData);
                 setIsUploading(false);
                 return false;

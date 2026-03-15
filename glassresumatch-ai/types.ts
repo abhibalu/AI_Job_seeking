@@ -50,6 +50,14 @@ export interface Education {
   score?: string;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  highlights: string[];
+  url?: string;
+}
+
 export interface ResumeData {
   fullName: string;
   title?: string;
@@ -61,6 +69,7 @@ export interface ResumeData {
   experience: Experience[];
   education: Education[];
   skills: string[];
+  projects?: Project[];
 }
 
 export const INITIAL_DATA: ResumeData = {
@@ -73,5 +82,6 @@ export const INITIAL_DATA: ResumeData = {
   summary: "Professional summary goes here...",
   experience: [],
   education: [],
-  skills: []
+  skills: [],
+  projects: []
 };

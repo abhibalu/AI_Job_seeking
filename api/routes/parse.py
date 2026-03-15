@@ -1,19 +1,17 @@
 """
 Parse routes - Parse JD for evaluated jobs.
 """
-import json
 from fastapi import APIRouter, HTTPException
 
 from agents.supabase_client import get_supabase_client
 
-from backend.settings import settings
 from api.schemas import ParseResult, MessageResponse
 from agents.database import (
-    get_db_connection,
     is_job_evaluated,
     is_job_parsed,
     save_jd_parsed,
     get_evaluation,
+    get_jd_parsed,
 )
 from agents.jd_parser import JDParserAgent
 
@@ -24,35 +22,21 @@ router = APIRouter()
 def get_job_by_id(job_id: str) -> dict | None:
     client = get_supabase_client()
     result = client.table("jobs").select("*").eq("id", job_id).execute()
-    
+
     if not result.data:
         return None
-        
+
     return result.data[0]
 
 
 @router.get("/{job_id}", response_model=ParseResult)
-def get_parsed_jd(job_id: str):
+def get_parsed_jd_route(job_id: str):
     """Get parsed JD signals for a job."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM jd_parsed WHERE job_id = ?", (job_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
+    result = get_jd_parsed(job_id)
+
+    if not result:
         raise HTTPException(status_code=404, detail=f"Parsed JD for job {job_id} not found")
-    
-    result = dict(row)
-    
-    # Parse JSON fields
-    for field in ["must_haves", "nice_to_haves", "location_constraints", "ats_keywords", "normalized_skills"]:
-        if result.get(field):
-            try:
-                result[field] = json.loads(result[field])
-            except:
-                pass
-    
+
     return result
 
 

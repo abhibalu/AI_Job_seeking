@@ -8,7 +8,6 @@ import {
     Share2, Bookmark, MapPin, Clock, Download, Loader2
 } from 'lucide-react';
 import { TailorReview } from './TailorReview';
-import { ResumePreview } from './ResumePreview';
 import { JobWithEvaluation } from '../services/jobService';
 import { formatTimeAgo } from '../utils/format';
 
@@ -32,13 +31,9 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate, t
     const [tailoredResume, setTailoredResume] = useState<TailoredResume | null>(null);
     const [baseResume, setBaseResume] = useState<any>(null);
 
-    // Simulation State
-    const [isSimulatedModalOpen, setIsSimulatedModalOpen] = useState(false);
-    const [isReviewOpen, setIsReviewOpen] = useState(false); // Controls TailorReview visibility
+    const [isReviewOpen, setIsReviewOpen] = useState(false);
     const [isGeneratingResume, setIsGeneratingResume] = useState(false);
     const [hasGeneratedResume, setHasGeneratedResume] = useState(false);
-    const [simulationStatus, setSimulationStatus] = useState<'pending' | 'approved'>('pending');
-    const [viewMode, setViewMode] = useState<'diff' | 'final'>('diff');
 
     const evaluation = job.evaluation;
     const isEvaluated = job.isEvaluated && !!evaluation;
@@ -51,10 +46,8 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate, t
         setTailoredResume(null);
         setHasGeneratedResume(false);
         setIsGeneratingResume(false);
-        setSimulationStatus('pending');
-        setViewMode('diff');
         setIsReEvaluating(false);
-        setIsReviewOpen(false); // Fix: Ensure modal is closed by default
+        setIsReviewOpen(false);
 
         // Check for existing tailored resume in Supabase
         const checkExistingTailored = async () => {
@@ -561,84 +554,6 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ job, onEvaluate, t
 
             </div>
 
-            {/* Simulated Tailor Resume Modal */}
-            {isSimulatedModalOpen && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white w-full max-w-5xl h-[95%] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                        {/* Modal Header */}
-                        <div className="h-16 border-b border-gray-100 flex items-center justify-between px-6 bg-white shrink-0">
-                            <div className="flex items-center gap-4">
-                                <h3 className="font-bold text-lg flex items-center gap-2 text-slate-900">
-                                    <FileText className="w-5 h-5 text-slate-900" />
-                                    Tailored Resume
-                                    <span className="text-xs font-normal px-2 py-0.5 bg-gray-100 rounded text-slate-600 border border-gray-200 ml-2">
-                                        Preview
-                                    </span>
-                                </h3>
-
-                                {/* View Toggle */}
-                                <div className="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200 h-8">
-                                    <button
-                                        onClick={() => setViewMode('diff')}
-                                        className={`px-3 text-xs font-medium rounded-md transition-all flex items-center h-full ${viewMode === 'diff' ? 'bg-white text-black shadow-sm' : 'text-slate-500 hover:text-black'}`}
-                                    >
-                                        Diff View
-                                    </button>
-                                    <button
-                                        onClick={() => setViewMode('final')}
-                                        className={`px-3 text-xs font-medium rounded-md transition-all flex items-center h-full ${viewMode === 'final' ? 'bg-white text-black shadow-sm' : 'text-slate-500 hover:text-black'}`}
-                                    >
-                                        Final Preview
-                                    </button>
-                                </div>
-                            </div>
-
-                            <button onClick={() => setIsSimulatedModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-slate-500 hover:text-black">
-                                <XCircle className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        {/* Modal Body */}
-                        <div className="flex-1 overflow-y-auto p-8 bg-slate-50 flex justify-center">
-                            <div className="transform scale-[0.85] origin-top bg-white shadow-xl min-h-[297mm]">
-                                <ResumePreview
-                                    data={tailoredResume || (baseResume as any) || {}}
-                                    originalData={viewMode === 'diff' ? baseResume : undefined}
-                                    template="ats_friendly"
-                                />
-                            </div>
-                        </div>
-
-                        {/* Modal Footer */}
-                        <div className="p-4 border-t border-gray-100 bg-white flex justify-end gap-3 z-10 shrink-0">
-                            <button
-                                onClick={() => setIsSimulatedModalOpen(false)}
-                                className="px-4 py-2 text-sm font-semibold hover:bg-gray-100 rounded-md transition-colors text-slate-900 border border-transparent hover:border-gray-200"
-                            >
-                                Close
-                            </button>
-
-                            {simulationStatus === 'approved' ? (
-                                <button className="px-6 py-2 bg-black text-white text-sm font-semibold rounded-md flex items-center gap-2 hover:bg-slate-800 transition-all shadow-md border border-black animate-in slide-in-from-bottom-2">
-                                    <Download className="w-4 h-4" />
-                                    Download PDF
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={() => {
-                                        setSimulationStatus('approved');
-                                        setViewMode('final'); // Auto-switch to final view on approve
-                                    }}
-                                    className="px-6 py-2 bg-black text-white text-sm font-semibold rounded-md flex items-center gap-2 hover:bg-slate-800 transition-all shadow-md border border-black"
-                                >
-                                    <CheckCircle className="w-4 h-4" />
-                                    Approve Resume
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

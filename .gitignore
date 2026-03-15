@@ -61,3 +61,31 @@ test/
 
 # Scraped Data
 jobs_*.json
+
+# Google Cloud Credentials
+google-credentials.json
+google-oauth-credentials.json
+google-authentication.json
+google-token.json
+
+# Node modules (root level)
+node_modules/
+
+# Google Docs integration directory
+google_doc/
+
+# Vite build cache
+glassresumatch-ai/.vite/
+
+# Scraped/exported data files
+backend/scraped_jobs.json
+scripts/gold_jobs.csv
+scripts/gold_jobs.json
+
+# Temporary/test artifacts
+output.txt
+test.pdf
+test.typ
+
+# Personal draft docs
+PROFILE_README_DRAFT.md

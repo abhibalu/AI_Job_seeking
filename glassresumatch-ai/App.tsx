@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { JobWithEvaluation, evaluateJob, importJob } from './services/jobService';
+import { apiClient } from './services/apiClient';
 import { useJobs } from './hooks/useJobs';
 import { useResumeState } from './hooks/useResumeState';
 import { useJobSelection } from './hooks/useJobSelection';
@@ -30,7 +31,37 @@ import {
 
 const App: React.FC = () => {
   // --- UI State ---
-  const [viewMode, setViewMode] = useState<ViewMode>('all');
+  // Initialize viewMode from URL hash (e.g., #resume -> 'resume')
+  const [viewMode, setViewModeRaw] = useState<ViewMode>(() => {
+    const hash = window.location.hash.replace('#', '');
+    if (hash === 'resume') return 'resume';
+    if (hash === 'evaluated') return 'evaluated';
+    if (hash === 'pending') return 'pending';
+    return 'all';
+  });
+
+  // Wrap setViewMode to push browser history state
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeRaw(mode);
+    const hash = mode === 'all' ? '' : `#${mode}`;
+    window.history.pushState({ viewMode: mode }, '', hash || window.location.pathname);
+  }, []);
+
+  // Listen for browser back/forward
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const mode = event.state?.viewMode;
+      if (mode) {
+        setViewModeRaw(mode);
+      } else {
+        // Fallback: read from hash
+        const hash = window.location.hash.replace('#', '');
+        setViewModeRaw(hash === 'resume' ? 'resume' : 'all');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   const [filters, setFilters] = useState<FilterOptions>({
     searchQuery: '',
     verdict: 'all',
@@ -47,6 +78,11 @@ const App: React.FC = () => {
 
   // Lifted state for Resume Tailoring
   const [tailoringJobId, setTailoringJobId] = useState<string | null>(null);
+
+  // Google Docs Import state
+  const [isGDocImportOpen, setIsGDocImportOpen] = useState(false);
+  const [gDocInput, setGDocInput] = useState('');
+  const [isImportingGDoc, setIsImportingGDoc] = useState(false);
 
   // --- Profile / Resume State (Hook) ---
   const {
@@ -161,6 +197,55 @@ const App: React.FC = () => {
     setTimeout(() => {
       window.print();
     }, 150);
+  };
+
+  const extractGoogleDocId = (input: string): string => {
+    const match = input.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    return match ? match[1] : input; // If no match, assume raw ID
+  };
+
+  const handleGDocImport = async () => {
+    if (!gDocInput.trim()) return;
+    setIsImportingGDoc(true);
+    try {
+      const documentId = extractGoogleDocId(gDocInput.trim());
+      await apiClient.importFromGoogleDoc(documentId);
+
+      // Poll for completion — same as PDF upload
+      const poll = setInterval(async () => {
+        try {
+          const resume = await apiClient.getMasterResume();
+          if (resume && resume.status === 'error') {
+            clearInterval(poll);
+            setIsImportingGDoc(false);
+            alert(`Resume parsing failed: ${resume.error || 'Unknown error'}\n\nPlease try again.`);
+            return;
+          }
+          if (resume && resume.status !== 'processing' && resume.fullName) {
+            clearInterval(poll);
+            setResumeData(resume);
+            setIsImportingGDoc(false);
+            setIsGDocImportOpen(false);
+            setGDocInput('');
+          }
+        } catch {
+          // Still processing
+        }
+      }, 2000);
+
+      // Timeout after 60s
+      setTimeout(() => {
+        clearInterval(poll);
+        if (isImportingGDoc) {
+          setIsImportingGDoc(false);
+          alert('Import timed out. The resume may still be processing — try refreshing the page.');
+        }
+      }, 60000);
+    } catch (error) {
+      console.error('Google Doc import failed:', error);
+      alert('Failed to import from Google Docs. Please check the URL and try again.');
+      setIsImportingGDoc(false);
+    }
   };
 
   const selectedJob = jobs.find(j => j.id === selectedJobId) || null;
@@ -282,6 +367,19 @@ const App: React.FC = () => {
                   </button>
 
                   <button
+                    onClick={() => setIsGDocImportOpen(true)}
+                    disabled={isImportingGDoc}
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 text-emerald-700 font-semibold transition-all shadow-sm"
+                  >
+                    {isImportingGDoc ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Download size={18} />
+                    )}
+                    <span>{isImportingGDoc ? 'Importing...' : 'Import Google Doc'}</span>
+                  </button>
+
+                  <button
                     onClick={() => setIsEditorOpen(true)}
                     className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold transition-all shadow-sm"
                   >
@@ -325,8 +423,34 @@ const App: React.FC = () => {
                 <div className="py-20 flex flex-col items-center">
                   <Loader2 className="w-10 h-10 text-slate-300 animate-spin mb-4" />
                   <p className="text-slate-500 font-medium animate-pulse">
-                    {isUploading ? 'Analyzing resume with AI...' : 'Loading resume data...'}
+                    {isUploading || isImportingGDoc ? 'Analyzing resume with AI...' : 'Loading resume data...'}
                   </p>
+                </div>
+              ) : resumeData.experience.length === 0 && resumeData.skills.length === 0 ? (
+                <div className="py-20 flex flex-col items-center max-w-md text-center">
+                  <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-6">
+                    <Upload className="w-10 h-10 text-slate-300" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-700 mb-2">No Resume Found</h3>
+                  <p className="text-slate-500 mb-6">
+                    Upload a PDF or import from Google Docs to get started. Your resume will be parsed by AI and saved for tailoring.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-all shadow-md"
+                    >
+                      <Upload size={18} />
+                      Upload PDF
+                    </button>
+                    <button
+                      onClick={() => setIsGDocImportOpen(true)}
+                      className="flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-all shadow-md"
+                    >
+                      <Download size={18} />
+                      Import Google Doc
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div id="resume-preview-container" className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex justify-center print:absolute print:top-0 print:left-0 print:w-full print:m-0 print:block">
@@ -501,20 +625,62 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {isGDocImportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden">
+          <div
+            className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity"
+            onClick={() => !isImportingGDoc && setIsGDocImportOpen(false)}
+          />
+          <GlassCard className="w-full max-w-lg p-6 z-20 bg-white/95 shadow-2xl">
+            <h2 className="text-xl font-bold mb-4 flex items-center text-slate-900">
+              <Download className="w-5 h-5 mr-2 text-emerald-600" />
+              Import from Google Docs
+            </h2>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Google Doc URL or ID</label>
+              <input
+                type="text"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
+                placeholder="https://docs.google.com/document/d/1abc.../edit"
+                value={gDocInput}
+                onChange={(e) => setGDocInput(e.target.value)}
+                disabled={isImportingGDoc}
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Paste a Google Doc URL or document ID. The content will be parsed by AI and saved as your master resume.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setIsGDocImportOpen(false); setGDocInput(''); }}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors"
+                disabled={isImportingGDoc}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGDocImport}
+                disabled={isImportingGDoc || !gDocInput.trim()}
+                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium shadow-md transition-all flex items-center gap-2"
+              >
+                {isImportingGDoc ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  'Import Resume'
+                )}
+              </button>
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
       {isEditorOpen && (
         <Editor
-          initialData={resumeData}
-          onSave={async (newData) => {
-            try {
-              // Note: Saving updates the Master state backend, we should refetch
-              setResumeData(newData);
-              setIsEditorOpen(false);
-              await apiClient.saveMasterResume(newData);
-            } catch (error) {
-              console.error("Failed to save resume", error);
-              alert("Failed to save resume updates.");
-            }
-          }}
+          data={resumeData}
+          onChange={(newData) => setResumeData(newData)}
           onClose={() => setIsEditorOpen(false)}
         />
       )}

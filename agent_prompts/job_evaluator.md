@@ -1,15 +1,3 @@
-User prompt given to an n8n agentic node which is used to evaluate a job and find the verdict of whether the job is a good fit for the user or not.
-
-Original Resume- 
-{{ JSON.stringify($('HTTP Request1').item.json.basics) }},
-{{ JSON.stringify($('HTTP Request1').item.json.work) }},
-{{ JSON.stringify($('HTTP Request1').item.json.education) }},
-{{ JSON.stringify($('HTTP Request1').item.json.skills) }}
-
-
-Job Description - {{ $json.description_text }}
-
-
 
 the system prompt is as follows:
 

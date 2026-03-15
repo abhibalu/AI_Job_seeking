@@ -1,8 +1,7 @@
 import json
 from pathlib import Path
 from agents.base import BaseAgent
-from agents.database import get_evaluation, is_job_parsed, get_jd_parsed
-from backend.settings import settings
+from agents.database import get_evaluation, get_jd_parsed
 
 class ResumeTailorAgent(BaseAgent):
     """
@@ -11,7 +10,7 @@ class ResumeTailorAgent(BaseAgent):
     """
 
     def __init__(self, model: str = None):
-        super().__init__(model)
+        super().__init__(model, temperature=0.3)
 
     def get_system_prompt(self) -> str:
         prompt_path = Path("agent_prompts/resume_tailor.md")
@@ -20,54 +19,54 @@ class ResumeTailorAgent(BaseAgent):
                 return f.read()
         return "You are an expert Resume Tailor." # Fallback
 
-    def build_user_prompt(self, base_resume: dict, jd_context: dict, approved_skills: str) -> str:
-        return f"""
+    def build_user_prompt(self, base_resume: dict, edit_plan: dict, approved_skills: str, critique: str = None, **kwargs) -> str:
+        prompt = f"""
         ### BASE RESUME (JSON):
         {json.dumps(base_resume, indent=2)}
-        
-        ### JD CONTEXT (Structured):
-        {json.dumps(jd_context, indent=2)}
-        
+
+        ### EDIT PLAN (Structured):
+        {json.dumps(edit_plan, indent=2)}
+
         ### APPROVED SKILLS (Source of Truth):
         {approved_skills}
-        
+
         ### INSTRUCTION:
-        Apply the "Conservative Editor" strategy.
-        1. Maintain Bullet Counts.
-        2. Integrate 'ats_keywords' from JD Context where truthful.
-        3. Fill 'strategic_gaps' using 'APPROVED SKILLS' only.
-        
-        Return VALID JSON only.
+        Apply the edit plan to the base resume.
+        1. Only modify locations specified in the edit plan.
+        2. Copy all other content exactly verbatim.
+        3. Preserve bullet counts, IDs, and section structure.
         """
+
+        if critique:
+            prompt += f"""
+
+        ### CRITIQUE TO ADDRESS (URGENT):
+        The reviewer found the following issues with your previous draft:
+        {critique}
+
+        You MUST revise the resume to fix these specific issues. Do not ignore this feedback.
+        """
+
+        prompt += "\n        Return VALID JSON only."
+        return prompt
 
     def run_tailoring(self, job_id: str, base_resume: dict, approved_skills: str) -> dict:
         """
-        Run the resume tailoring process.
-        Returns the tailored resume JSON.
+        Legacy direct-call path: fetches context from DB, generates a plan, and executes.
+        Prefer using the subgraph (build_tailoring_subgraph) for the full pipeline.
         """
-        
+        from agents.change_planner import ChangePlannerAgent
+
         # 1. Fetch Context
         evaluation = get_evaluation(job_id)
         if not evaluation:
             raise ValueError(f"Job not evaluated yet: {job_id}")
-            
+
         jd_parsed = get_jd_parsed(job_id)
         if not jd_parsed:
-             print(f"Warning: JD Parser signals missing for {job_id}. Tailoring might lack precision.")
-             jd_parsed = {}
+            print(f"Warning: JD Parser signals missing for {job_id}. Tailoring might lack precision.")
+            jd_parsed = {}
 
-        # 2. Construct Prompt Inputs
-        # Safely handle raw_response which might be a string or dict
-        raw_response = evaluation.get("raw_response", {})
-        if isinstance(raw_response, str):
-            try:
-                raw_response = json.loads(raw_response)
-            except:
-                raw_response = {}
-        
-        # We don't really rely on full JD text anymore as we use structured signals
-        # But if we did, we'd get it here properly now.
-        
         jd_context = {
             "role": evaluation.get("title_role"),
             "company": evaluation.get("company_name"),
@@ -78,16 +77,14 @@ class ResumeTailorAgent(BaseAgent):
             "improvement_suggestions": evaluation.get("improvement_suggestions", [])
         }
 
-        # 3. Use BaseAgent.run() which handles token limits, keys, etc.
-        # Pass the kwargs expected by build_user_prompt
-        # Note: BaseAgent.run calls build_user_prompt(**kwargs)
-        
-        # Override BaseAgent.run to inject specific json_mode=True if needed?
-        # BaseAgent.run calls _call_llm which uses just the prompt.
-        # BaseAgent doesn't natively support json_mode param in _call_llm signature in the provided file.
-        # But OpenRouter supports it via model parameters or just prompt engineering.
-        # The prompt says "Return VALID JSON".
-        # We can pass `response_format` in _call_llm if we updated BaseAgent, but right now we rely on prompt.
-        
-        return self.run(base_resume=base_resume, jd_context=jd_context, approved_skills=approved_skills)
+        # 2. Generate edit plan
+        planner = ChangePlannerAgent()
+        edit_plan = planner.run(
+            base_resume=base_resume,
+            jd_context=jd_context,
+            approved_skills=approved_skills,
+        )
+
+        # 3. Execute the plan
+        return self.run(base_resume=base_resume, edit_plan=edit_plan, approved_skills=approved_skills)
 

@@ -4,7 +4,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-import httpx
 import os
 from backend.settings import settings
 
@@ -59,7 +58,7 @@ class BaseAgent(ABC):
             )
 
     @observe(as_type="generation")
-    def _call_llm(self, user_prompt: str) -> str:
+    def _call_llm(self, user_prompt: str, response_format: dict | None = None) -> str:
         """Make a LLM call using OpenAI SDK and return the response text."""
         if not self.api_key:
             logger.critical("OPENROUTER_API_KEY not set in environment")
@@ -86,7 +85,7 @@ class BaseAgent(ABC):
                         logger.warning(f"Retrying with BACKUP model: {current_model}")
 
                     # SDK Call
-                    completion = self.client.chat.completions.create(
+                    create_kwargs = dict(
                         model=current_model,
                         messages=messages,
                         temperature=self.temperature,
@@ -95,6 +94,9 @@ class BaseAgent(ABC):
                         },
                         name=f"{self.__class__.__name__}-generation"
                     )
+                    if response_format:
+                        create_kwargs["response_format"] = response_format
+                    completion = self.client.chat.completions.create(**create_kwargs)
                     
                     content = completion.choices[0].message.content
                     

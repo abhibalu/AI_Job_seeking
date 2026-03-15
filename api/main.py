@@ -21,6 +21,9 @@ def on_startup():
     from backend.logging import setup_logging
     setup_logging()
     init_database()
+    # Start background scheduler (scrape + evaluate workers)
+    from services.scheduler import start_scheduler
+    start_scheduler()
 
 # CORS middleware for frontend
 app.add_middleware(
@@ -48,6 +51,15 @@ app.include_router(pdf.router, prefix="/api/pdf", tags=["PDF Generation"])
 
 from .routes import logs
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
+
+from .routes import scheduler
+app.include_router(scheduler.router, prefix="/api/scheduler", tags=["Scheduler"])
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    from services.scheduler import stop_scheduler
+    stop_scheduler()
 
 
 @app.get("/")

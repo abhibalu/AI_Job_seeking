@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TailoredResume, apiClient } from '../services/apiClient';
 import { ResumePreview } from './ResumePreview';
-import { CheckCircle, XCircle, Download, FileText, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { CheckCircle, XCircle, Download, FileText, ArrowLeft, Eye, EyeOff, ExternalLink, Loader2 } from 'lucide-react';
 
 interface TailorReviewProps {
     baseResume: any;
@@ -13,10 +13,12 @@ interface TailorReviewProps {
 
 export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailoredResume, evaluation, onClose, onStatusChange }) => {
     // Defensive: default to 'pending' if status is undefined
-    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected'>(tailoredResume?.status || 'pending');
+    const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'needs_review'>(tailoredResume?.status || 'pending');
     const [viewMode, setViewMode] = useState<'diff' | 'final'>('diff');
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
+    const [isExportingDoc, setIsExportingDoc] = useState(false);
+    const [exportedDocUrl, setExportedDocUrl] = useState<string | null>(null);
 
     const handleUpdateStatus = async (newStatus: 'approved' | 'rejected') => {
         setIsUpdating(true);
@@ -49,6 +51,22 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
             console.error("Download failed:", error);
         } finally {
             setIsDownloading(false);
+        }
+    };
+
+    const handleExportToDoc = async () => {
+        setIsExportingDoc(true);
+        try {
+            const result = await apiClient.exportToGoogleDocs(tailoredResume.job_id);
+            if (result.url) {
+                setExportedDocUrl(result.url);
+                window.open(result.url, '_blank');
+            }
+        } catch (error: any) {
+            console.error("Failed to export Google Doc:", error);
+            alert(error?.message || error?.detail || "Failed to export to Google Docs.");
+        } finally {
+            setIsExportingDoc(false);
         }
     };
 
@@ -103,18 +121,44 @@ export const TailorReview: React.FC<TailorReviewProps> = ({ baseResume, tailored
                     </div>
 
                     {status === 'approved' ? (
-                        <button
-                            onClick={handleDownload}
-                            disabled={isDownloading}
-                            className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-md text-sm font-medium flex items-center shadow-sm disabled:opacity-50 border border-black"
-                        >
-                            {isDownloading ? (
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                        <>
+                            {exportedDocUrl ? (
+                                <a
+                                    href={exportedDocUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-4 py-2 bg-white border border-slate-300 text-slate-900 rounded-md text-sm font-medium flex items-center hover:bg-slate-50 transition-colors"
+                                >
+                                    <ExternalLink className="w-4 h-4 mr-2" />
+                                    Open Google Doc
+                                </a>
                             ) : (
-                                <Download className="w-4 h-4 mr-2" />
+                                <button
+                                    onClick={handleExportToDoc}
+                                    disabled={isExportingDoc}
+                                    className="px-4 py-2 bg-white border border-slate-300 text-slate-900 rounded-md text-sm font-medium flex items-center hover:bg-slate-50 transition-colors disabled:opacity-50"
+                                >
+                                    {isExportingDoc ? (
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <FileText className="w-4 h-4 mr-2" />
+                                    )}
+                                    {isExportingDoc ? 'Exporting...' : 'Export to Google Docs'}
+                                </button>
                             )}
-                            Download PDF
-                        </button>
+                            <button
+                                onClick={handleDownload}
+                                disabled={isDownloading}
+                                className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-md text-sm font-medium flex items-center shadow-sm disabled:opacity-50 border border-black"
+                            >
+                                {isDownloading ? (
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                                ) : (
+                                    <Download className="w-4 h-4 mr-2" />
+                                )}
+                                Download PDF
+                            </button>
+                        </>
                     ) : (
                         <>
                             <button

@@ -2,7 +2,7 @@
 Pydantic schemas for API request/response models.
 """
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 
 
@@ -140,6 +140,61 @@ class Education(BaseModel):
     period: str
     location: Optional[str] = ""
     score: Optional[str] = None
+
+class GDocImportRequest(BaseModel):
+    document_id: str  # The Google Doc ID from the URL
+
+
+# JSON Resume validation schemas (for LLM output validation)
+class JSONResumeBasics(BaseModel):
+    name: str
+    label: str = ""
+    email: str = ""
+    phone: str = ""
+    summary: str = ""
+    location: dict | str = {}
+    profiles: list[dict] = []
+
+    model_config = ConfigDict(extra="allow")
+
+
+class JSONResumeWork(BaseModel):
+    name: str
+    position: str
+    startDate: str = ""
+    endDate: str = "Present"
+    summary: str = ""
+    highlights: list[str] = []
+
+    model_config = ConfigDict(extra="allow")
+
+
+class JSONResumeEducation(BaseModel):
+    institution: str
+    studyType: str = ""
+    area: str = ""
+    startDate: str = ""
+    endDate: str = ""
+    score: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class JSONResumeSkill(BaseModel):
+    name: str
+    keywords: list[str] = []
+
+    model_config = ConfigDict(extra="allow")
+
+
+class JSONResumeSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    basics: JSONResumeBasics
+    work: list[JSONResumeWork] = []
+    education: list[JSONResumeEducation] = []
+    skills: list[JSONResumeSkill] = []
+
 
 class ResumeData(BaseModel):
     fullName: str

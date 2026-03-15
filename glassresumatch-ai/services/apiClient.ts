@@ -182,6 +182,13 @@ class ApiClient {
         });
     }
 
+    async importFromGoogleDoc(documentId: string) {
+        return this.request<{ status: string; message: string }>('/api/resumes/import-gdoc', {
+            method: 'POST',
+            body: JSON.stringify({ document_id: documentId }),
+        });
+    }
+
     // Tailored Resume endpoints
     async tailorResume(jobId: string) {
         return this.request<TailoredResume>(`/api/resumes/tailor/${jobId}`, {
@@ -191,6 +198,12 @@ class ApiClient {
 
     async getTailoredVersions(jobId: string) {
         return this.request<TailoredResume[]>(`/api/resumes/tailored/${jobId}`);
+    }
+
+    async exportToGoogleDocs(jobId: string) {
+        return this.request<{ status: string; url: string }>(`/api/resumes/export-gdoc/${jobId}`, {
+            method: 'POST',
+        });
     }
 
     async updateTailoredStatus(recordId: string, status: string) {
@@ -311,7 +324,7 @@ export interface TailoredResume {
     job_id: string;
     version: number;
     content: any;
-    status: 'pending' | 'approved' | 'rejected';
+    status: 'pending' | 'approved' | 'rejected' | 'needs_review';
     created_at: string;
 }
 

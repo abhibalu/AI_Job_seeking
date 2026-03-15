@@ -167,6 +167,7 @@ Return one JSON object with exactly these keys:
   },
   
   "recommended_action": "apply | tailor | skip",
+  "wit_line": "3–5 word punchy quip about this role (e.g. 'Exactly your stack', 'Worth the stretch', 'Pass on this one')",
   "jd_keywords": ["keyword1", "keyword2"],
   "matched_keywords": ["keyword1"],
   "missing_keywords": ["keyword2"],

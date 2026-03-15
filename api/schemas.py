@@ -73,6 +73,8 @@ class EvaluationResult(BaseModel):
     summary: str | None = None
     required_exp: str | None = None
     recommended_action: str | None = None
+    wit_line: str | None = None
+    recruiter_email: str | None = None
     gaps: dict | None = None
     improvement_suggestions: dict | None = None
     interview_tips: dict | None = None

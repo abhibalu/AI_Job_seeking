@@ -4,11 +4,10 @@ import { apiClient } from './services/apiClient';
 import { useJobs } from './hooks/useJobs';
 import { useResumeState } from './hooks/useResumeState';
 import { useJobSelection } from './hooks/useJobSelection';
-import { sortJobs } from './utils/sort';
 import { ViewMode, FilterOptions, TemplateType } from './types';
-import { JobListItem } from './components/JobListItem';
+import { JobListPanel } from './components/JobListPanel';
 import { JobDetailView } from './components/JobDetailView';
-import { Pagination } from './components/Pagination';
+import { Toast } from './components/Toast';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { StatsCard } from './components/StatsCard';
@@ -26,7 +25,6 @@ import {
   Briefcase,
   Upload,
   Download,
-  Trash2
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -74,10 +72,16 @@ const App: React.FC = () => {
   const [newJobText, setNewJobText] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [evaluatingJobId, setEvaluatingJobId] = useState<string | null>(null);
 
   // Lifted state for Resume Tailoring
   const [tailoringJobId, setTailoringJobId] = useState<string | null>(null);
+
+  // App-level toast (for import/analysis flows)
+  const [appToast, setAppToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const showAppToast = (message: string, type: 'error' | 'success') => {
+    setAppToast({ message, type });
+    setTimeout(() => setAppToast(null), 4500);
+  };
 
   // Google Docs Import state
   const [isGDocImportOpen, setIsGDocImportOpen] = useState(false);
@@ -107,32 +111,22 @@ const App: React.FC = () => {
     stats,
     totalJobs,
     loading,
+    loadingMore,
     error,
-    currentPage,
-    setCurrentPage,
+    hasMore,
+    loadMore,
     refresh: loadData
   } = useJobs(viewMode, filters);
 
-  const ITEMS_PER_PAGE = 9;
-
-  // --- Derived: Sorted Jobs ---
-  // Applying client-side sorting/filtering to the fetched page
-  // Filtering is handled by useJobs/backend mostly, but we ensure consistency here for search/local
-  const filteredJobs = React.useMemo(() => {
-    let result = [...jobs];
-
-    // Basic client-side filtering cleanup if needed (e.g. strict match)
-    if (filters.searchQuery) {
-      const query = filters.searchQuery.toLowerCase();
-      result = result.filter(j =>
-        j.company_name?.toLowerCase().includes(query) ||
-        j.title?.toLowerCase().includes(query)
-      );
-    }
-
-    // Sorting via Utility
-    return sortJobs(result, filters.sortBy, filters.sortOrder, evaluatingJobId);
-  }, [jobs, filters, evaluatingJobId]);
+  // Search-only filter for selection hook (JobListPanel owns the sort)
+  const searchFilteredJobs = React.useMemo(() => {
+    if (!filters.searchQuery) return jobs;
+    const query = filters.searchQuery.toLowerCase();
+    return jobs.filter(j =>
+      j.company_name?.toLowerCase().includes(query) ||
+      j.title?.toLowerCase().includes(query)
+    );
+  }, [jobs, filters.searchQuery]);
 
   // --- Selection (Hook) ---
   const {
@@ -141,25 +135,11 @@ const App: React.FC = () => {
     toggleSelectJob,
     toggleSelectAll,
     handleDeleteSelected
-  } = useJobSelection(totalJobs, filteredJobs, filters, () => loadData(true)); // Refresh silently on delete
+  } = useJobSelection(totalJobs, searchFilteredJobs, filters, () => loadData(true)); // Refresh silently on delete
 
   // --- Handlers ---
   const handleJobClick = (job: JobWithEvaluation) => {
     setSelectedJobId(job.id);
-  };
-
-  const handleEvaluateJob = async (jobId: string) => {
-    setEvaluatingJobId(jobId);
-    try {
-      await evaluateJob(jobId);
-      await loadData(true);
-    } catch (err) {
-      console.error('Failed to evaluate job:', err);
-      // setError handled by hook usually, but here distinct
-      alert('Failed to evaluate job. Please try again.');
-    } finally {
-      setEvaluatingJobId(null);
-    }
   };
 
   const handleAnalyzeNewJob = async () => {
@@ -175,16 +155,16 @@ const App: React.FC = () => {
         setSelectedJobId(response.id);
 
         if (response.count && response.count > 1) {
-          alert(`Batch Import Successful! Imported ${response.count} jobs. Analyzing the newest one.`);
+          showAppToast(`Imported ${response.count} jobs. Analyzing the newest one.`, 'success');
         } else {
-          alert('Job Imported & Analyzed Successfully!');
+          showAppToast('Job imported & analyzed successfully!', 'success');
         }
       } else {
         throw new Error("Import returned no ID");
       }
     } catch (error) {
       console.error('Import/Analyze failed', error);
-      alert('Failed to import/analyze job. Ensure it is a valid LinkedIn URL.');
+      showAppToast('Failed to import/analyze job. Ensure it is a valid LinkedIn URL.', 'error');
     } finally {
       setAnalyzing(false);
       setIsAddModalOpen(false);
@@ -218,7 +198,7 @@ const App: React.FC = () => {
           if (resume && resume.status === 'error') {
             clearInterval(poll);
             setIsImportingGDoc(false);
-            alert(`Resume parsing failed: ${resume.error || 'Unknown error'}\n\nPlease try again.`);
+            showAppToast(`Resume parsing failed: ${resume.error || 'Unknown error'}`, 'error');
             return;
           }
           if (resume && resume.status !== 'processing' && resume.fullName) {
@@ -238,12 +218,12 @@ const App: React.FC = () => {
         clearInterval(poll);
         if (isImportingGDoc) {
           setIsImportingGDoc(false);
-          alert('Import timed out. The resume may still be processing — try refreshing the page.');
+          showAppToast('Import timed out. The resume may still be processing — try refreshing.', 'error');
         }
       }, 60000);
     } catch (error) {
       console.error('Google Doc import failed:', error);
-      alert('Failed to import from Google Docs. Please check the URL and try again.');
+      showAppToast('Failed to import from Google Docs. Please check the URL and try again.', 'error');
       setIsImportingGDoc(false);
     }
   };
@@ -460,104 +440,45 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="print:hidden">
-            {loading ? (
-              <div className="flex flex-col items-center justify-center h-[60vh]">
-                <Loader2 className="w-12 h-12 text-slate-300 animate-spin mb-4" />
-                <p className="text-slate-500 animate-pulse font-medium">Loading jobs...</p>
-              </div>
-            ) : filteredJobs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[40vh]">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                  <Sparkles className="w-8 h-8 text-slate-300" />
-                </div>
-                <p className="text-slate-500 font-medium">No jobs match your filters</p>
-                <button
-                  onClick={() => {
-                    setViewMode('all');
-                    setFilters({
-                      searchQuery: '',
-                      verdict: 'all',
-                      action: 'all',
-                      sortBy: 'date',
-                      sortOrder: 'desc',
-                    });
-                  }}
-                  className="mt-3 text-blue-600 hover:text-blue-700 text-sm font-medium"
-                >
-                  Clear filters
-                </button>
-              </div>
-            ) : (
-              <div className="flex h-[calc(100vh-140px)] gap-6 overflow-hidden">
-                {/* LEFT SIDEBAR: Job List */}
-                <div className="w-full lg:w-[400px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                  <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center h-12">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={totalJobs > 0 && selectedIds.size === totalJobs}
-                        onChange={toggleSelectAll}
-                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                        {selectedIds.size > 0 ? `${selectedIds.size} Selected` : `${totalJobs} Jobs`}
-                      </p>
-                    </div>
+          <div className="print:hidden flex h-[calc(100vh-140px)] gap-6 overflow-hidden">
+            {/* LEFT SIDEBAR: Job List */}
+            <div className="w-full lg:w-[360px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <JobListPanel
+                jobs={searchFilteredJobs}
+                totalJobs={totalJobs}
+                loading={loading}
+                loadingMore={loadingMore}
+                hasMore={hasMore}
+                loadMore={loadMore}
+                selectedJobId={selectedJobId}
+                selectedIds={selectedIds}
+                isDeleting={isDeleting}
+                onJobClick={handleJobClick}
+                onToggleSelect={toggleSelectJob}
+                onToggleSelectAll={toggleSelectAll}
+                onDeleteSelected={handleDeleteSelected}
+              />
+            </div>
 
-                    {selectedIds.size > 0 && (
-                      <button
-                        onClick={handleDeleteSelected}
-                        disabled={isDeleting}
-                        className="flex items-center gap-1 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2 py-1 rounded transition-colors"
-                      >
-                        {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                        Delete
-                      </button>
-                    )}
+            {/* RIGHT MAIN: Job Details */}
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+              {selectedJob ? (
+                <JobDetailView
+                  job={selectedJob}
+                  onEvaluate={() => loadData(true)}
+                  tailoringJobId={tailoringJobId}
+                  onTailorStart={setTailoringJobId}
+                  onTailorEnd={() => setTailoringJobId(null)}
+                />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                    <Briefcase className="w-8 h-8 text-slate-300" />
                   </div>
-                  <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-slate-200">
-                    {filteredJobs.map((job) => (
-                      <JobListItem
-                        key={job.id}
-                        job={job}
-                        isActive={selectedJobId === job.id}
-                        isSelected={selectedIds.has(job.id)}
-                        onToggleSelect={() => toggleSelectJob(job.id)}
-                        onClick={() => handleJobClick(job)}
-                      />
-                    ))}
-                    <div className="p-4 border-t border-slate-100">
-                      <Pagination
-                        currentPage={currentPage}
-                        totalPages={Math.ceil(totalJobs / ITEMS_PER_PAGE)}
-                        onPageChange={setCurrentPage}
-                      />
-                    </div>
-                  </div>
+                  <p className="font-medium">Select a job to view details</p>
                 </div>
-
-                {/* RIGHT MAIN: Job Details */}
-                <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
-                  {selectedJob ? (
-                    <JobDetailView
-                      job={selectedJob}
-                      onEvaluate={() => loadData(true)}
-                      tailoringJobId={tailoringJobId}
-                      onTailorStart={setTailoringJobId}
-                      onTailorEnd={() => setTailoringJobId(null)}
-                    />
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                      <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                        <Briefcase className="w-8 h-8 text-slate-300" />
-                      </div>
-                      <p className="font-medium">Select a job to view details</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
       </main>
@@ -682,6 +603,14 @@ const App: React.FC = () => {
           data={resumeData}
           onChange={(newData) => setResumeData(newData)}
           onClose={() => setIsEditorOpen(false)}
+        />
+      )}
+
+      {appToast && (
+        <Toast
+          message={appToast.message}
+          type={appToast.type}
+          onDismiss={() => setAppToast(null)}
         />
       )}
     </div>

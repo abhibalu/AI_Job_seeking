@@ -1,102 +1,94 @@
 import React from 'react';
 import { JobWithEvaluation } from '../services/jobService';
-import { Building2, XCircle, CheckCircle2, Clock } from 'lucide-react';
 import { formatTimeAgo } from '../utils/format';
 
 interface JobListItemProps {
     job: JobWithEvaluation;
     isActive: boolean;
     isSelected: boolean;
+    onToggleSelect: () => void;
     onClick: () => void;
-    onToggleSelect: (e: React.MouseEvent) => void;
 }
 
-export const JobListItem: React.FC<JobListItemProps> = ({ job, isActive, isSelected, onClick, onToggleSelect }) => {
-    const score = job.evaluation?.job_match_score || 0;
+export const JobListItem: React.FC<JobListItemProps> = ({
+    job, isActive, isSelected, onToggleSelect, onClick
+}) => {
+    const action = job.evaluation?.recommended_action ?? 'pending';
+    const score = job.evaluation?.job_match_score;
+    const hasRecruiter =
+        job.evaluation?.recruiter_email &&
+        job.evaluation.recruiter_email !== 'Unknown';
 
-    // Logo is now strict black/dark theme
-    const getLogoColor = () => 'bg-slate-900';
-
-    const getBgColor = () => {
-        if (isActive) return 'bg-gray-50 border-l-4 border-l-black';
-        return 'bg-white hover:bg-gray-50/80 border-l-4 border-l-transparent';
+    const edgeColor = () => {
+        if (action === 'apply') return 'bg-green-500';
+        if (action === 'tailor') return 'bg-amber-500';
+        if (action === 'skip') return 'bg-slate-200';
+        return 'transparent';
     };
+
+    const rowBg = () => {
+        if (isActive) return 'bg-slate-100';
+        if (action === 'apply') return 'bg-gradient-to-r from-green-50/40 to-transparent';
+        if (action === 'tailor') return 'bg-gradient-to-r from-amber-50/40 to-transparent';
+        return '';
+    };
+
+    const verdictColor = () => {
+        if (action === 'apply') return 'text-green-600';
+        if (action === 'tailor') return 'text-amber-600';
+        if (action === 'skip') return 'text-slate-300';
+        return 'text-slate-300';
+    };
+
+    const verdictLabel = () => {
+        if (action === 'apply') return 'Apply';
+        if (action === 'tailor') return 'Tailor';
+        if (action === 'skip') return 'Skip';
+        return '—';
+    };
+
+    const isSkip = action === 'skip';
 
     return (
         <div
+            className={`relative flex items-start gap-2.5 pl-4 pr-3.5 py-2.5 cursor-pointer border-b border-slate-50 transition-all ${rowBg()} ${isSkip ? 'opacity-40' : ''}`}
             onClick={onClick}
-            className={`
-        w-full p-4 border-b border-gray-100 cursor-pointer transition-all duration-200 relative
-        ${getBgColor()}
-      `}
         >
-            <div className="flex gap-3">
-                {/* Checkbox */}
-                <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
-                    <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => {
-                            // Cast the event to MouseEvent-like behavior for parent handler compatibility if needed, 
-                            // or better, just allow the handler to take ChangeEvent or be generic.
-                            // But cleaner: onClick on parent div handles stopPropagation.
-                            // Let's just use the onToggleSelect passed down.
-                            // Actually, onChange on input is safer for accessibility.
-                        }}
-                        onClick={onToggleSelect}
-                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                    />
+            {/* Left edge accent */}
+            <div className={`absolute left-0 top-0 bottom-0 w-[3px] rounded-r-sm ${edgeColor()}`} />
+
+            {/* Checkbox */}
+            <div className="pt-0.5 shrink-0" onClick={e => { e.stopPropagation(); onToggleSelect(); }}>
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={onToggleSelect}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-slate-900 focus:ring-slate-500 cursor-pointer"
+                />
+            </div>
+
+            {/* Main content */}
+            <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-medium text-slate-900 whitespace-nowrap overflow-hidden text-ellipsis mb-0.5">
+                    {job.title}
                 </div>
-
-                {/* Logo */}
-                <div className={`w-12 h-12 min-w-[3rem] rounded-md ${getLogoColor()} flex items-center justify-center text-white font-bold text-lg shadow-sm border border-slate-900`}>
-                    {job.company_name?.charAt(0) || 'C'}
+                <div className="text-[11px] text-slate-400">
+                    {job.company_name}
+                    {job.posted_at && <> · {formatTimeAgo(job.posted_at)}</>}
                 </div>
+            </div>
 
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                    <h3 className={`text-base font-semibold truncate ${isActive ? 'text-black' : 'text-slate-900'}`}>
-                        {job.title}
-                    </h3>
-                    <div className="text-sm text-slate-600 truncate font-medium">
-                        {job.company_name}
-                    </div>
-                    <div className="flex items-center text-xs text-slate-500 mt-1 mb-2">
-                        <span className="truncate">{job.location || 'Remote'}</span>
-                        <span className="mx-1">•</span>
-                        {job.posted_at && (
-                            <span className="text-slate-600 font-medium flex items-center gap-1">
-                                <Clock size={10} />
-                                {formatTimeAgo(job.posted_at)}
-                            </span>
-                        )}
-                    </div>
-
-                    {job.isEvaluated && job.evaluation ? (
-                        <div className="flex items-center gap-2 mt-2">
-                            {/* Match Badge - Monochrome */}
-                            <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border bg-white text-slate-900 border-slate-200 shadow-sm">
-                                {score}% Match
-                            </div>
-
-                            {/* Status Badge (Tailor/Skip) */}
-                            <div className="flex items-center gap-1">
-                                {job.evaluation.recommended_action === 'skip' ? (
-                                    <XCircle className="w-3 h-3 text-slate-400" />
-                                ) : job.evaluation.recommended_action === 'tailor' ? (
-                                    <CheckCircle2 className="w-3 h-3 text-slate-900" />
-                                ) : (
-                                    <Clock className="w-3 h-3 text-slate-400" />
-                                )}
-                                <span className="text-xs text-slate-600 capitalize">{job.evaluation.recommended_action}</span>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="mt-2 text-xs text-slate-400 italic">
-                            Click to Analyze
-                        </div>
-                    )}
-                </div>
+            {/* Right: score + verdict + recruiter dot */}
+            <div className="flex flex-col items-end gap-0.5 shrink-0">
+                {score !== undefined && score !== null && (
+                    <span className="text-[12px] font-medium text-slate-900">{score}</span>
+                )}
+                <span className={`text-[10px] font-medium ${verdictColor()}`}>
+                    {verdictLabel()}
+                </span>
+                {hasRecruiter && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-0.5" title="Recruiter contact available" />
+                )}
             </div>
         </div>
     );

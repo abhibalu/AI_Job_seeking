@@ -299,6 +299,8 @@ export interface Evaluation {
     matched_keywords: string[] | null;
     missing_keywords: string[] | null;
     evaluated_at: string | null;
+    recruiter_email?: string | null;
+    wit_line?: string | null;
 }
 
 export interface EvaluationStats {

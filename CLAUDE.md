@@ -123,3 +123,4 @@ Architecture decisions are recorded in `docs/decisions/`. Key decisions:
 - [ADR-0004](docs/decisions/0004-tailoring-quality-phase1.md) — Tailoring quality Phase 1: ATS bug fix, temperatures, structural validation
 - [ADR-0005](docs/decisions/0005-plan-then-execute-and-gdoc-import.md) — Phase 2: Plan-then-Execute architecture, Google Docs import, UI navigation fix
 - [ADR-0006](docs/decisions/0006-resume-parser-fidelity.md) — Resume parser fidelity: temperature fix, prompt rewrite, one-shot example, projects UI
+- [ADR-0007](docs/decisions/0007-linear-style-ui-redesign.md) — Linear-style UI redesign: infinite scroll, actionability sort, detail view rewrite, wit_line, recruiter modal

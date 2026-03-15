@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TailorAI is an autonomous job-seeking agent that discovers, evaluates, and tailors resumes to job descriptions using a multi-agent LLM pipeline. It combines a React frontend, FastAPI backend, LangGraph orchestration, and Supabase (PostgreSQL).
 
+## How we got here
+
+- **Phase 1** — Basic evaluation pipeline: scrape LinkedIn → score jobs → gap analysis
+- **Phase 2** — Plan-then-Execute tailoring: ChangePlanner → ResumeTailor → Validate → ResumeCritic loop with Supabase checkpointing
+- **Phase 3** — Google Docs integration: import base resume from GDoc, export tailored resume back to Drive
+- **Phase 4** — Resume parser fidelity: verbatim extraction, one-shot example, section-mapping, temperature fix; projects section surfaced in UI
+- **Phase 5** — UI redesign: infinite scroll, actionability-first sort, Linear-style job list and detail view, recruiter contact modal
+
 ## Commands
 
 ### Backend

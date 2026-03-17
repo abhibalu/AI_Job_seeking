@@ -1,5 +1,8 @@
 # Feature: job_evaluation
 
+> Load me when: task touches JobEvaluatorAgent, evaluation scoring, recommended_action routing,
+> wit_line, gaps, improvement_suggestions, or the evaluation DB schema.
+
 ## 1. Logic (The Mental Model)
 
 Job Evaluation acts as the **Harsh Gatekeeper** of the tailoring pipeline. Instead of wasting computational resources (and the user's focus) on every job, the system performs a high-speed "sanity check" to determine if a job is worth pursuing. 

@@ -1,5 +1,8 @@
 # Feature: gdoc_base_resume
 
+> Load me when: task touches Google Docs import/export, google_docs.py, GDrive folder
+> structure, or the base resume ingestion flow.
+
 ## 1. Logic (The Mental Model)
 
 The "Base Resume" is the single source of truth for the candidate's professional identity. This feature provides bidirectional integration with Google Docs:

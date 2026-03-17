@@ -1,5 +1,8 @@
 # Feature: linkedin_scraping
 
+> Load me when: task touches the scraper worker, Apify integration, job ingestion,
+> parse_raw_json(), map_job_record(), or the jobs table schema.
+
 ## 1. Logic (The Mental Model)
 
 Acquiring high-fidelity job data is the foundation of the tailoring process. LinkedIn scraping is treated as a **Managed Data Ingestion** feature. Instead of trying to bypass complex bot-detection locally, the system delegates the extraction to a specialized "Scraping Agent" (External Cloud Provider). 

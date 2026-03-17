@@ -6,9 +6,6 @@
 ## Feature Context
 - [ ] If changing business logic, load `docs/features/<relevant_feature>.md` (Check `docs/README.md` for available features)
 
-## Feature Context
-- [ ] If changing business logic, load `docs/features/<relevant_feature>.md` (Check `docs/README.md` for available features)
-
 ## Domains touched
 - [ ] agents/ — agents/CLAUDE.md
 - [ ] api/ — api/CLAUDE.md

@@ -1,5 +1,8 @@
 # Feature: tailoring_loop
 
+> Load me when: task touches the tailoring subgraph, ChangePlannerAgent, ResumeTailorAgent,
+> ResumeCriticAgent, resume_validator.py, or the Plan-then-Execute loop logic.
+
 ## 1. Logic (The Mental Model)
 
 Generating a tailored resume is not a one-shot process. It requires a balance between **Strategic Promotion** (adding keywords and emphasizing relevant experience) and **Authenticity** (sticking to the candidate's actual background).

@@ -45,6 +45,7 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 | supabase_db/, migrations                  | agents/CLAUDE.md (DB section)         |
 | cross-cutting (>1 domain)                 | docs/active/TEMPLATE.md + domain files|
 | import rules, full data flow              | docs/core/architecture.md             |
+| feature behaviour, state machines         | docs/features/<feature>.md            |
 
 ## Active tasks
 See `docs/active/` for in-progress cross-cutting task scaffolds.

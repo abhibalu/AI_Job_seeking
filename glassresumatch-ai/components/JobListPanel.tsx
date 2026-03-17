@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { JobWithEvaluation } from '../services/jobService';
+import { JobWithEvaluation, fetchEvaluations } from '../services/jobService';
 import { JobListItem } from './JobListItem';
 import { Loader2, Trash2 } from 'lucide-react';
 
@@ -38,6 +38,8 @@ interface JobListPanelProps {
     loadingMore: boolean;
     hasMore: boolean;
     loadMore: () => void;
+    showSectionHeaders?: boolean; // false when a tab already communicates the section
+    activeAction?: 'apply' | 'tailor' | 'skip' | 'all'; // scopes recruiter contacts to current tab
     selectedJobId: string | null;
     selectedIds: Set<string>;
     isDeleting: boolean;
@@ -49,6 +51,8 @@ interface JobListPanelProps {
 
 export const JobListPanel: React.FC<JobListPanelProps> = ({
     jobs, totalJobs, loading, loadingMore, hasMore, loadMore,
+    showSectionHeaders = true,
+    activeAction = 'all',
     selectedJobId, selectedIds, isDeleting,
     onJobClick, onToggleSelect, onToggleSelectAll, onDeleteSelected,
 }) => {
@@ -66,18 +70,21 @@ export const JobListPanel: React.FC<JobListPanelProps> = ({
         return (b.evaluation?.job_match_score ?? 0) - (a.evaluation?.job_match_score ?? 0);
     });
 
-    // Build recruiter contact list
+    // Fetch recruiter contacts for the active tab — re-runs when tab changes
     useEffect(() => {
-        const withRecruiter = jobs
-            .filter(j => j.evaluation?.recruiter_email && j.evaluation.recruiter_email !== 'Unknown')
-            .map(j => ({
-                id: j.id,
-                title: j.title ?? 'Unknown role',
-                company: j.company_name ?? 'Unknown',
-                email: j.evaluation!.recruiter_email!,
-            }));
-        setRecruiterJobs(withRecruiter);
-    }, [jobs]);
+        const action = activeAction === 'all' ? undefined : activeAction;
+        fetchEvaluations(1, 500, action).then(result => {
+            const contacts = result.data
+                .filter((e: any) => e.recruiter_email && e.recruiter_email !== 'Unknown')
+                .map((e: any) => ({
+                    id: e.job_id,
+                    title: e.title_role ?? 'Unknown role',
+                    company: e.company_name ?? 'Unknown',
+                    email: e.recruiter_email,
+                }));
+            setRecruiterJobs(contacts);
+        }).catch(() => {});
+    }, [activeAction]);
 
     // Infinite scroll observer
     useEffect(() => {
@@ -174,18 +181,20 @@ export const JobListPanel: React.FC<JobListPanelProps> = ({
             <div ref={feedRef} className="flex-1 overflow-y-auto min-h-0">
                 {sortedJobs.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full py-16 text-slate-400">
-                        <p className="text-[12px]">No jobs match your filters</p>
+                        <p className="text-[12px]">No jobs</p>
                     </div>
                 ) : (
                     grouped.map(({ action, items }) => (
                         <React.Fragment key={action}>
-                            {/* Section header */}
-                            <div className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-50/80 border-b border-slate-50 sticky top-0 z-10">
-                                <div className={`w-[5px] h-[5px] rounded-full ${SECTION_DOT[action] ?? 'bg-slate-200'}`} />
-                                <span className="text-[10px] font-medium text-slate-400 uppercase tracking-[0.07em]">
-                                    {SECTION_LABELS[action] ?? action}
-                                </span>
-                            </div>
+                            {/* Section header — hidden when tab already communicates the section */}
+                            {showSectionHeaders && (
+                                <div className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-50/80 border-b border-slate-50 sticky top-0 z-10">
+                                    <div className={`w-[5px] h-[5px] rounded-full ${SECTION_DOT[action] ?? 'bg-slate-200'}`} />
+                                    <span className="text-[10px] font-medium text-slate-400 uppercase tracking-[0.07em]">
+                                        {SECTION_LABELS[action] ?? action}
+                                    </span>
+                                </div>
+                            )}
                             {items.map(job => (
                                 <JobListItem
                                     key={job.id}

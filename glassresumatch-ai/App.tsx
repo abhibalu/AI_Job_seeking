@@ -63,7 +63,7 @@ const App: React.FC = () => {
   const [filters, setFilters] = useState<FilterOptions>({
     searchQuery: '',
     verdict: 'all',
-    action: 'all',
+    action: 'apply', // Default to Apply Now tab
     sortBy: 'date',
     sortOrder: 'desc',
   });
@@ -443,6 +443,37 @@ const App: React.FC = () => {
           <div className="print:hidden flex h-[calc(100vh-140px)] gap-6 overflow-hidden">
             {/* LEFT SIDEBAR: Job List */}
             <div className="w-full lg:w-[360px] flex-shrink-0 flex flex-col bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              {/* Action tab strip */}
+              <div className="flex border-b border-slate-100 px-3 pt-2 gap-0.5 flex-shrink-0">
+                {([
+                  { action: 'apply',  label: 'Apply now',    dot: 'bg-green-500',  active: 'text-green-700 border-green-500' },
+                  { action: 'tailor', label: 'Tailor first', dot: 'bg-amber-500',  active: 'text-amber-700 border-amber-500' },
+                  { action: 'skip',   label: 'Skip',         dot: 'bg-slate-300',  active: 'text-slate-600 border-slate-400' },
+                ] as const).map(({ action, label, dot, active }) => {
+                  const count = stats?.by_action[action] ?? 0;
+                  const isActive = filters.action === action;
+                  return (
+                    <button
+                      key={action}
+                      onClick={() => setFilters(prev => ({ ...prev, action }))}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium border-b-2 transition-colors whitespace-nowrap ${
+                        isActive
+                          ? `${active} bg-white`
+                          : 'text-slate-400 border-transparent hover:text-slate-600'
+                      }`}
+                    >
+                      <div className={`w-[5px] h-[5px] rounded-full ${dot}`} />
+                      {label}
+                      {count > 0 && (
+                        <span className={`tabular-nums text-[10px] ${isActive ? 'opacity-70' : 'text-slate-300'}`}>
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
               <JobListPanel
                 jobs={searchFilteredJobs}
                 totalJobs={totalJobs}
@@ -450,6 +481,8 @@ const App: React.FC = () => {
                 loadingMore={loadingMore}
                 hasMore={hasMore}
                 loadMore={loadMore}
+                showSectionHeaders={filters.action === 'all'}
+                activeAction={filters.action as 'apply' | 'tailor' | 'skip' | 'all'}
                 selectedJobId={selectedJobId}
                 selectedIds={selectedIds}
                 isDeleting={isDeleting}

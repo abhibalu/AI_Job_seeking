@@ -83,6 +83,38 @@ UI elements showing complete/total data (counts, contact lists) must be fetched 
 not derived from the `jobs` prop, which is partial until fully scrolled. Use a dedicated API
 call scoped to the active filter. See agent-lessons #5.
 
+## Infinite scroll: always reset totalJobs on filter change
+
+When switching tabs/filters, reset `totalJobs` to `0` alongside `jobs` and `currentPage`.
+`hasMore = jobs.length < totalJobs` — if `totalJobs` keeps the previous tab's value, `hasMore`
+stays `true` throughout the switch and the `IntersectionObserver` effect (which depends on
+`hasMore`) never re-runs. The sentinel mounts but is never observed. Infinite scroll silently
+breaks on every tab except the first one loaded. See agent-lessons #6.
+
+## Infinite scroll: use a ref for the observer callback, not the function itself
+
+Don't put the `loadMore` function directly in the `IntersectionObserver` effect deps. `loadMore`
+changes on every `loadingMore` flip, causing the observer to disconnect/reconnect mid-load. On
+reconnect the sentinel may be below the viewport (new items just appended), leaving it unobserved
+until the user scrolls — which they can't if they're already at the bottom.
+
+Pattern:
+```ts
+const loadMoreRef = useRef(loadMore);
+useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
+
+useEffect(() => {
+    if (!sentinelRef.current || !hasMore) return;
+    const obs = new IntersectionObserver(
+        ([entry]) => { if (entry.isIntersecting) loadMoreRef.current(); },
+        { root: feedRef.current, threshold: 0.1 }
+    );
+    obs.observe(sentinelRef.current);
+    return () => obs.disconnect();
+}, [hasMore]); // only re-creates when sentinel mounts/unmounts
+```
+See agent-lessons #7.
+
 ## Environment variables
 No `.env` file for frontend — base URL is hardcoded in `apiClient.ts`.
 Change `API_BASE_URL` constant if backend port changes.

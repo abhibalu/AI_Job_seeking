@@ -99,6 +99,68 @@ useEffect(() => {
 
 ---
 
+## 6. Reset totalJobs when switching paginated filters
+
+**Source**: 2026-03-17
+
+**Mistake**: `useJobs` reset `jobs` and `currentPage` on filter change but not `totalJobs`.
+`hasMore = jobs.length < totalJobs`. After `setJobs([])`, `jobs.length = 0` but `totalJobs`
+still held the previous tab's value — so `hasMore` stayed `true` throughout the tab switch.
+The `IntersectionObserver` effect had `[hasMore]` as its only dependency. Because `hasMore`
+never changed (true → true), the effect never re-ran after the new data loaded, leaving the
+sentinel unobserved. Infinite scroll silently stopped working on every tab except the first.
+
+**Correct pattern**: Reset `totalJobs` to `0` alongside `jobs` and `currentPage` on filter
+change. This forces `hasMore` to cycle `false → true` when new data loads, reliably
+re-triggering the observer effect.
+
+```ts
+useEffect(() => {
+    setCurrentPage(1);
+    setJobs([]);
+    setTotalJobs(0); // forces hasMore false→true so observer re-attaches on new data
+    load(1, false, true);
+}, [viewMode, filters.action, filters.verdict, filters.searchQuery]);
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 7. Use a ref for IntersectionObserver callbacks to avoid observer churn
+
+**Source**: 2026-03-17
+
+**Mistake**: The `IntersectionObserver` effect in `JobListPanel` had `[hasMore, loadMore]` as
+deps. `loadMore` changed every time `loadingMore` flipped (it was in `loadMore`'s `useCallback`
+deps). This caused the observer to disconnect and reconnect on every loading state change.
+On reconnect, if the sentinel had just been pushed below the viewport by newly appended items,
+the observer would set up and wait — but since the user was already at the bottom of the old
+list, they couldn't scroll further to re-trigger it.
+
+**Correct pattern**: Store `loadMore` in a ref so the observer callback is always current
+without needing to be recreated. Only include `hasMore` in the effect deps — the observer
+only needs to reconnect when the sentinel mounts or unmounts.
+
+```ts
+const loadMoreRef = useRef(loadMore);
+useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
+
+useEffect(() => {
+    if (!sentinelRef.current || !hasMore) return;
+    const obs = new IntersectionObserver(
+        ([entry]) => { if (entry.isIntersecting) loadMoreRef.current(); },
+        { root: feedRef.current, threshold: 0.1 }
+    );
+    obs.observe(sentinelRef.current);
+    return () => obs.disconnect();
+}, [hasMore]); // only re-creates when sentinel mounts/unmounts
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
 ## 4. Force-saved resume status must differ from critic-approved
 **Source**: ADR-0004 (2025)
 

@@ -86,16 +86,20 @@ export const JobListPanel: React.FC<JobListPanelProps> = ({
         }).catch(() => {});
     }, [activeAction]);
 
-    // Infinite scroll observer
+    // Keep a stable ref to the latest loadMore so the observer never goes stale
+    const loadMoreRef = useRef(loadMore);
+    useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
+
+    // Infinite scroll observer — only re-created when hasMore changes (sentinel mounts/unmounts)
     useEffect(() => {
         if (!sentinelRef.current || !hasMore) return;
         const obs = new IntersectionObserver(
-            ([entry]) => { if (entry.isIntersecting) loadMore(); },
+            ([entry]) => { if (entry.isIntersecting) loadMoreRef.current(); },
             { root: feedRef.current, threshold: 0.1 }
         );
         obs.observe(sentinelRef.current);
         return () => obs.disconnect();
-    }, [hasMore, loadMore]);
+    }, [hasMore]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Group by action for section headers
     const grouped: { action: string; items: JobWithEvaluation[] }[] = [];

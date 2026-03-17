@@ -8,7 +8,7 @@ import {
 import { EvaluationStats } from '../services/apiClient';
 import { ViewMode, FilterOptions } from '../types';
 
-const ITEMS_PER_PAGE = 9;
+const ITEMS_PER_PAGE = 20;
 
 interface UseJobsResult {
     jobs: JobWithEvaluation[];
@@ -118,6 +118,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         if (viewMode === 'resume') return;
         setCurrentPage(1);
         setJobs([]);
+        setTotalJobs(0); // reset so hasMore goes false→true, re-triggering the scroll observer
         load(1, false, true);
     }, [viewMode, filters.action, filters.verdict, filters.searchQuery]);
 

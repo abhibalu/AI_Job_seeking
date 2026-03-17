@@ -69,6 +69,36 @@ def build_user_prompt(self, **kwargs) -> str:
 
 ---
 
+## 5. Don't derive stable UI state from paginated list state
+
+**Source**: ADR-0008 (2026-03-17)
+
+**Mistake**: The recruiter contacts pill in `JobListPanel` built its contact list by filtering
+the `jobs` prop. Because `jobs` grows incrementally as the user scrolls, the pill count
+changed on every infinite-scroll trigger — visually unstable and incomplete until fully loaded.
+
+**Correct pattern**: Any UI element that represents **complete** data (total counts, contact
+lists, summary stats) must be fetched independently from the paginated list. Use a dedicated
+API call scoped to the relevant filter, not a derivation from partial in-memory state.
+
+```ts
+// Wrong: derived from paginated jobs array — incomplete until fully scrolled
+useEffect(() => {
+    setRecruiterJobs(jobs.filter(j => j.evaluation?.recruiter_email));
+}, [jobs]);
+
+// Correct: independent fetch, scoped to active tab, runs on tab change only
+useEffect(() => {
+    fetchEvaluations(1, 500, activeAction).then(result => {
+        setRecruiterJobs(result.data.filter(e => e.recruiter_email));
+    });
+}, [activeAction]);
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
 ## 4. Force-saved resume status must differ from critic-approved
 **Source**: ADR-0004 (2025)
 

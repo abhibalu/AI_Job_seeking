@@ -66,6 +66,23 @@ Match resource names: `getJobs()`, `getJob(id)`, `evaluateJob(id)`, `tailorResum
 Use `pushState` / `popstate` for view mode navigation (job list ↔ job detail ↔ tailor review).
 Avoids full page reloads. Implemented per ADR-0007.
 
+## Job list tab navigation
+
+The sidebar job list uses a 3-tab strip (Apply now / Tailor first / Skip) that sets
+`filters.action`. Each tab triggers server-side filtering via `fetchEvaluations` in `useJobs` —
+infinite scroll loads more jobs for the active tab only. Counts come from `stats.by_action`.
+Default tab: `apply`. See ADR-0008.
+
+`JobListPanel` props relevant to tabs:
+- `showSectionHeaders` — pass `false` when a tab is active (avoids redundant section label)
+- `activeAction` — scopes the recruiter contacts fetch to the current tab
+
+## Don't derive stable UI state from paginated list state
+
+UI elements showing complete/total data (counts, contact lists) must be fetched independently —
+not derived from the `jobs` prop, which is partial until fully scrolled. Use a dedicated API
+call scoped to the active filter. See agent-lessons #5.
+
 ## Environment variables
 No `.env` file for frontend — base URL is hardcoded in `apiClient.ts`.
 Change `API_BASE_URL` constant if backend port changes.

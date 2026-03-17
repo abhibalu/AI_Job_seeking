@@ -54,4 +54,4 @@ See `docs/active/` for in-progress cross-cutting task scaffolds.
 See `docs/agent-lessons.md` for recurring mistake patterns and fixes.
 
 ## Architecture decisions
-Recorded in `docs/decisions/`. ADR-0001 through ADR-0007 cover all major architectural shifts.
+Recorded in `docs/decisions/`. ADR-0001 through ADR-0008 cover all major architectural shifts.

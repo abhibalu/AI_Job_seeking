@@ -3,6 +3,12 @@
 ## Goal
 [1-2 sentences — what this task achieves and why]
 
+## Feature Context
+- [ ] If changing business logic, load `docs/features/<relevant_feature>.md` (Check `docs/README.md` for available features)
+
+## Feature Context
+- [ ] If changing business logic, load `docs/features/<relevant_feature>.md` (Check `docs/README.md` for available features)
+
 ## Domains touched
 - [ ] agents/ — agents/CLAUDE.md
 - [ ] api/ — api/CLAUDE.md
@@ -34,8 +40,10 @@
 ## Decisions made
 <!-- Date | Decision | Rationale -->
 
+## Documentation Updates
+- [ ] Update `docs/features/*.md` if architecture boundaries or system state transitions changed.
+
 ## Last session
-<!-- What was completed in the most recent session -->
 
 ## Next session entry point
 <!-- CRITICAL: fill this before context runs out.

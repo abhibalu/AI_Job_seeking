@@ -8,27 +8,19 @@ Welcome to the TailorAI technical documentation. We use a **Layered Documentatio
 
 ### Google Doc Base Resume Ingestion
 Transitioning from static JSON storage to live Google Docs as the single source of truth.
-- [Level 1: Logic & Mental Model](features/gdoc_base_resume/logic.md)
-- [Level 2: Architecture & Contracts](features/gdoc_base_resume/architecture.md)
-- [Level 3: Implementation Detail](features/gdoc_base_resume/implementation.md)
+- [Feature Documentation](features/gdoc_base_resume.md)
 
 ### LinkedIn Job Scraping
 External cloud-based extraction of job data into the internal Lakehouse.
-- [Level 1: Logic & Mental Model](features/linkedin_scraping/logic.md)
-- [Level 2: Architecture & Contracts](features/linkedin_scraping/architecture.md)
-- [Level 3: Implementation Detail](features/linkedin_scraping/implementation.md)
+- [Feature Documentation](features/linkedin_scraping.md)
 
 ### Job Evaluation
 The gatekeeper of the pipeline, providing match scores, strategic gaps, and routing decisions.
-- [Level 1: Logic & Mental Model](features/job_evaluation/logic.md)
-- [Level 2: Architecture & Contracts](features/job_evaluation/architecture.md)
-- [Level 3: Implementation Detail](features/job_evaluation/implementation.md)
+- [Feature Documentation](features/job_evaluation.md)
 
 ### Actor-Critic Tailoring Loop
 The core iteration engine that drafts and refines the resume for maximum quality.
-- [Level 1: Logic & Mental Model](features/tailoring_loop/logic.md)
-- [Level 2: Architecture & Contracts](features/tailoring_loop/architecture.md)
-- [Level 3: Implementation Detail](features/tailoring_loop/implementation.md)
+- [Feature Documentation](features/tailoring_loop.md)
 
 ---
 

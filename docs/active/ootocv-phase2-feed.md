@@ -27,17 +27,18 @@ Build the verdict-conditional card feed correctly from the start — before any 
 ## Implementation Checklist
 
 ### Frontend (glassresumatch-ai/)
-- [ ] `JobCard.tsx`: add permanent `⋯` icon at `opacity-30` on card right edge
-- [ ] `JobCard.tsx`: hover → icon `opacity-100`, quick action buttons slide in
-- [ ] `JobCard.tsx`: tap `⋯` on touch → reveal action buttons inline (no hover)
-- [ ] `JobCard.tsx`: Apply Direct button copy conditional — `tailoringStatus === 'ready'` → "Apply with tailored CV →" else "Apply with base CV →"
-- [ ] `JobCard.tsx`: pass `cv_version: 'base' | 'tailored'` in `PATCH /jobs/:id/action` call
-- [ ] `useJobs.ts`: filter pills apply to unactioned jobs only
-- [ ] `useJobs.ts`: actioned/dimmed cards always render below filtered results
-- [ ] `sort.ts` (or equivalent): APPLY DIRECT sorts before TAILOR at same `matchScore` — 1-line comparator change
+- [x] `JobCard.tsx`: add permanent `⋯` icon at `opacity-30` on card right edge
+- [x] `JobCard.tsx`: hover → icon `opacity-100`, quick action buttons slide in
+- [x] `JobCard.tsx`: tap `⋯` on touch → reveal action buttons inline (no hover)
+- [x] `JobCard.tsx`: Apply Direct button copy conditional — `tailoringStatus === 'ready'` → "Apply with tailored CV →" else "Apply with base CV →"
+- [x] `JobCard.tsx`: pass `cv_version: 'base' | 'tailored'` in `PATCH /jobs/:id/action` call
+- [x] `useJobs.ts`: filter pills apply to unactioned jobs only
+- [x] `useJobs.ts`: actioned/dimmed cards always render below filtered results
+- [x] `sort.ts` (or equivalent): APPLY DIRECT sorts before TAILOR at same `matchScore` — 1-line comparator change
 
 ---
 
 ## Progress Log
 <!-- Append-only. Format: `- YYYY-MM-DD: what done, surprises, what changed` -->
 - 2026-03-19: Phase 2 plan created. Depends on Phase 1 (tailoringStatus in types.ts).
+- 2026-03-19: All 8 checklist items implemented. sort.ts APPLY DIRECT rule was already present. JobCard.tsx: ⋯ (MoreHorizontal) at opacity-30 always, opacity-100 on group-hover; quick action panel slides in (translate-x + opacity transition); touch toggle via showActions state; button copy conditional on tailoring_status. apiClient.ts: patchJobAction(jobId, cvVersion) added. useJobs.ts: actionedIds Set + markActioned() + activeJobs/actionedJobs derived partitions added to return value.

@@ -247,6 +247,14 @@ class ApiClient {
         });
     }
 
+    // OotoCV: Job apply action — records cv_version chosen and opens job URL
+    async patchJobAction(jobId: string, cvVersion: 'base' | 'tailored') {
+        return this.request<{ ok: boolean }>(`/api/jobs/${jobId}/action`, {
+            method: 'PATCH',
+            body: JSON.stringify({ cv_version: cvVersion }),
+        });
+    }
+
     // OotoCV: Cover letter (ADR-0011)
     async updateCoverLetter(resumeId: string, coverLetter: string) {
         return this.request<{ ok: boolean }>(`/api/resumes/${resumeId}/cover_letter`, {

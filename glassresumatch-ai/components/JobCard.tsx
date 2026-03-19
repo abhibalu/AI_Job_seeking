@@ -1,17 +1,37 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { JobWithEvaluation } from '../services/jobService';
 import { GlassCard } from './GlassCard';
-import { Building2, Briefcase, Play, CheckCircle2 } from 'lucide-react';
+import { Building2, Briefcase, Play, MoreHorizontal } from 'lucide-react';
 
 interface JobCardProps {
   job: JobWithEvaluation;
   onClick: () => void;
   onEvaluate?: () => void;
   isEvaluating?: boolean;
+  onAction?: (jobId: string, cvVersion: 'base' | 'tailored') => void;
 }
 
-export const JobCard: React.FC<JobCardProps> = ({ job, onClick, onEvaluate, isEvaluating }) => {
+export const JobCard: React.FC<JobCardProps> = ({ job, onClick, onEvaluate, isEvaluating, onAction }) => {
+  const [showActions, setShowActions] = useState(false);
   const evaluation = job.evaluation;
+
+  const isReady = job.tailoring_status === 'ready';
+  const cvVersion: 'base' | 'tailored' = isReady ? 'tailored' : 'base';
+  const applyButtonLabel = isReady ? 'Apply with tailored CV →' : 'Apply with base CV →';
+
+  const handleDotsClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowActions(prev => !prev);
+  };
+
+  const handleApply = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (job.job_url) {
+      window.open(job.job_url, '_blank', 'noopener,noreferrer');
+    }
+    onAction?.(job.id, cvVersion);
+    setShowActions(false);
+  };
 
   const getVerdictColor = (verdict: string | null | undefined) => {
     switch (verdict) {
@@ -45,6 +65,31 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onClick, onEvaluate, isEv
 
   return (
     <GlassCard onClick={onClick} hoverEffect={true} className="h-full flex flex-col p-6 group border-slate-200/60">
+      {/* ⋯ quick action trigger — always visible at opacity-30, full on hover or touch-toggle */}
+      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
+        {/* Quick action panel: slides in on card hover (desktop) or when touch-toggled */}
+        <div className={`flex items-center transition-all duration-200 ${
+          showActions
+            ? 'opacity-100 translate-x-0'
+            : 'opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0'
+        }`}>
+          <button
+            onClick={handleApply}
+            className="px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md hover:bg-slate-700 transition-colors whitespace-nowrap shadow-sm"
+          >
+            {applyButtonLabel}
+          </button>
+        </div>
+        <button
+          onClick={handleDotsClick}
+          className={`p-0.5 rounded transition-opacity duration-200 ${
+            showActions ? 'opacity-100' : 'opacity-30 group-hover:opacity-100'
+          }`}
+        >
+          <MoreHorizontal className="w-4 h-4 text-slate-500" />
+        </button>
+      </div>
+
       <div className="flex justify-between items-start mb-4">
         <div className="flex items-center space-x-3">
           <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-slate-800 to-slate-900 flex items-center justify-center text-white font-bold text-xl shadow-md">
@@ -62,11 +107,11 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onClick, onEvaluate, isEv
         </div>
 
         {job.isEvaluated && evaluation ? (
-          <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${getVerdictColor(evaluation.verdict)}`}>
+          <div className={`px-3 py-1 rounded-full text-xs font-semibold border mr-6 ${getVerdictColor(evaluation.verdict)}`}>
             {evaluation.verdict}
           </div>
         ) : (
-          <div className="px-3 py-1 rounded-full text-xs font-semibold border bg-slate-100 text-slate-500 border-slate-200">
+          <div className="px-3 py-1 rounded-full text-xs font-semibold border mr-6 bg-slate-100 text-slate-500 border-slate-200">
             Not Evaluated
           </div>
         )}
@@ -138,12 +183,6 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onClick, onEvaluate, isEv
         )}
       </div>
 
-      {/* Evaluated indicator */}
-      {job.isEvaluated && (
-        <div className="absolute top-3 right-3">
-          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-        </div>
-      )}
     </GlassCard>
   );
 };

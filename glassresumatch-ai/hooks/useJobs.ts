@@ -12,6 +12,11 @@ const ITEMS_PER_PAGE = 20;
 
 interface UseJobsResult {
     jobs: JobWithEvaluation[];
+    /** Unactioned jobs — filter pills apply to this partition */
+    activeJobs: JobWithEvaluation[];
+    /** Jobs the user has applied to — always rendered below, dimmed */
+    actionedJobs: JobWithEvaluation[];
+    markActioned: (id: string) => void;
     stats: EvaluationStats | null;
     totalJobs: number;
     loading: boolean;
@@ -27,6 +32,7 @@ interface UseJobsResult {
 
 export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResult {
     const [jobs, setJobs] = useState<JobWithEvaluation[]>([]);
+    const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
     const [stats, setStats] = useState<EvaluationStats | null>(null);
     const [totalJobs, setTotalJobs] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -135,8 +141,20 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         load(1, silent, true);
     }, [load]);
 
+    const markActioned = useCallback((id: string) => {
+        setActionedIds(prev => new Set([...prev, id]));
+    }, []);
+
+    // Partition: filter pills (server-side) apply to unactioned jobs only.
+    // Actioned jobs are always surfaced separately for the dimmed-below section.
+    const activeJobs = jobs.filter(j => !actionedIds.has(j.id));
+    const actionedJobs = jobs.filter(j => actionedIds.has(j.id));
+
     return {
         jobs,
+        activeJobs,
+        actionedJobs,
+        markActioned,
         stats,
         totalJobs,
         loading,

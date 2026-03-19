@@ -67,12 +67,37 @@ Match resource names: `getJobs()`, `getJob(id)`, `evaluateJob(id)`, `tailorResum
 `deleteJobs(ids)`. Pattern: `getX()`, `postX()`, `deleteX()`.
 
 OotoCV methods added: `getResumeChanges(resumeId)`, `applyChangeAction(resumeId, changeId, action)`,
-`applyBulkChangeAction(resumeId, action, scope)`, `updateCoverLetter(resumeId, coverLetter)`.
+`applyBulkChangeAction(resumeId, action, scope)`, `updateCoverLetter(resumeId, coverLetter)`,
+`patchJobAction(jobId, cvVersion: 'base' | 'tailored')` — PATCH `/api/jobs/:id/action`, fire-and-forget
+to record which CV version the user applied with (called from JobCard quick action).
 
 ## Feed sort rule (OotoCV)
 
 Within equal `matchScore`, APPLY DIRECT (`recommended_action === 'apply'`) sorts before TAILOR.
 Implemented in `utils/sort.ts` smart sort tier. Less friction = more urgent.
+
+## JobCard quick actions (OotoCV phase 2)
+
+`JobCard.tsx` carries a permanent `⋯` (`MoreHorizontal`) icon at `opacity-30` on the card's
+top-right, always discoverable. On desktop hover (`group-hover`): icon goes full opacity and the
+apply button slides in via `translate-x` + `opacity` transition. On touch: tapping `⋯` toggles
+`showActions` local state, revealing buttons inline (no hover required).
+
+Apply button copy is conditional on `Job.tailoring_status`:
+- `'ready'` → `"Apply with tailored CV →"` (`cv_version: 'tailored'`)
+- anything else → `"Apply with base CV →"` (`cv_version: 'base'`)
+
+Clicking the button: opens `job_url` in a new tab + calls `onAction(jobId, cvVersion)` (passed as
+prop). The parent wires `onAction` to `markActioned` + `patchJobAction`.
+
+## useJobs actioned partitioning (OotoCV phase 2)
+
+`useJobs.ts` tracks `actionedIds: Set<string>` and exposes:
+- `markActioned(id)` — call when user clicks Apply in JobCard
+- `activeJobs` — jobs not yet actioned; server-side filter pills apply to this partition
+- `actionedJobs` — actioned jobs; render below filtered results, dimmed
+
+The raw `jobs` array (all loaded) is also still returned for backwards compatibility.
 
 ## Browser history / view mode sync
 

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { GlassCard } from './GlassCard';
 import { X, Zap, Loader2, CheckCircle, Building2 } from 'lucide-react';
-import { startBatchEvaluation, getTaskStatus } from '../services/jobService';
+import { startBatchEvaluation } from '../services/jobService';
 import { TaskStatus } from '../services/apiClient';
+import { useSSE } from '../hooks/useSSE';
 
 interface BatchEvaluateProps {
     isOpen: boolean;
@@ -18,33 +19,38 @@ export const BatchEvaluate: React.FC<BatchEvaluateProps> = ({ isOpen, onClose, o
     const [taskId, setTaskId] = useState<string | null>(null);
     const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
 
-    // Poll task status
-    useEffect(() => {
-        if (!taskId || !isRunning) return;
-
-        const pollInterval = setInterval(async () => {
-            try {
-                const status = await getTaskStatus(taskId);
-                setTaskStatus(status);
-
-                if (status.status === 'completed' || status.status === 'failed') {
-                    setIsRunning(false);
-                    if (status.status === 'completed') {
-                        setTimeout(() => {
-                            setTaskId(null);
-                            setTaskStatus(null);
-                            onComplete();
-                            onClose();
-                        }, 1500);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to get task status:', error);
+    // SSE — replaces setInterval polling (ADR-0009)
+    useSSE(isRunning ? taskId : null, {
+        onProgress: (event) => {
+            setTaskStatus({
+                task_id: event.task_id,
+                status: event.status,
+                progress: event.progress ?? null,
+                created_at: null,
+                completed_at: null,
+                error: null,
+            });
+        },
+        onRunComplete: (event) => {
+            setIsRunning(false);
+            setTaskStatus({
+                task_id: event.task_id,
+                status: event.status,
+                progress: event.progress ?? null,
+                created_at: null,
+                completed_at: null,
+                error: event.error ?? null,
+            });
+            if (event.status === 'completed') {
+                setTimeout(() => {
+                    setTaskId(null);
+                    setTaskStatus(null);
+                    onComplete();
+                    onClose();
+                }, 1500);
             }
-        }, 2000);
-
-        return () => clearInterval(pollInterval);
-    }, [taskId, isRunning, onComplete]);
+        },
+    });
 
     const handleClose = () => {
         if (!isRunning) {

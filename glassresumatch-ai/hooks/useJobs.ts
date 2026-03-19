@@ -17,6 +17,8 @@ interface UseJobsResult {
     /** Jobs the user has applied to — always rendered below, dimmed */
     actionedJobs: JobWithEvaluation[];
     markActioned: (id: string) => void;
+    /** Undo markActioned — call on API failure to roll back optimistic update */
+    unmarkActioned: (id: string) => void;
     stats: EvaluationStats | null;
     totalJobs: number;
     loading: boolean;
@@ -145,6 +147,14 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         setActionedIds(prev => new Set([...prev, id]));
     }, []);
 
+    const unmarkActioned = useCallback((id: string) => {
+        setActionedIds(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+        });
+    }, []);
+
     // Partition: filter pills (server-side) apply to unactioned jobs only.
     // Actioned jobs are always surfaced separately for the dimmed-below section.
     const activeJobs = jobs.filter(j => !actionedIds.has(j.id));
@@ -155,6 +165,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         activeJobs,
         actionedJobs,
         markActioned,
+        unmarkActioned,
         stats,
         totalJobs,
         loading,

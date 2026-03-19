@@ -121,6 +121,8 @@ export const TailoringReview: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
   const [approving, setApproving] = useState(false);
+  const [gdocExported, setGdocExported] = useState(false);
+  const [reexporting, setReexporting] = useState(false);
   const approveRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -181,13 +183,32 @@ export const TailoringReview: React.FC = () => {
       // Export to Google Docs
       try {
         const result = await apiClient.exportToGoogleDocs(resume.job_id);
-        if (result.url) {
-          window.open(result.url, '_blank');
+        if (result.status === 'success') {
+          if (result.url) window.open(result.url, '_blank');
+        } else if (result.status === 'partial') {
+          const skipped = result.summary?.skipped ?? 0;
+          const total = result.summary?.total ?? 0;
+          setToast({
+            message: `Exported with ${skipped} of ${total} changes skipped. Check the document.`,
+            type: 'error',
+          });
+          if (result.url) window.open(result.url, '_blank');
+        } else if (result.status === 'failed') {
+          const reasons = result.skipped_fields?.map(f => f.reason).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'unknown';
+          setToast({
+            message: `Export failed — no changes could be applied (${reasons}). Try re-exporting.`,
+            type: 'error',
+          });
+        } else if (result.status === 'no_changes') {
+          setToast({ message: 'No differences found between base and tailored resume.', type: 'error' });
+          if (result.url) window.open(result.url, '_blank');
         }
+        setGdocExported(true);
       } catch (err: any) {
         // Non-fatal — approve succeeded, GDoc export is best-effort
         const detail = err?.detail || err?.message || 'Unknown error';
         setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
+        setGdocExported(true);
       }
 
       // Record application in tracker
@@ -230,6 +251,36 @@ export const TailoringReview: React.FC = () => {
       setToast({ message: 'Failed to save cover letter.', type: 'error' });
     }
   }, [id, coverLetter]);
+
+  const handleReexport = useCallback(async () => {
+    if (!resume || reexporting) return;
+    setReexporting(true);
+    try {
+      const result = await apiClient.exportToGoogleDocs(resume.job_id);
+      if (result.status === 'success') {
+        setToast({ message: 'Re-exported successfully.', type: 'success' });
+        if (result.url) window.open(result.url, '_blank');
+      } else if (result.status === 'partial') {
+        const skipped = result.summary?.skipped ?? 0;
+        const total = result.summary?.total ?? 0;
+        setToast({
+          message: `Re-exported with ${skipped} of ${total} changes skipped.`,
+          type: 'error',
+        });
+        if (result.url) window.open(result.url, '_blank');
+      } else if (result.status === 'failed') {
+        setToast({ message: 'Re-export failed — no changes could be applied.', type: 'error' });
+      } else {
+        setToast({ message: 'No differences found.', type: 'error' });
+        if (result.url) window.open(result.url, '_blank');
+      }
+    } catch (err: any) {
+      const detail = err?.detail || err?.message || 'Unknown error';
+      setToast({ message: `Re-export failed: ${detail}`, type: 'error' });
+    } finally {
+      setReexporting(false);
+    }
+  }, [resume, reexporting]);
 
   const accepted = changes.filter(c => c.review_action === 'accept').length;
   const rejected = changes.filter(c => c.review_action === 'reject').length;
@@ -304,6 +355,19 @@ export const TailoringReview: React.FC = () => {
         >
           Skip
         </button>
+
+        {gdocExported && (
+          <button
+            onClick={handleReexport}
+            disabled={reexporting}
+            className={cn(
+              'text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer',
+              reexporting && 'opacity-50 cursor-not-allowed',
+            )}
+          >
+            {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
+          </button>
+        )}
 
         <button
           ref={approveRef}

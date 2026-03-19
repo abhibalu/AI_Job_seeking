@@ -205,7 +205,13 @@ class ApiClient {
     }
 
     async exportToGoogleDocs(jobId: string) {
-        return this.request<{ status: string; url: string }>(`/api/resumes/export-gdoc/${jobId}`, {
+        return this.request<{
+            status: 'success' | 'partial' | 'failed' | 'no_changes';
+            url: string;
+            path: 'copy_and_fill' | 'plain_text';
+            summary?: { total: number; applied: number; skipped: number };
+            skipped_fields?: { section: string; reason: string }[];
+        }>(`/api/resumes/export-gdoc/${jobId}`, {
             method: 'POST',
         });
     }

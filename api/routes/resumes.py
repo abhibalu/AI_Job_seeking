@@ -544,7 +544,13 @@ def save_cover_letter(resume_id: str, body: dict):
 
 @router.post("/export-gdoc/{job_id}")
 async def export_to_google_docs(job_id: str):
-    """Export the latest tailored resume for a job to a Google Doc."""
+    """Export the latest tailored resume for a job to a Google Doc.
+
+    Returns structured ExportResultResponse with per-field tracking:
+    - status: success | partial | failed | no_changes
+    - summary: total/applied/skipped counts
+    - skipped_fields: list of sections that couldn't be applied with reasons
+    """
     try:
         from services.google_docs import create_tailored_resume_doc
 
@@ -578,8 +584,8 @@ async def export_to_google_docs(job_id: str):
             base_content = master_row.get("content", master_row)
             base_resume_data = _to_frontend_format(base_content)
 
-        # 5. Generate Google Doc
-        doc_url = await run_in_threadpool(
+        # 5. Generate Google Doc (returns ExportResult with per-field tracking)
+        export_result = await run_in_threadpool(
             create_tailored_resume_doc,
             job_title=job_title,
             company=company,
@@ -592,11 +598,20 @@ async def export_to_google_docs(job_id: str):
         # 6. Persist GDoc URL on the resume record
         from agents.database import update_gdoc_url
         resume_id = latest_version.get("id")
-        if resume_id and doc_url:
-            update_gdoc_url(resume_id, doc_url)
+        if resume_id and export_result.doc_url:
+            update_gdoc_url(resume_id, export_result.doc_url)
 
-        return {"status": "success", "url": doc_url}
+        # 7. Build structured response
+        response = {
+            "status": export_result.status,
+            "url": export_result.doc_url,
+            "path": export_result.path,
+        }
+        if export_result.fields:
+            response["summary"] = export_result.summary
+            response["skipped_fields"] = export_result.skipped_fields
+        return response
 
     except Exception as e:
-        logger.error(f"Failed to export Google Doc: {str(e)}")
+        logger.exception("Failed to export Google Doc")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")

@@ -252,3 +252,23 @@ class SystemConfigItem(BaseModel):
 class CronConfigRequest(BaseModel):
     cron_time: str          # HH:MM
     cron_tz: str            # IANA timezone (e.g. "Europe/Dublin")
+
+
+# OotoCV: GDoc export result schema (Layer 4)
+class ExportSkippedField(BaseModel):
+    section: str
+    reason: str
+
+
+class ExportResultSummary(BaseModel):
+    total: int
+    applied: int
+    skipped: int
+
+
+class ExportResultResponse(BaseModel):
+    status: Literal['success', 'partial', 'failed', 'no_changes']
+    url: str
+    path: Literal['copy_and_fill', 'plain_text']
+    summary: ExportResultSummary | None = None
+    skipped_fields: list[ExportSkippedField] | None = None

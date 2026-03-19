@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     ExternalLink, MapPin, Clock, Loader2,
-    Wand2, FileText, Sparkles, RefreshCw, CheckCircle
+    Wand2, FileText, Sparkles, RefreshCw, CheckCircle, ArrowLeft
 } from 'lucide-react';
-import { Evaluation, TailoredResume, apiClient } from '../services/apiClient';
+import { Evaluation, TailoredResume, Application, apiClient } from '../services/apiClient';
 import { evaluateJob } from '../services/jobService';
 import { JobWithEvaluation } from '../services/jobService';
 import { TailorReview } from './TailorReview';
@@ -26,6 +26,11 @@ interface JobDetailViewProps {
     tailoringJobId?: string | null;
     onTailorStart?: (jobId: string) => void;
     onTailorEnd?: () => void;
+    /** When true: read-only "what you sent" mode — auto-opens TailorReview, hides all action CTAs */
+    sentMode?: boolean;
+    /** The application record (for cv_version + applied_at) when sentMode=true */
+    sentApplication?: Application;
+    onBack?: () => void;
 }
 
 // ─── Wit lines ────────────────────────────────────────────────────────────────
@@ -493,7 +498,8 @@ const DynamicSection: React.FC<DynamicSectionProps> = ({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export const JobDetailView: React.FC<JobDetailViewProps> = ({
-    job, onEvaluate, tailoringJobId, onTailorStart, onTailorEnd
+    job, onEvaluate, tailoringJobId, onTailorStart, onTailorEnd,
+    sentMode = false, sentApplication, onBack,
 }) => {
     const [isReEvaluating, setIsReEvaluating] = useState(false);
     const [isGeneratingResume, setIsGeneratingResume] = useState(false);
@@ -574,6 +580,8 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({
                     setHasGeneratedResume(true);
                     const base = await apiClient.getMasterResume();
                     setBaseResume(base);
+                    // sentMode: auto-open the review so user sees what was sent
+                    if (sentMode) setIsReviewOpen(true);
                 }
             } catch {
                 // No existing tailored resume
@@ -657,6 +665,34 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({
 
     return (
         <div className="h-full flex flex-col bg-white">
+            {/* sentMode: "What you sent" banner */}
+            {sentMode && (
+                <div className="flex items-center gap-3 px-6 py-3 bg-slate-50 border-b border-slate-100 flex-shrink-0">
+                    {onBack && (
+                        <button onClick={onBack} className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors">
+                            <ArrowLeft className="w-4 h-4 text-slate-500" />
+                        </button>
+                    )}
+                    <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-medium text-slate-700">
+                            What you sent
+                            {sentApplication && (
+                                <span className={`ml-2 text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                                    sentApplication.cv_version === 'tailored'
+                                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                                }`}>
+                                    {sentApplication.cv_version === 'tailored' ? 'tailored CV' : 'base CV'}
+                                </span>
+                            )}
+                        </p>
+                        {sentApplication?.applied_at && (
+                            <p className="text-[11px] text-slate-400">Applied {formatTimeAgo(sentApplication.applied_at)}</p>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {isReviewOpen && tailoredResume && baseResume && evaluation && (
                 <TailorReview
                     baseResume={baseResume}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Plus, BarChart3, Zap, FileText, Briefcase } from 'lucide-react';
+import { Sparkles, Plus, BarChart3, Zap, FileText, Briefcase, ClipboardList } from 'lucide-react';
 import { ViewMode } from '../types';
 
 interface HeaderProps {
@@ -54,6 +54,16 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <FileText className="w-4 h-4 mr-2" />
               My Resume
+            </button>
+            <button
+              onClick={() => onViewModeChange('tracker')}
+              className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${viewMode === 'tracker'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              <ClipboardList className="w-4 h-4 mr-2" />
+              Tracker
             </button>
           </div>
 

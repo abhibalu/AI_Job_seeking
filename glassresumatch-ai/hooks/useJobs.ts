@@ -46,7 +46,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
     const requestId = useRef(0);
 
     const fetchPage = useCallback(async (page: number) => {
-        if (viewMode === 'resume') return { jobs: [] as JobWithEvaluation[], total: 0, stats: null };
+        if (viewMode === 'resume' || viewMode === 'tracker') return { jobs: [] as JobWithEvaluation[], total: 0, stats: null };
 
         const statsResult = await getEvaluationStats().catch(() => null);
 
@@ -123,7 +123,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
 
     // Reset and reload on filter/view change
     useEffect(() => {
-        if (viewMode === 'resume') return;
+        if (viewMode === 'resume' || viewMode === 'tracker') return;
         setCurrentPage(1);
         setJobs([]);
         setTotalJobs(0); // reset so hasMore goes false→true, re-triggering the scroll observer

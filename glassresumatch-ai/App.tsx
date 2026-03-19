@@ -15,6 +15,9 @@ import { ResumePreview } from './components/ResumePreview';
 import { BatchEvaluate } from './components/BatchEvaluate';
 import { GlassCard } from './components/GlassCard';
 import { Editor } from './components/Editor';
+import { ApplicationTracker } from './components/ApplicationTracker';
+import { Onboarding } from './components/Onboarding';
+import { Application } from './services/apiClient';
 import {
   Loader2,
   Sparkles,
@@ -75,6 +78,14 @@ const App: React.FC = () => {
 
   // Lifted state for Resume Tailoring
   const [tailoringJobId, setTailoringJobId] = useState<string | null>(null);
+
+  // Onboarding gate: show if user hasn't completed onboarding
+  const [showOnboarding, setShowOnboarding] = useState(
+    !localStorage.getItem('onboarding_complete')
+  );
+
+  // Tracker "view what you sent" mode
+  const [sentApplication, setSentApplication] = useState<Application | null>(null);
 
   // App-level toast (for import/analysis flows)
   const [appToast, setAppToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
@@ -228,6 +239,18 @@ const App: React.FC = () => {
     }
   };
 
+  // Handle "View what you sent" from tracker
+  const handleViewSent = (app: Application) => {
+    setSentApplication(app);
+    setSelectedJobId(app.job_id);
+    setViewMode('all'); // switch to jobs view to render JobDetailView
+  };
+
+  const handleBackFromSent = () => {
+    setSentApplication(null);
+    setViewMode('tracker');
+  };
+
   const selectedJob = jobs.find(j => j.id === selectedJobId) || null;
 
   const templatesList: { id: TemplateType, label: string, desc: string }[] = [
@@ -291,7 +314,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {viewMode === 'resume' ? (
+        {viewMode === 'tracker' ? (
+          <ApplicationTracker onViewSent={handleViewSent} />
+        ) : viewMode === 'resume' ? (
           <div>
             {/* Resume Toolbar */}
             <div className="mb-8 animate-in slide-in-from-top-2 relative z-40 print:hidden">
@@ -327,7 +352,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
                   <input
                     type="file"
-                    accept=".pdf"
+                    accept=".pdf,.docx"
                     ref={fileInputRef}
                     className="hidden"
                     onChange={handleFileUpload}
@@ -343,7 +368,7 @@ const App: React.FC = () => {
                     ) : (
                       <Upload size={18} />
                     )}
-                    <span>{isUploading ? 'Parsing...' : 'Upload PDF'}</span>
+                    <span>{isUploading ? 'Parsing...' : 'Upload PDF / DOCX'}</span>
                   </button>
 
                   <button
@@ -502,6 +527,9 @@ const App: React.FC = () => {
                   tailoringJobId={tailoringJobId}
                   onTailorStart={setTailoringJobId}
                   onTailorEnd={() => setTailoringJobId(null)}
+                  sentMode={!!sentApplication && sentApplication.job_id === selectedJob?.id}
+                  sentApplication={sentApplication ?? undefined}
+                  onBack={sentApplication ? handleBackFromSent : undefined}
                 />
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400">
@@ -645,6 +673,10 @@ const App: React.FC = () => {
           type={appToast.type}
           onDismiss={() => setAppToast(null)}
         />
+      )}
+
+      {showOnboarding && (
+        <Onboarding onComplete={() => setShowOnboarding(false)} />
       )}
     </div>
   );

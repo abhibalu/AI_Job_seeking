@@ -262,6 +262,35 @@ class ApiClient {
             body: JSON.stringify({ cover_letter: coverLetter }),
         });
     }
+
+    // OotoCV: Application tracker (phase 5)
+    async getApplications() {
+        return this.request<Application[]>('/api/applications');
+    }
+
+    async createApplication(
+        jobId: string,
+        cvVersion: 'base' | 'tailored',
+        opts?: { jobTitle?: string; companyName?: string; resumeId?: string }
+    ) {
+        return this.request<Application>('/api/applications', {
+            method: 'POST',
+            body: JSON.stringify({
+                job_id: jobId,
+                cv_version: cvVersion,
+                job_title: opts?.jobTitle,
+                company_name: opts?.companyName,
+                resume_id: opts?.resumeId,
+            }),
+        });
+    }
+
+    async updateApplicationStatus(applicationId: string, status: Application['status']) {
+        return this.request<Application>(`/api/applications/${applicationId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status }),
+        });
+    }
 }
 
 // Types matching backend schemas
@@ -405,6 +434,19 @@ export interface MessageResponse {
     message: string;
     job_id?: string;
     task_id?: string;
+}
+
+// OotoCV: Application tracker (phase 5)
+export interface Application {
+    id: string;
+    job_id: string;
+    job_title: string | null;
+    company_name: string | null;
+    resume_id: string | null;
+    cv_version: 'base' | 'tailored';
+    status: 'applied' | 'replied' | 'interview' | 'rejected' | 'ghosting';
+    status_history: Array<{ status: string; timestamp: string }>;
+    applied_at: string;
 }
 
 // Export singleton instance

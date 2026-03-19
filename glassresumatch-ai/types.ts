@@ -13,12 +13,13 @@ export {
   type ResumeChange,
   type TaskStatus,
   type MessageResponse,
+  type Application,
 } from './services/apiClient';
 
 export { type JobWithEvaluation } from './services/jobService';
 
 // View mode for the app
-export type ViewMode = 'all' | 'evaluated' | 'pending' | 'resume';
+export type ViewMode = 'all' | 'evaluated' | 'pending' | 'resume' | 'tracker';
 
 // Template Type
 export type TemplateType = 'modern' | 'classic' | 'compact' | 'tech' | 'minimal' | 'ats_friendly';

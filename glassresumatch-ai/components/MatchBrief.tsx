@@ -135,12 +135,18 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
 
       {/* Expand toggle */}
       {hiddenCount > 0 && !expanded && (
-        <button
+        <motion.button
           onClick={() => setExpanded(true)}
-          className="text-[9px] font-mono text-gray-600 hover:text-gray-400 mt-1 cursor-pointer"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="group flex items-center gap-1.5 text-[9px] font-mono text-gray-500 mt-2 px-3 py-1.5 rounded-md border border-dashed border-white/8 hover:border-accent/30 hover:text-accent transition-colors duration-200 cursor-pointer"
         >
-          +{hiddenCount} more
-        </button>
+          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/5 group-hover:bg-accent/10 text-[8px] font-bold transition-colors duration-200">
+            +{hiddenCount}
+          </span>
+          more insights
+        </motion.button>
       )}
     </div>
   );

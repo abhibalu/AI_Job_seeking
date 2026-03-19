@@ -196,3 +196,135 @@ save_status = "needs_review" if is_force_save else "pending"
 ```
 
 **Propagated to**: `agents/CLAUDE.md` (resume status semantics section)
+
+---
+
+## 9. Misleading section heading in JobDetail
+**Source**: 2026-03-19
+
+**Mistake**: `JobDetail.tsx` section titled "What you'd actually do" displayed `resume_edits` from
+the evaluation (AI suggestions for CV improvements). Users expected job responsibilities, not
+resume tailoring tips. The mismatch caused confusion about what data was shown.
+
+**Correct pattern**: Match heading to actual data source. Use "How to strengthen your CV" for
+`resume_edits`. Track as separate follow-up: add `responsibilities` field to `ParseResult` schema
+(requires agent prompt + migration) to restore "What you'd actually do" with real job duties.
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 10. Duplicate skip buttons on borderline verdict
+**Source**: 2026-03-19
+
+**Mistake**: `JobDetail.tsx` rendered a generic "Skip" button in the CTA footer for all verdicts,
+plus a contextual "Skip This One" button in the borderline verdict section. Users saw two skip
+buttons, creating confusion about which one to click and duplicating UI real estate.
+
+**Correct pattern**: Conditional render the generic skip button: show only when `verdict !== 'borderline'`.
+The borderline section has its own "Skip This One" + "Tailor Anyway" pair. This unambiguously
+separates decision patterns: other verdicts get single-CTA footer, borderline gets side-by-side choice.
+
+```tsx
+{verdict !== 'borderline' && (<button>Skip</button>)}
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 11. No feedback after CTA clicks
+**Source**: 2026-03-19
+
+**Mistake**: `JobDetail.tsx` CTAs (`handleTailor`, `onAction`) had no loading states. Clicking
+"Tailor & Approve" or "Apply Direct" appeared to do nothing — especially problematic on slow networks.
+
+**Correct pattern**: Track action state (`actionInFlight: 'tailor' | 'apply' | null`). All buttons show
+loading copy ("Tailoring…", "Applying…"), disable (`disabled={!!actionInFlight}`), and visually fade
+(`opacity-50 cursor-not-allowed`). For async handlers, set before call, clear in finally.
+For fire-and-forget (e.g., `onAction` opens a new tab), set before and clear via timeout (~1.5s).
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 12. Typewriter animation replays on remount
+**Source**: 2026-03-19
+
+**Mistake**: `VerdictTypewriter.tsx` used `useRef<Set<string>>(new Set())` inside the component.
+On remount (navigating away and back to the same job), the ref was recreated, losing the previous
+`seenVerdicts` set. Result: typewriter animated every time the user viewed the job, no caching.
+
+**Correct pattern**: Move replay tracking outside the component to module scope. Use a module-level
+`seenVerdicts: Set<string>` so state persists across unmounts and remounts.
+
+```ts
+// Module scope — survives component lifecycle
+const seenVerdicts = new Set<string>();
+
+const VerdictTypewriter: React.FC<{...}> = ({ text, jobId }) => {
+    if (seenVerdicts.has(jobId)) {
+        // Skip animation, show full text immediately
+        setDisplayed(text);
+        setDone(true);
+        return;
+    }
+    // Animate, then add jobId to seenVerdicts when done
+};
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 13. Red flags filter almost always empty
+**Source**: 2026-03-19
+
+**Mistake**: `JobDetail.tsx` filtered `evaluation.gaps.technical` by string matching `'red flag'` or
+`'concern'`. But the evaluation agent rarely includes these exact strings — they're incidental in prose,
+not formatted as structured red flags. Result: section almost always empty, even when gaps existed.
+
+**Correct pattern**: Show all technical gaps without filtering. Rename section from "Red Flags" (too
+dramatic) to "Gaps to watch" (accurate, lower-stakes). Use amber styling instead of red to signal
+"warnings" not "blockers."
+
+```ts
+const technicalGaps = evaluation.gaps?.technical || [];
+// Show all, no string filter
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 14. CompanyIntel duplication
+**Source**: 2026-03-19
+
+**Mistake**: `JobDetail.tsx` rendered a `CompanyIntel` component showing company name, location, posted
+date. All three fields were already visible in the hero section at the top of the page. The duplication
+wasted vertical space and violated the single-source-of-truth principle.
+
+**Correct pattern**: Delete the `CompanyIntel` component entirely. Relocate the unique summary data
+(`eval_.summary`) into the verdict block instead, guarded against duplication with the `wit_line`.
+This preserves the summary insight while eliminating redundancy.
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 15. CVDiff silent failure (swallowed errors)
+**Source**: 2026-03-19
+
+**Mistake**: `JobDetail.tsx` fetched resume changes with `.catch(() => {})`, swallowing all errors.
+The UI showed nothing — no loading indicator, no error message. Users didn't know if the data was
+still loading, failed to fetch, or simply absent.
+
+**Correct pattern**: Implement explicit loading and error states. Add `changesLoading` and
+`changesError` state. Update useEffect to set/clear loading, and set error on catch. Pass both
+to `CVDiff` component, which renders appropriate UI:
+- Loading: "Loading changes…" with animate-pulse
+- Error: "Couldn't load changes" in red
+- Empty: nothing
+- Data: full diff list
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`

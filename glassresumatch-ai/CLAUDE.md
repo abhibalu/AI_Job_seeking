@@ -71,6 +71,21 @@ OotoCV methods added: `getResumeChanges(resumeId)`, `applyChangeAction(resumeId,
 `patchJobAction(jobId, cvVersion: 'base' | 'tailored')` — PATCH `/api/jobs/:id/action`, fire-and-forget
 to record which CV version the user applied with (called from JobCard quick action).
 
+`getSchedulerStatus()` — `GET /api/scheduler`, returns `SchedulerStatus` with `scheduler_running: bool`,
+`last_runs: Record<string, PipelineRun>`, `jobs: Array<{name, next_run_utc}>`. Used by Sidebar to poll
+and display real cron/scraper status (active/sleeping/error).
+
+## Sidebar brand & scheduler status (OotoCV phase 5 polish)
+
+**Brand**: Sidebar logo text is "OotoCV" (not "TailorAI").
+
+**Cron status**: Sidebar footer polls `getSchedulerStatus()` every 60s. Derives state from response:
+- `scheduler_running || any run.status === 'running'` → `'active'` (green dot + pulse, message: "Running now…")
+- `any run.status === 'failed'` → `'error'` (red dot, message: "Last run failed", hover → "View logs →" → navigate `/settings`)
+- else → `'sleeping'` (amber dot, message: "Last run Xh ago", hover → next run time)
+
+Uses `formatTimeAgo(last_run.finished_at)` to display "Last run" time. Gracefully degrades if backend unavailable.
+
 ## Feed sort rule (OotoCV)
 
 Within equal `matchScore`, APPLY DIRECT (`recommended_action === 'apply'`) sorts before TAILOR.
@@ -164,6 +179,12 @@ Props: `threshold` (the new value 1–4), `onConfirm`, `onCancel`.
 Use `pushState` / `popstate` for view mode navigation (job list ↔ job detail ↔ tailor review).
 Avoids full page reloads. Implemented per ADR-0007.
 
+## Sidebar badge (actionable count)
+
+Sidebar Feed button shows a badge with count of jobs ready to action. **Source**: `stats.by_action['apply'] + stats.by_action['tailor']`
+(NOT derived from paginated `activeJobs` list). This ensures the badge reflects all unactioned jobs,
+not just loaded ones. See agent-lessons for this pattern.
+
 ## Job list tab navigation
 
 The sidebar job list uses a 3-tab strip (Apply now / Tailor first / Skip) that sets
@@ -246,6 +267,38 @@ Pass alongside `sentApplication?: Application` so the banner can show the applic
 - Progressive save: `onboarding_step` key written on step change so a refresh resumes at Step 1.
 - "Skip for now" link sets `onboarding_complete=true` without uploading (user uploads later via My Resume tab).
 - Gate in App.tsx: `useState(!localStorage.getItem('onboarding_complete'))`.
+
+## JobDetail component (OotoCV phase 5 polish)
+
+`JobDetail.tsx` displays a single job's evaluation, parsed JD, and tailored resume changes.
+
+**Verdict typewriter**: Uses module-scoped `seenVerdicts: Set<string>` (not useRef) to persist replay state
+across unmounts/remounts. When a job ID is already in the set, the typewriter skips animation and shows text immediately.
+
+**Action loading state**: `actionInFlight` state tracks which button is busy ('tailor' | 'apply' | null).
+All CTAs show loading text ("Tailoring…", "Applying…") and disable when in-flight.
+For `handleTailor` (async): set before call, clear in finally.
+For `handleApplyDirect`: set, call handler (opens tab), clear after ~1.5s timeout (parent is fire-and-forget).
+
+**CVDiff loading/error**: CVDiff component accepts optional `loading` and `error` props. Shows
+"Loading changes…" with animate-pulse when loading. Shows "Couldn't load changes" in red if error.
+Prevents silent failures from swallowed `.catch(() => {})` error handlers.
+
+**Section headings**: "How to strengthen your CV" (formerly "What you'd actually do") aligns with actual
+data source: `resume_edits` from evaluation, not job requirements. See agent-lessons #1.
+
+**Gaps to watch**: Renamed from "Red Flags" (was too dramatic) and changed from fragile string-filter
+(almost always empty) to show all `evaluation.gaps.technical[]` entries in amber styling.
+
+**Removed CompanyIntel**: Deleted component and all usages. Company/location/posted-at data was
+duplicated from hero section. Added `eval_.summary` inline in verdict block (guarded against duplication with reason).
+
+**Borderline hype copy**: Conditional message: if technical gaps exist, shows "Main gap: X. Tailoring can close it."
+Else: "Could go either way. Tailoring tips the odds."
+
+**Skip button dedup**: Hidden when verdict !== 'borderline' to prevent two skip buttons (borderline has its own contextual "Skip This One").
+
+**Apply Direct button**: Removed flex-1 width. Added subtitle span: "Opens posting in new tab" in smaller text.
 
 ## ViewMode tracker
 

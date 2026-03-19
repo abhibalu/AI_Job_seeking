@@ -291,6 +291,11 @@ class ApiClient {
             body: JSON.stringify({ status }),
         });
     }
+
+    // Scheduler status
+    async getSchedulerStatus() {
+        return this.request<SchedulerStatus>('/api/scheduler');
+    }
 }
 
 // Types matching backend schemas
@@ -447,6 +452,20 @@ export interface Application {
     status: 'applied' | 'replied' | 'interview' | 'rejected' | 'ghosting';
     status_history: Array<{ status: string; timestamp: string }>;
     applied_at: string;
+}
+
+// Scheduler types
+export interface PipelineRun {
+    status: 'running' | 'completed' | 'failed';
+    started_at: string | null;
+    finished_at: string | null;
+    error?: string | null;
+}
+
+export interface SchedulerStatus {
+    scheduler_running: boolean;
+    last_runs: Record<string, PipelineRun>;
+    jobs: Array<{ name: string; next_run_utc: string | null }>;
 }
 
 // Export singleton instance

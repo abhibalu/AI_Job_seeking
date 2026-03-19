@@ -64,15 +64,29 @@ Frontend polls `GET /api/tasks/{task_id}` to track progress.
 
 ## Key routes reference
 
-| Method | Path                            | Purpose                            |
-|--------|---------------------------------|------------------------------------|
-| GET/POST | `/api/jobs`                   | Job CRUD and search                |
-| GET    | `/api/evaluations`              | Evaluation results with filtering  |
-| GET/POST | `/api/resumes`                | Master resume management           |
-| POST   | `/api/resumes/tailor/{job_id}`  | Triggers tailoring subgraph        |
-| POST   | `/api/resumes/export-gdoc/{id}` | Export to Google Docs              |
-| GET    | `/api/tasks/{task_id}`          | Background task status polling     |
-| GET    | `/api/scheduler`                | Scheduler job status               |
+| Method | Path                                        | Purpose                                        |
+|--------|---------------------------------------------|------------------------------------------------|
+| GET/POST | `/api/jobs`                               | Job CRUD and search                            |
+| GET    | `/api/evaluations`                          | Evaluation results with filtering              |
+| GET/POST | `/api/resumes`                            | Master resume management                       |
+| POST   | `/api/resumes/tailor/{job_id}`              | Triggers tailoring subgraph                    |
+| POST   | `/api/resumes/export-gdoc/{id}`             | Export to Google Docs                          |
+| GET    | `/api/resumes/{resume_id}/changes`          | Per-change review records (OotoCV ADR-0010)    |
+| PATCH  | `/api/resumes/{resume_id}/changes/{id}`     | Accept / Reject / Keep original on one change  |
+| PATCH  | `/api/resumes/{resume_id}/changes/bulk`     | Bulk action on remaining or all changes        |
+| PATCH  | `/api/resumes/{resume_id}/cover_letter`     | Save user-edited cover letter (ADR-0011)       |
+| GET    | `/api/tasks/{task_id}`                      | Background task status polling                 |
+| GET    | `/api/scheduler`                            | Scheduler job status                           |
+
+## OotoCV schema additions (`api/schemas.py`)
+
+New schemas added for OotoCV Phase 1:
+- `ResumeChange` — per-change review record (fields: `original_text`, `tailored_text`, `accepted_text`, `review_action`, `confidence`)
+- `ResumeChangeActionRequest` — body for single-change PATCH (`action: accept | reject | keep_original`)
+- `ResumeChangeBulkActionRequest` — body for bulk PATCH (`action`, `scope: remaining | all`)
+- `SystemConfigItem` / `CronConfigRequest` — system config read/write
+
+`JobDetail` now includes `tailoring_status` and `cover_letter` fields.
 
 ## Environment variables for API
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — required for all DB operations

@@ -99,9 +99,40 @@ START → plan (ChangePlannerAgent)
 
 ## Resume status semantics
 
+Two orthogonal status fields on the `resumes` table:
+
+**`status`** — user review decision:
+- `master` = base resume row (not a tailored version)
 - `pending` = critic-approved (zero flaws). Safe to present to user.
 - `needs_review` = force-saved at max revisions (unresolved flaws). **Do not save as `pending`.**
   These become indistinguishable from approved resumes and human review is impossible.
+- `approved` / `rejected` = user has acted on the tailored resume.
+
+**`tailoring_status`** — OotoCV pipeline state (ADR-0010):
+- `not_started` → `processing` → `ready` (or `cancelled` / `needs_review`)
+- Set automatically by `save_tailored_resume()` based on the `status` value at save time.
+- Drives button copy and card verdict in the OotoCV feed UI.
+
+## resume_changes table (ADR-0010)
+
+Normalised per-change records written by `_save_resume_changes()` inside `save_tailored_resume()`.
+Each row = one planned edit from `edit_plan.edits[]`.
+
+Key fields: `original_text` (immutable pre-AI text from `current_text`), `tailored_text` (AI output from `target_text`), `accepted_text` (set by user action), `review_action` (`accept | reject | keep_original`).
+
+`keep_original` sets `accepted_text = original_text` immediately — no regeneration loop.
+
+Helper functions: `get_resume_changes(resume_id)`, `apply_change_action(change_id, action)`, `apply_bulk_change_action(resume_id, action, scope)`.
+
+## system_config table
+
+Key-value store for user-level settings. Keys: `cron_time` (HH:MM), `cron_tz` (IANA, e.g. `Europe/Dublin`), `auto_send_threshold` (integer 0–4).
+Functions: `get_system_config(key)`, `set_system_config(key, value)`.
+
+## DB migration idempotency rule
+
+Any INSERT that copies rows by primary key **must** include `ON CONFLICT (id) DO NOTHING`.
+Without it, re-running a partially-applied migration causes a duplicate key error that blocks all further runs. See agent-lessons #8.
 
 ## DB cleanup before persist
 

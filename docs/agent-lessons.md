@@ -161,6 +161,25 @@ useEffect(() => {
 
 ---
 
+## 8. Migration INSERT without ON CONFLICT is not idempotent
+
+**Source**: 2026-03-19
+
+**Mistake**: `003_consolidate_resumes.sql` ran `INSERT INTO resumes ... FROM tailored_resumes` without `ON CONFLICT DO NOTHING`. If the migration failed mid-run or was re-applied, rows already copied to `resumes` on the first pass caused a `duplicate key value violates unique constraint "resumes_pkey"` error, blocking all subsequent re-runs.
+
+**Correct pattern**: Any data migration INSERT that copies rows by primary key must include `ON CONFLICT (id) DO NOTHING` to make it idempotent and safe to re-run.
+
+```sql
+INSERT INTO resumes (id, ...)
+SELECT id::uuid, ...
+FROM tailored_resumes
+ON CONFLICT (id) DO NOTHING;
+```
+
+**Propagated to**: `agents/CLAUDE.md` (DB section)
+
+---
+
 ## 4. Force-saved resume status must differ from critic-approved
 **Source**: ADR-0004 (2025)
 

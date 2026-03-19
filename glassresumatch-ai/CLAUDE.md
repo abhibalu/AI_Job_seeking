@@ -27,7 +27,12 @@ glassresumatch-ai/
 
 All types live in `types.ts`. Add new types here — not inline in component files.
 Key types already defined: `Job`, `JobDetail`, `JobStats`, `Evaluation`, `EvaluationStats`,
-`ParseResult`, `TailoredResume`, `TaskStatus`, `MessageResponse`.
+`ParseResult`, `TailoredResume`, `ResumeChange`, `TaskStatus`, `MessageResponse`.
+
+`Job.tailoring_status` drives OotoCV button copy: `'not_started' | 'processing' | 'ready' | 'cancelled' | 'needs_review'`.
+`Job.posted_at` is a UTC ISO-8601 string — always pass through `formatTimeAgo()` at render time, never pre-format server-side.
+
+`ResumeChange` fields: `original_text` (immutable), `tailored_text` (AI output), `accepted_text` (user choice), `review_action`, `confidence` (sort ascending — lowest confidence first in review UI).
 
 ## apiClient.ts
 
@@ -60,6 +65,14 @@ Query params: `skip` (offset) and `limit`. Total count in `X-Total-Count` respon
 
 Match resource names: `getJobs()`, `getJob(id)`, `evaluateJob(id)`, `tailorResume(id)`,
 `deleteJobs(ids)`. Pattern: `getX()`, `postX()`, `deleteX()`.
+
+OotoCV methods added: `getResumeChanges(resumeId)`, `applyChangeAction(resumeId, changeId, action)`,
+`applyBulkChangeAction(resumeId, action, scope)`, `updateCoverLetter(resumeId, coverLetter)`.
+
+## Feed sort rule (OotoCV)
+
+Within equal `matchScore`, APPLY DIRECT (`recommended_action === 'apply'`) sorts before TAILOR.
+Implemented in `utils/sort.ts` smart sort tier. Less friction = more urgent.
 
 ## Browser history / view mode sync
 

@@ -213,6 +213,45 @@ useEffect(() => {
 ```
 See agent-lessons #7.
 
+## Application tracker (OotoCV phase 5)
+
+`ApplicationTracker.tsx` shows all recorded applications with timeline dots and inline status chips.
+
+- Fetches `GET /api/applications` on mount (newest first).
+- Each card: company initial, title, applied-at (via `formatTimeAgo`), `cv_version` badge,
+  timeline dots (`applied · replied · interview · rejected`), status-advance chips.
+- "View what you sent →" calls `onViewSent(app)` → App.tsx switches to jobs view with `sentMode=true`.
+- `updateApplicationStatus(id, status)` reads-appends-writes on the server (ADR-0013).
+
+`Application` type: `id, job_id, job_title, company_name, resume_id, cv_version, status, status_history, applied_at`.
+Exported from `apiClient.ts` and re-exported from `types.ts`.
+
+## JobDetailView sentMode (OotoCV phase 5)
+
+`sentMode?: boolean` prop on `JobDetailView`. When `true`:
+- Shows a "What you sent" banner above the sticky header with `cv_version` badge + `applied_at`.
+- Auto-opens `TailorReview` on mount if a tailored resume exists for the job.
+- `onBack` prop (optional) → back button navigates to tracker.
+- All normal CTAs remain visible but context shifts to "what was sent" framing.
+
+Pass alongside `sentApplication?: Application` so the banner can show the application details.
+
+## Onboarding (OotoCV phase 5)
+
+`Onboarding.tsx` is shown when `localStorage.getItem('onboarding_complete')` is `null`.
+
+- **Step 0**: Animated mock feed (3 mock job cards stagger-fade in with CSS delay). CTA: "Let's set it up →".
+- **Step 1**: File upload. `accept=".pdf,.docx"`. Polls `getMasterResume()` after upload; sets
+  `onboarding_complete=true` in localStorage when parsing finishes, then calls `onComplete`.
+- Progressive save: `onboarding_step` key written on step change so a refresh resumes at Step 1.
+- "Skip for now" link sets `onboarding_complete=true` without uploading (user uploads later via My Resume tab).
+- Gate in App.tsx: `useState(!localStorage.getItem('onboarding_complete'))`.
+
+## ViewMode tracker
+
+`ViewMode` includes `'tracker'`. `useJobs` returns empty for `tracker` (same early-return as `resume`).
+`Header.tsx` shows a Tracker tab (ClipboardList icon). App.tsx renders `<ApplicationTracker>` when active.
+
 ## Environment variables
 No `.env` file for frontend — base URL is hardcoded in `apiClient.ts`.
 Change `API_BASE_URL` constant if backend port changes.

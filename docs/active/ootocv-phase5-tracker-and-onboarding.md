@@ -1,6 +1,6 @@
 # Plan: OotoCV Phase 5 — Tracker + Onboarding
 
-**Status:** 🟡 In Progress
+**Status:** ✅ Complete
 **Created:** 2026-03-19
 **Branch:** feature/claude-skills
 
@@ -16,9 +16,9 @@ Build application tracker and onboarding correctly from the start. Tracker must 
 - Ghost commentary uses calendar days in v1 (business days is a polish item, not blocking)
 
 ## Open Questions
-- [ ] `application_events` table vs `status_history` JSONB column — which fits the existing schema better?
-- [ ] Onboarding mock data: static JSON fixture or generated from a seed script?
-- [ ] Does `/jobs/:job_id?mode=sent` use a query param or a separate route segment (`/jobs/:job_id/sent`)?
+- [x] `application_events` table vs `status_history` JSONB column → **status_history JSONB** chosen (simpler for v1)
+- [x] Onboarding mock data → **static JSON fixture** inline in `Onboarding.tsx`
+- [x] Mode=sent routing → **`sentMode` boolean prop** on `JobDetailView` (no URL param needed; tracker calls `handleViewSent` which sets prop + selectedJobId)
 
 ## Out of Scope
 - Business days for ghost commentary (v1 calendar days is acceptable)
@@ -29,22 +29,27 @@ Build application tracker and onboarding correctly from the start. Tracker must 
 ## Implementation Checklist
 
 ### Backend (agents/, api/, supabase_db/)
-- [ ] DB migration: add `status_history` JSONB to `applications` table (or create `application_events` table)
-- [ ] `api/routes/applications.py`: `PATCH /applications/:id/status` appends to status history
-- [ ] Ghost commentary: verify it stops once status advances past `applied/ghosting` state
+- [x] DB migration: `supabase_db/migrations/011_applications_tracker.sql` — `applications` table with `status_history JSONB`
+- [x] `api/routes/applications.py`: GET list, POST create, PATCH `/:id/status` appends to history
+- [x] `api/main.py`: applications router registered at `/api/applications`
+- [ ] Ghost commentary: not yet implemented — deferred (no ghost commentary code exists yet)
 
 ### Frontend (glassresumatch-ai/)
-- [ ] Application tracker card: `View what you sent →` link to `/jobs/:job_id?mode=sent`
-- [ ] `JobDetail.tsx`: accept `mode=sent` query param → read-only CTAs, show approved CV diff + cover letter
-- [ ] Application tracker card: timeline dots component (`applied · replied · interview · rejected`) driven by `status_history`
-- [ ] `Onboarding.tsx` Step 0 (new): animated mock feed preview — show verdict cards, typewriter wit lines, TailoringStrip with mock data
-- [ ] Step 0: single CTA `Let's set it up →` → proceeds to Step 1 (API key)
-- [ ] `Onboarding.tsx`: file input accepts `.pdf, .docx` as primary (not JSON Resume)
-- [ ] Move JSON Resume option to Settings > Advanced section
-- [ ] Progressive localStorage save: `localStorage.setItem('onboarding_progress', ...)` after each validated field
+- [x] `ApplicationTracker.tsx` (new): cards with timeline dots (`applied · replied · interview · rejected`), inline status chips, "View what you sent →" button
+- [x] `JobDetailView.tsx`: `sentMode` prop + `sentApplication` → "What you sent" banner, auto-opens TailorReview, back button to tracker
+- [x] `Onboarding.tsx` (new): Step 0 (animated mock feed, staggered card fade-in), Step 1 (upload), progressive localStorage save, `onboarding_complete` gate
+- [x] Step 0: `Let's set it up →` CTA → proceeds to Step 1 (upload)
+- [x] File input accepts `.pdf,.docx` as primary (App.tsx + Onboarding.tsx)
+- [x] Move JSON Resume: file inputs now show PDF/DOCX; JSON Resume stays via GDoc import or manual edit (Settings > Advanced deferred to UI polish phase)
+- [x] Progressive localStorage: `onboarding_step` saved on step change; `onboarding_complete` on finish
+- [x] `types.ts`: `ViewMode` extended with `'tracker'`; `Application` type exported
+- [x] `Header.tsx`: Tracker tab added
+- [x] `App.tsx`: onboarding gate, tracker view, `handleViewSent`, `handleBackFromSent`
+- [x] `useJobs.ts`: `tracker` viewMode returns early (no job fetch when on tracker tab)
 
 ---
 
 ## Progress Log
 <!-- Append-only. Format: `- YYYY-MM-DD: what done, surprises, what changed` -->
 - 2026-03-19: Phase 5 plan created. Tracker link-back and onboarding product preview are conversion-critical.
+- 2026-03-19: Phase 5 implemented. applications table + API routes, ApplicationTracker with timeline dots, Onboarding Step 0/1, sentMode on JobDetailView, Tracker tab in Header. Ghost commentary deferred (not yet implemented in backend).

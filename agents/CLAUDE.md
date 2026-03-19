@@ -124,6 +124,18 @@ Key fields: `original_text` (immutable pre-AI text from `current_text`), `tailor
 
 Helper functions: `get_resume_changes(resume_id)`, `apply_change_action(change_id, action)`, `apply_bulk_change_action(resume_id, action, scope)`.
 
+## applications table (OotoCV phase 5)
+
+Application tracker. Each row = one job the user applied to.
+
+Key fields: `job_id`, `job_title` + `company_name` (denormalized for display), `cv_version` (`base | tailored`),
+`status` (`applied | replied | interview | rejected | ghosting`), `status_history JSONB` (append-only
+`[{status, timestamp}]` log). See ADR-0013 for why JSONB was chosen over a separate events table.
+
+No backend agent writes to this table — rows are created by the API when the user clicks Apply.
+`PATCH /api/applications/:id/status` reads history, appends new entry, writes back (single-user,
+no concurrency concern).
+
 ## system_config table
 
 Key-value store for user-level settings. Keys: `cron_time` (HH:MM), `cron_tz` (IANA, e.g. `Europe/Dublin`), `auto_send_threshold` (integer 0–4).

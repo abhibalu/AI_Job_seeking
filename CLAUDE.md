@@ -58,4 +58,5 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 See `docs/agent-lessons.md` for recurring mistake patterns and fixes.
 
 ## Architecture decisions
-Recorded in `docs/decisions/`. ADR-0001 through ADR-0012 cover all major architectural shifts.
+Recorded in `docs/decisions/`. ADR-0001 through ADR-0013 cover all major architectural shifts.
+- ADR-0013: Application tracker uses `status_history JSONB` over a separate events table (single-user, bounded history, no join needed).

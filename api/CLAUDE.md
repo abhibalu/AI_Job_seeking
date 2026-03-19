@@ -90,6 +90,9 @@ by the main UI.
 | PATCH  | `/api/resumes/{resume_id}/cover_letter`     | Save user-edited cover letter (ADR-0011)       |
 | GET    | `/api/events/stream`                        | SSE progress stream for a task (ADR-0009)      |
 | GET    | `/api/tasks/{task_id}`                      | Background task status (non-SSE callers)       |
+| GET    | `/api/applications`                         | List applications (tracker), newest first      |
+| POST   | `/api/applications`                         | Record a new application (called on Apply)     |
+| PATCH  | `/api/applications/{id}/status`             | Update status, append to status_history        |
 | GET    | `/api/scheduler`                            | Scheduler job status                           |
 
 ## OotoCV schema additions (`api/schemas.py`)

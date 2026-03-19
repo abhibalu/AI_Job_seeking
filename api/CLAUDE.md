@@ -87,7 +87,7 @@ by the main UI.
 | GET    | `/api/evaluations`                          | Evaluation results with filtering              |
 | GET/POST | `/api/resumes`                            | Master resume management                       |
 | POST   | `/api/resumes/tailor/{job_id}`              | Background task: tailoring pipeline (returns `task_id`) |
-| POST   | `/api/resumes/export-gdoc/{id}`             | Export to Google Docs                          |
+| POST   | `/api/resumes/export-gdoc/{id}`             | Export to Google Docs (excludes master resumes)|
 | GET    | `/api/resumes/{resume_id}/changes`          | Per-change review records (OotoCV ADR-0010)    |
 | PATCH  | `/api/resumes/{resume_id}/changes/{id}`     | Accept / Reject / Keep original on one change  |
 | PATCH  | `/api/resumes/{resume_id}/changes/bulk`     | Bulk action on remaining or all changes        |

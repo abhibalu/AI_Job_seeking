@@ -194,6 +194,9 @@ catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 beside the dismiss `✕`. Use for any optimistic-update failure where the user should be able to
 retry the action in-place.
 
+**Error detail in toasts**: Never show generic "X failed" — always extract `err.message` (or
+`err.detail`) and include it so the user knows *why*. See agent-lessons #20.
+
 ## TailorReview (OotoCV phase 3)
 
 Split layout: 420px left panel (change list + cover letter) + `flex-1` resume preview right.

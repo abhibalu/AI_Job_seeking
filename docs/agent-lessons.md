@@ -395,6 +395,51 @@ const isEvaluatedFilter = viewMode === 'pending' ? false : true;
 
 ---
 
+## 19. Master resume leaks into GDoc export
+
+**Source**: 2026-03-19
+
+**Mistake**: `export_to_google_docs()` in `api/routes/resumes.py` called `get_tailored_resumes(job_id)`
+which returns ALL resume versions including `status='master'`. If the master had the highest version
+number, the export silently sent the un-tailored resume to Google Docs.
+
+**Correct pattern**: Filter out master before picking the latest version. Also guard against `content`
+being `None` (not just missing) — `.get("content", {})` returns `None` when the key exists with a null value.
+
+```python
+versions = [v for v in get_tailored_resumes(job_id) if v.get("status") != "master"]
+content = latest_version.get("content") or {}  # handles both missing and None
+```
+
+**Propagated to**: `api/CLAUDE.md`
+
+---
+
+## 20. OAuth refresh error swallowed as generic 500
+
+**Source**: 2026-03-19
+
+**Mistake**: `get_credentials()` in `services/google_docs.py` called `creds.refresh(Request())` with
+no error handling. When the refresh token was revoked, `RefreshError` propagated up to the route's
+generic `except Exception`, returning a 500 with no actionable detail. The frontend toast showed
+"Google Docs export failed" with no hint about re-authentication.
+
+**Correct pattern**: Catch refresh failures explicitly, delete the stale token file, and raise a
+`ValueError` with an actionable message. On the frontend, include server error detail in failure
+toasts — never discard `err.message`.
+
+```python
+try:
+    creds.refresh(Request())
+except Exception as e:
+    os.remove(TOKEN_FILE)
+    raise ValueError("Google OAuth token expired or revoked. Re-authenticate.") from e
+```
+
+**Propagated to**: `services/CLAUDE.md`, `glassresumatch-ai/CLAUDE.md`
+
+---
+
 ## 17. Synchronous tailoring endpoint wastes LLM credits on cancel
 
 **Source**: 2026-03-19

@@ -55,6 +55,11 @@ Source: `services/telegram_notifier.py`.
 Import: reuses `ResumeParserAgent` pipeline to parse raw GDoc text — no separate parsing logic.
 Export: formats tailored resume JSON back to GDoc and uploads to Drive.
 
+**OAuth error handling**: `get_credentials()` catches `RefreshError` when the cached token is
+expired/revoked. On failure it deletes `google-token.json` and raises `ValueError` with an
+actionable message. In server context, `run_local_server()` cannot open a browser — the user
+must re-authenticate manually (delete token, run OAuth flow from terminal).
+
 Env vars needed:
 - `GOOGLE_DRIVE_FOLDER_ID` — target Drive folder for exports
 - `BASE_RESUME` — document ID for the base resume GDoc import

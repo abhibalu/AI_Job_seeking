@@ -100,7 +100,7 @@ Uses the Google Docs API v1 to read document content.
 **Key Implementation Details:**
 - **Authentication:** Reuses existing OAuth2 flow via `get_credentials()`. Scopes already include `documents` and `drive`.
 - **Text Extraction:** Traverses `doc.body.content[].paragraph.elements[].textRun.content` and concatenates all text runs. Returns plain text (no formatting preserved — the LLM parser handles structure detection).
-- **Credential Caching:** Token cached in `google-token.json`, auto-refreshes on expiry.
+- **Credential Caching:** Token cached in `google-token.json`, auto-refreshes on expiry. If refresh fails (revoked/expired grant), `get_credentials()` deletes the stale token and raises `ValueError` — caller must re-authenticate via terminal OAuth flow.
 
 ### 2. Document ID Extraction (Frontend)
 The frontend extracts the document ID from a pasted URL using regex:

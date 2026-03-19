@@ -27,7 +27,17 @@ def get_credentials():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                logger.error(f"OAuth token refresh failed: {e}")
+                # Delete stale token so next call triggers re-auth
+                if os.path.exists(TOKEN_FILE):
+                    os.remove(TOKEN_FILE)
+                raise ValueError(
+                    "Google OAuth token has been expired or revoked. "
+                    "Delete google-token.json and re-authenticate."
+                ) from e
         else:
             if not os.path.exists(OAUTH_CREDENTIALS_FILE):
                 logger.error(f"OAuth credentials file not found: {OAUTH_CREDENTIALS_FILE}")

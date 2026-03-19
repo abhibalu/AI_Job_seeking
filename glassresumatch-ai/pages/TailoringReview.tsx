@@ -184,9 +184,10 @@ export const TailoringReview: React.FC = () => {
         if (result.url) {
           window.open(result.url, '_blank');
         }
-      } catch {
+      } catch (err: any) {
         // Non-fatal — approve succeeded, GDoc export is best-effort
-        setToast({ message: 'Approved, but Google Docs export failed.', type: 'error' });
+        const detail = err?.detail || err?.message || 'Unknown error';
+        setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
       }
 
       // Record application in tracker

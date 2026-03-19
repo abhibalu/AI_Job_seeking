@@ -544,13 +544,14 @@ async def export_to_google_docs(job_id: str):
     try:
         from services.google_docs import create_tailored_resume_doc
         
-        # 1. Fetch latest tailored resume for this job
-        versions = get_tailored_resumes(job_id)
+        # 1. Fetch latest tailored resume for this job (exclude master)
+        versions = [v for v in get_tailored_resumes(job_id) if v.get("status") != "master"]
         if not versions:
             raise HTTPException(status_code=404, detail="No tailored resume found to export")
-            
+
         latest_version = versions[0]
-        resume_data = _to_frontend_format(latest_version.get("content", {}))
+        content = latest_version.get("content") or {}
+        resume_data = _to_frontend_format(content)
         
         # 2. Get Job Details for the Doc Title
         eval_res = get_evaluation(job_id) or {}

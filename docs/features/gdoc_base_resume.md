@@ -62,10 +62,14 @@ Instead of treating the resume as a static file requiring a specialized editor, 
 #### Export Path
 
 1.  **The API Endpoint (`POST /api/resumes/export-gdoc/{job_id}`)**
-    - *Responsibility:* Fetch latest tailored resume, format it, create/update Google Doc.
+    - *Responsibility:* Fetch latest tailored resume, format it, create/update Google Doc, return
+      structured result with per-field tracking.
+    - *Returns:* `ExportResultResponse` with status (success/partial/failed/no_changes), URL, path,
+      summary (total/applied/skipped counts), and list of skipped fields with failure reasons.
 
 2.  **The Doc Builder (`services/google_docs.py`)**
     - *Responsibility:* Create Google Docs with formatted resume content in company subfolders.
+      Returns `ExportResult` with per-field tracking and verification status.
 
 ### Data Contracts
 
@@ -123,17 +127,44 @@ function extractGoogleDocId(input: string): string {
 Two export paths (selected via presence of `GOOGLE_BASE_RESUME_DOC_ID`):
 
 #### Path A: Copy-and-Fill (Formatting Preserved) — When `GOOGLE_BASE_RESUME_DOC_ID` is set
-- **Mechanism:** Copy the base resume GDoc into the company subfolder, then apply a two-phase update:
-  1. `replaceAllText` for changed strings (rewording existing content).
-  2. `insertText` for additions — new skills lines or extra experience bullets not present in the base (ADR-0018).
-- **Build Step:** `_build_gdoc_replacements(gdoc_paragraphs, base_data, tailored_data)` returns `(replacements, insertions)`. Replacements use GDoc paragraph text as match target (fuzzy word overlap). Insertions are detected when tailored data has more items than base data.
-- **Apply Step:** `_build_replace_requests(replacements)` converts to Docs API `replaceAllText` requests. Then `_apply_insertions()` re-reads doc structure for fresh indices and inserts `\n{new_text}` at the sibling paragraph's `endIndex - 1`, bottom-to-top. New paragraphs inherit the sibling's formatting.
-- **Safety Guards:**
-  - Skills format compatibility: if base uses structured categories (`"Category: kw, kw"`) but tailored uses bare keywords (`"Python"`), skills replacement is skipped to avoid destroying GDoc formatting.
-  - Apostrophe escaping: single quotes in folder/doc names are escaped in Drive API queries.
-- **Folder Structure:** `OtooCV / <Company Name> / <Resume Doc>`
-- **Replace Logic:** If a doc with the same title already exists, delete it and create a fresh copy to avoid stale content.
-- **Benefit:** Exported doc inherits all formatting from the base GDoc — fonts, styles, layout preserved.
+
+Three-stage pipeline with per-field tracking and verification (ADR-0018 + Lesson #18):
+
+**Stage 1 — Build & Pre-flight Gate:**
+- `_build_gdoc_replacements(gdoc_paragraphs, base_data, tailored_data)` returns `(replacements, insertions, field_results)`.
+  - Improved matching: normalize text (strip bullets, collapse whitespace, normalize smart quotes),
+    try exact prefix match (first 40 chars) before fuzzy overlap, consumed tracking (prevents
+    double-matching), threshold raised to 0.6 with 2x length guard.
+  - Each field tracked in `ExportFieldResult` with section path, action, status, and failure reason.
+- Pre-flight gate: if `matched / total_changed < 0.5`, delete the copy and skip to Path B (Tier 3).
+
+**Stage 2 — Apply Mutations:**
+- `_build_replace_requests(replacements)` converts to Docs API `replaceAllText` requests.
+- `_apply_insertions()` inserts new paragraphs bottom-to-top (after fresh doc read for indices).
+- Free verification: `_check_occurrences_changed()` parses batchUpdate response, marks fields with
+  `occurrencesChanged: 0` as `api_no_match` (API returned 200 OK but didn't find the text).
+
+**Stage 3 — Dual Verification & Fallback:**
+- `_verify_export()` re-reads doc and confirms each "applied" field is present (exact substring or
+  word overlap ≥ 0.8). Updates failed fields to `verification_failed`.
+- If verification < 80% applied: Tier 2 fallback — `_append_missed_changes()` appends a
+  demarcated "--- Changes not auto-applied ---" section at doc bottom listing missed fields with
+  section labels so user can manually place them.
+
+**Safety Guards:**
+- Skills format compatibility: if base uses structured categories but tailored uses bare keywords,
+  skills replacement is skipped.
+- Apostrophe escaping: single quotes in folder/doc names are escaped in Drive API queries.
+- Smart quote normalization: `'` → `'`, `"` → `"` (Lesson #18).
+
+**Folder Structure:** `OtooCV / <Company Name> / <Resume Doc>`
+
+**Replace Logic:** If a doc with the same title already exists, delete it and create a fresh copy.
+
+**Benefit:** Exported doc inherits all formatting from the base GDoc — fonts, styles, layout preserved.
+
+**Return Type:** `ExportResult` with status (`success | partial | failed | no_changes`), summary counts,
+and list of skipped fields with reasons. API returns structured `ExportResultResponse` to frontend.
 
 #### Path B: Plain-Text Insert (Default) — When `GOOGLE_BASE_RESUME_DOC_ID` is not set
 - **Mechanism:** Create a blank Google Doc and insert resume content as plain text via `insertText` batchUpdate.

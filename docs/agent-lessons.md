@@ -562,3 +562,28 @@ for cancellation. Frontend tracks real progress via SSE. One tailoring run at a 
 App-level `tailoringJob` guard. Dashboard buttons disabled during active tailoring.
 
 **Propagated to**: `api/CLAUDE.md`, `glassresumatch-ai/CLAUDE.md`, `docs/decisions/ADR-0014`
+
+---
+
+## 18. GDoc export silent failures — always verify and report per-field
+
+**Source**: 2026-03-19
+
+**Mistake**: `create_tailored_resume_doc` reported "exported" (returned a URL) even when
+`replaceAllText` matched 0 paragraphs. Fuzzy matching with word overlap ≥ 0.5 silently skipped
+fields: smart quotes (`'` vs `'`) caused mismatches, two similar bullets matched the same
+paragraph, and the API returned 200 OK with `occurrencesChanged: 0`. Failures were logged as
+warnings but never surfaced to the user. No post-export verification existed.
+
+**Correct pattern**: Three-layer fix:
+1. **Per-field tracking**: `ExportFieldResult` dataclass tracks section, action, status, and
+   failure reason for every field. `ExportResult` aggregates into status (success/partial/failed/no_changes).
+2. **Better matching**: Normalize text (strip bullets, collapse whitespace, normalize smart quotes),
+   try exact prefix match before fuzzy, track consumed paragraphs to prevent double-matching,
+   raise threshold to 0.6 with length guard. Pre-flight gate: if match rate < 50%, skip
+   copy-and-fill entirely and use plain-text fallback.
+3. **Dual verification**: Check `occurrencesChanged` from batchUpdate response (free), then
+   re-read doc and verify tailored text is present. Tier 2 fallback: append "Changes not
+   auto-applied" section at doc bottom for partially failed exports.
+
+**Propagated to**: `services/CLAUDE.md`, `api/CLAUDE.md`, `glassresumatch-ai/CLAUDE.md`

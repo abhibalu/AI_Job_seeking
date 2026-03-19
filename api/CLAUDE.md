@@ -110,6 +110,13 @@ New schemas added for OotoCV Phase 1:
 - `ResumeChangeBulkActionRequest` — body for bulk PATCH (`action`, `scope: remaining | all`)
 - `SystemConfigItem` / `CronConfigRequest` — system config read/write
 
+New schemas added for hardened GDoc export (Lesson #18):
+- `ExportResultResponse` — structured export response with `status` (success/partial/failed/no_changes),
+  `url`, `path` (copy_and_fill/plain_text), `summary` (total/applied/skipped), and `skipped_fields`
+  (list of sections with failure reasons)
+- `ExportResultSummary` — total/applied/skipped counts
+- `ExportSkippedField` — section + reason (no_match, no_sibling, format_mismatch, api_no_match, verification_failed)
+
 `JobBase` includes `tailoring_status` (inherited by `JobDetail`) and `salary_info` (optional, for UI metadata display).
 `JobDetail` adds `cover_letter` and fuller company metadata (`company_employees_count`, `company_description`).
 Both `tailoring_status` and `salary_info` are surfaced via `v_jobs_enriched` view (migration 014) — both `list_jobs` and

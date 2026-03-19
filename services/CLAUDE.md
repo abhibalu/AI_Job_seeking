@@ -68,13 +68,20 @@ Source: `services/telegram_notifier.py`.
 **Import**: Reuses `ResumeParserAgent` pipeline to parse raw GDoc text — no separate parsing logic.
 Endpoint: `POST /api/resumes/import-gdoc` with `document_id`.
 
-**Export**: Two paths controlled by `GOOGLE_BASE_RESUME_DOC_ID` env var (ADR-0015, ADR-0018):
+**Export**: Returns `ExportResult` (not bare URL) with per-field tracking. Two paths controlled
+by `GOOGLE_BASE_RESUME_DOC_ID` env var (ADR-0015, ADR-0018):
 - **Copy-and-fill** (when set): Copy base resume GDoc to company subfolder, apply two-phase update:
   1. `replaceAllText` for changed strings (rewording).
   2. `insertText` for additions — new skills lines or extra experience bullets (ADR-0018).
-  Safety guards: skills format compatibility check (structured vs keywords → skip if mismatch);
-  apostrophe escaping in Drive API queries.
-- **Plain-text insert** (default): Create blank doc, insert resume as plain text. Works without a base template.
+  Safety guards: text normalization (smart quotes, bullets, whitespace), exact prefix match priority,
+  consumed tracking (prevents double-matching), skills format compatibility check, pre-flight gate
+  (match rate < 50% → fall through to plain-text). Post-mutation: checks `occurrencesChanged` from
+  API response + re-reads doc for verification. Tier 2 fallback: appends "Changes not auto-applied"
+  section at doc bottom when verification < 80%.
+- **Plain-text insert** (default/Tier 3 fallback): Create blank doc, insert resume as plain text.
+  Used when no base template or when pre-flight match rate is too low.
+- **Status model**: `ExportResult.status` is `success | partial | failed | no_changes`. API
+  endpoint returns structured `ExportResultResponse` with summary counts and skipped field details.
 
 **OAuth error handling**: `get_credentials()` catches `RefreshError` when the cached token is
 expired/revoked. On failure it deletes `google-token.json` and raises `ValueError` with an

@@ -101,6 +101,11 @@ the next node boundary.
 `last_runs: Record<string, PipelineRun>`, `jobs: Array<{name, next_run_utc}>`. Used by Sidebar to poll
 and display real cron/scraper status (active/sleeping/error).
 
+`exportToGoogleDocs(jobId)` — `POST /api/resumes/export-gdoc/{jobId}`, returns structured
+`ExportResultResponse` with `status` (success/partial/failed/no_changes), `url`, `path`,
+`summary` (total/applied/skipped), and `skipped_fields` list with failure reasons. Frontend
+shows toast variants per status (green/amber/red/info) and opens doc on success/partial/no_changes.
+
 ## Sidebar brand & scheduler status (OotoCV phase 5 polish)
 
 **Brand**: Sidebar logo text is "OotoCV" (not "TailorAI").
@@ -233,6 +238,22 @@ Cover letter `<textarea>` pre-filled from `tailoredResume.cover_letter`; saves o
 
 Sticky footer: remaining unreviewed count + "Accept all remaining →" (disabled when 0).
 Existing Approve/Reject/Download/Export header buttons are preserved above the split layout.
+
+**Approve & Send Button** (`handleApprove`):
+- Calls `updateTailoredStatus(id, 'approved')` first.
+- Exports to Google Docs via `apiClient.exportToGoogleDocs(jobId)`.
+- Returns structured `ExportResultResponse` with `status` (success/partial/failed/no_changes), summary counts, and skipped fields.
+- Toast feedback per status:
+  - `success`: green toast, opens doc
+  - `partial`: amber toast "Exported with N of M changes skipped", opens doc
+  - `failed`: red toast with failure reasons, does not open
+  - `no_changes`: info toast, opens doc
+- Sets `gdocExported = true` after export attempt.
+
+**Re-export Button** (appears after first export):
+- Visible only when `gdocExported === true`.
+- Same toast feedback as `handleApprove` on retry.
+- Allows user to re-attempt export if first attempt had failures or they made manual edits to the doc.
 
 ## TypewriterWaitState component
 

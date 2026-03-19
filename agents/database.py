@@ -346,7 +346,19 @@ def get_master_resume() -> dict | None:
 # ============================================
 
 def save_tailored_resume(job_id: str, version: int, content: dict, status: str = "pending", edit_plan: dict = None) -> str:
-    """Save a tailored resume (wrapper around save_resume), optionally with edit plan."""
+    """Save a tailored resume (wrapper around save_resume), optionally with edit plan.
+
+    Also writes normalised resume_changes rows (ADR-0010) so the OotoCV review UI
+    can show per-change Accept / Reject / Keep original controls.
+    """
+    # Map resume status to tailoring_status
+    tailoring_status_map = {
+        "pending": "ready",
+        "needs_review": "needs_review",
+        "approved": "ready",
+        "rejected": "ready",
+    }
+
     record_id = save_resume(
         content=content,
         name=f"Tailored Resume V{version}",
@@ -356,15 +368,61 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
         version=version
     )
 
-    # Store edit plan if provided
+    # Store edit plan + derived tailoring_status
     if edit_plan:
         try:
             client = _get_supabase()
-            client.table("resumes").update({"edit_plan": edit_plan}).eq("id", record_id).execute()
+            client.table("resumes").update({
+                "edit_plan": edit_plan,
+                "tailoring_status": tailoring_status_map.get(status, "ready"),
+            }).eq("id", record_id).execute()
         except Exception as e:
             logger.warning(f"Failed to save edit_plan for resume {record_id}: {e}")
 
+        # Write normalised resume_changes rows (ADR-0010)
+        _save_resume_changes(record_id, job_id, edit_plan)
+
     return record_id
+
+
+def _save_resume_changes(resume_id: str, job_id: str, edit_plan: dict) -> None:
+    """Write per-change rows to resume_changes table from edit_plan edits.
+
+    original_text is captured from current_text in the plan (immutable pre-AI text).
+    tailored_text is populated after the tailor agent runs — stored in target_text.
+    accepted_text starts NULL (user has not reviewed yet).
+    """
+    edits = edit_plan.get("edits", [])
+    if not edits:
+        return
+
+    client = _get_supabase()
+    rows = []
+    for edit in edits:
+        action_type = edit.get("action", "rephrase")
+        if action_type not in ("rephrase", "add", "remove"):
+            action_type = "rephrase"
+
+        rows.append({
+            "resume_id": resume_id,
+            "job_id": job_id,
+            "location": edit.get("location", ""),
+            "action_type": action_type,
+            "original_text": edit.get("current_text"),   # immutable — captured before AI edits
+            "tailored_text": edit.get("target_text"),     # AI output
+            "accepted_text": None,                        # user has not reviewed yet
+            "review_action": None,
+            "reason": edit.get("reason"),
+            "confidence": edit.get("confidence"),
+            "approved_source": edit.get("approved_source"),
+        })
+
+    if rows:
+        try:
+            client.table("resume_changes").insert(rows).execute()
+            logger.info(f"Saved {len(rows)} resume_changes for resume {resume_id}")
+        except Exception as e:
+            logger.warning(f"Failed to save resume_changes for resume {resume_id}: {e}")
 
 
 def get_tailored_resumes(job_id: str) -> list[dict]:
@@ -378,6 +436,113 @@ def update_tailored_resume_status(record_id: str, status: str):
     """Update status (approved/rejected)."""
     client = _get_supabase()
     client.table("resumes").update({"status": status}).eq("id", record_id).execute()
+
+
+def update_cover_letter(resume_id: str, cover_letter: str) -> None:
+    """Save user-edited cover letter to a tailored resume (ADR-0011)."""
+    client = _get_supabase()
+    client.table("resumes").update({"cover_letter": cover_letter}).eq("id", resume_id).execute()
+
+
+def update_tailoring_status(resume_id: str, tailoring_status: str) -> None:
+    """Update the tailoring pipeline status on a resume row."""
+    client = _get_supabase()
+    client.table("resumes").update({"tailoring_status": tailoring_status}).eq("id", resume_id).execute()
+
+
+# ============================================
+# RESUME CHANGES FUNCTIONS (ADR-0010)
+# ============================================
+
+def get_resume_changes(resume_id: str) -> list[dict]:
+    """Get all change records for a tailored resume, ordered by confidence asc (worst first)."""
+    client = _get_supabase()
+    result = (
+        client.table("resume_changes")
+        .select("*")
+        .eq("resume_id", resume_id)
+        .order("confidence", desc=False, nullsfirst=False)
+        .execute()
+    )
+    return result.data or []
+
+
+def apply_change_action(change_id: str, action: str) -> None:
+    """Apply Accept / Reject / Keep original to a single change (ADR-0010).
+
+    'keep_original': sets accepted_text = original_text immediately, no regen loop.
+    'accept': sets accepted_text = tailored_text.
+    'reject': clears accepted_text (triggers UI regeneration flow if implemented).
+    """
+    client = _get_supabase()
+    row = client.table("resume_changes").select("original_text, tailored_text").eq("id", change_id).execute()
+    if not row.data:
+        return
+
+    change = row.data[0]
+    if action == "accept":
+        accepted_text = change.get("tailored_text")
+    elif action == "keep_original":
+        accepted_text = change.get("original_text")
+    else:  # reject
+        accepted_text = None
+
+    client.table("resume_changes").update({
+        "review_action": action,
+        "accepted_text": accepted_text,
+    }).eq("id", change_id).execute()
+
+
+def apply_bulk_change_action(resume_id: str, action: str, scope: str = "remaining") -> int:
+    """Apply an action to multiple changes at once.
+
+    scope='remaining': only changes where review_action IS NULL.
+    scope='all': all changes for the resume.
+    Returns count of rows updated.
+    """
+    client = _get_supabase()
+
+    # Build query to fetch target changes
+    query = client.table("resume_changes").select("id, original_text, tailored_text").eq("resume_id", resume_id)
+    if scope == "remaining":
+        query = query.is_("review_action", "null")
+
+    result = query.execute()
+    rows = result.data or []
+
+    for row in rows:
+        if action == "accept":
+            accepted_text = row.get("tailored_text")
+        elif action == "keep_original":
+            accepted_text = row.get("original_text")
+        else:
+            accepted_text = None
+
+        client.table("resume_changes").update({
+            "review_action": action,
+            "accepted_text": accepted_text,
+        }).eq("id", row["id"]).execute()
+
+    return len(rows)
+
+
+# ============================================
+# SYSTEM CONFIG FUNCTIONS
+# ============================================
+
+def get_system_config(key: str) -> str | None:
+    """Get a system config value by key."""
+    client = _get_supabase()
+    result = client.table("system_config").select("value").eq("key", key).execute()
+    if result.data:
+        return result.data[0]["value"]
+    return None
+
+
+def set_system_config(key: str, value: str) -> None:
+    """Upsert a system config value."""
+    client = _get_supabase()
+    client.table("system_config").upsert({"key": key, "value": value}, on_conflict="key").execute()
 
 
 def get_jd_parsed(job_id: str) -> dict | None:

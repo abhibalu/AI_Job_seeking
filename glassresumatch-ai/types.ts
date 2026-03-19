@@ -9,6 +9,8 @@ export {
   type Evaluation,
   type EvaluationStats,
   type ParseResult,
+  type TailoredResume,
+  type ResumeChange,
   type TaskStatus,
   type MessageResponse,
 } from './services/apiClient';

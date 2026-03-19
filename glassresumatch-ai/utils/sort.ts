@@ -47,6 +47,14 @@ export const sortJobs = (
                 const scoreA = a.evaluation?.job_match_score || 0;
                 const scoreB = b.evaluation?.job_match_score || 0;
                 if (scoreA !== scoreB) return (scoreB - scoreA) * multiplier;
+
+                // At same score: APPLY DIRECT before TAILOR (less friction = more urgent)
+                const aAction = a.evaluation?.recommended_action;
+                const bAction = b.evaluation?.recommended_action;
+                if (aAction !== bAction) {
+                    if (aAction === 'apply') return -1;
+                    if (bAction === 'apply') return 1;
+                }
             }
 
             // Tier 3: Both Unevaluated (or same score) -> Sort by Time

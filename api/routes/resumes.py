@@ -19,11 +19,15 @@ UPLOAD_DIR = "/Users/abhijithm/Documents/Code/TailorAI/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 from agents.database import (
-    get_master_resume as get_db_master_resume, 
+    get_master_resume as get_db_master_resume,
     save_resume,
     save_tailored_resume,
     get_tailored_resumes,
-    update_tailored_resume_status
+    update_tailored_resume_status,
+    update_cover_letter,
+    get_resume_changes,
+    apply_change_action,
+    apply_bulk_change_action,
 )
 from agents.resume_tailor import ResumeTailorAgent
 from agents.tailoring_subgraph import build_tailoring_subgraph
@@ -399,6 +403,50 @@ def update_status(record_id: str, status: str):
          
     update_tailored_resume_status(record_id, status)
     return {"status": "success"}
+
+from api.schemas import ResumeChangeActionRequest, ResumeChangeBulkActionRequest
+
+
+@router.get("/{resume_id}/changes")
+def list_resume_changes(resume_id: str):
+    """Get all per-change review records for a tailored resume (ADR-0010).
+    Sorted by confidence asc — lowest confidence (most uncertain) first.
+    """
+    changes = get_resume_changes(resume_id)
+    return changes
+
+
+@router.patch("/{resume_id}/changes/bulk")
+def bulk_change_action(resume_id: str, body: ResumeChangeBulkActionRequest):
+    """Accept / Reject / Keep original across multiple changes at once (ADR-0010).
+
+    scope='remaining' (default): only unreviewed changes.
+    scope='all': all changes for the resume.
+    """
+    updated = apply_bulk_change_action(resume_id, body.action, body.scope)
+    return {"updated": updated}
+
+
+@router.patch("/{resume_id}/changes/{change_id}")
+def change_action(resume_id: str, change_id: str, body: ResumeChangeActionRequest):
+    """Apply Accept / Reject / Keep original to a single change (ADR-0010).
+
+    'keep_original': sets accepted_text = original_text immediately.
+    No regeneration loop is triggered — the original text is the final value.
+    """
+    apply_change_action(change_id, body.action)
+    return {"ok": True}
+
+
+@router.patch("/{resume_id}/cover_letter")
+def save_cover_letter(resume_id: str, body: dict):
+    """Save user-edited cover letter for a tailored resume (ADR-0011).
+    Called on blur from the CL textarea in TailoringReview.
+    """
+    cover_letter = body.get("cover_letter", "")
+    update_cover_letter(resume_id, cover_letter)
+    return {"ok": True}
+
 
 @router.post("/export-gdoc/{job_id}")
 async def export_to_google_docs(job_id: str):

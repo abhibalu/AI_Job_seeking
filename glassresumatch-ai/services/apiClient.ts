@@ -227,6 +227,33 @@ class ApiClient {
 
         return response.blob();
     }
+
+    // OotoCV: Resume change review (ADR-0010)
+    async getResumeChanges(resumeId: string) {
+        return this.request<ResumeChange[]>(`/api/resumes/${resumeId}/changes`);
+    }
+
+    async applyChangeAction(resumeId: string, changeId: string, action: 'accept' | 'reject' | 'keep_original') {
+        return this.request<{ ok: boolean }>(`/api/resumes/${resumeId}/changes/${changeId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ action }),
+        });
+    }
+
+    async applyBulkChangeAction(resumeId: string, action: 'accept' | 'reject' | 'keep_original', scope: 'remaining' | 'all' = 'remaining') {
+        return this.request<{ updated: number }>(`/api/resumes/${resumeId}/changes/bulk`, {
+            method: 'PATCH',
+            body: JSON.stringify({ action, scope }),
+        });
+    }
+
+    // OotoCV: Cover letter (ADR-0011)
+    async updateCoverLetter(resumeId: string, coverLetter: string) {
+        return this.request<{ ok: boolean }>(`/api/resumes/${resumeId}/cover_letter`, {
+            method: 'PATCH',
+            body: JSON.stringify({ cover_letter: coverLetter }),
+        });
+    }
 }
 
 // Types matching backend schemas
@@ -235,13 +262,15 @@ export interface Job {
     title: string | null;
     company_name: string | null;
     location: string | null;
-    posted_at: string | null;
+    posted_at: string | null;   // UTC ISO-8601 — use formatTimeAgo() at render time
     applicants_count: number | null;
     company_website: string | null;
-    job_url?: string | null; // Matched to DB alias
+    job_url?: string | null;
     updated_at?: string | null;
     description_text?: string | null;
     description_html?: string | null;
+    // OotoCV: tailoring pipeline state (drives button copy and card verdict)
+    tailoring_status?: 'not_started' | 'processing' | 'ready' | 'cancelled' | 'needs_review' | null;
 }
 
 export interface JobDetail extends Job {
@@ -327,7 +356,27 @@ export interface TailoredResume {
     version: number;
     content: any;
     status: 'pending' | 'approved' | 'rejected' | 'needs_review';
+    tailoring_status: 'not_started' | 'processing' | 'ready' | 'cancelled' | 'needs_review' | null;
+    cover_letter: string | null;
     created_at: string;
+}
+
+// OotoCV: per-change review record (ADR-0010)
+export interface ResumeChange {
+    id: string;
+    resume_id: string;
+    job_id: string;
+    location: string;
+    action_type: 'rephrase' | 'add' | 'remove';
+    original_text: string | null;   // immutable pre-AI text
+    tailored_text: string | null;   // AI output
+    accepted_text: string | null;   // set by user action; null = not reviewed
+    review_action: 'accept' | 'reject' | 'keep_original' | null;
+    reason: string | null;
+    confidence: number | null;
+    approved_source: string | null;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface TaskStatus {

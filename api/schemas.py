@@ -3,7 +3,7 @@ Pydantic schemas for API request/response models.
 """
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 # Job schemas
@@ -50,6 +50,12 @@ class JobDetail(JobBase):
     # URLs
     apply_url: str | None = None
     input_url: str | None = None
+
+    # OotoCV: tailoring pipeline state (separate from status which is user review decision)
+    tailoring_status: Literal['not_started', 'processing', 'ready', 'cancelled', 'needs_review'] | None = None
+
+    # OotoCV: cover letter (AI-generated, user-editable)
+    cover_letter: str | None = None
 
 
 class JobStats(BaseModel):
@@ -209,3 +215,41 @@ class ResumeData(BaseModel):
     experience: List[Experience] = []
     education: List[Education] = []
     skills: List[str] = []
+
+
+# OotoCV: per-change review schema (ADR-0010)
+class ResumeChange(BaseModel):
+    id: str
+    resume_id: str
+    job_id: str
+    location: str
+    action_type: Literal['rephrase', 'add', 'remove']
+    original_text: str | None = None   # immutable pre-AI text; None for 'add' actions
+    tailored_text: str | None = None   # AI output
+    accepted_text: str | None = None   # final value; None = not yet reviewed
+    review_action: Literal['accept', 'reject', 'keep_original'] | None = None
+    reason: str | None = None
+    confidence: float | None = None
+    approved_source: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ResumeChangeActionRequest(BaseModel):
+    action: Literal['accept', 'reject', 'keep_original']
+
+
+class ResumeChangeBulkActionRequest(BaseModel):
+    action: Literal['accept', 'reject', 'keep_original']
+    scope: Literal['remaining', 'all'] = 'remaining'
+
+
+# OotoCV: system config schema (cron_tz, auto_send_threshold)
+class SystemConfigItem(BaseModel):
+    key: str
+    value: str
+
+
+class CronConfigRequest(BaseModel):
+    cron_time: str          # HH:MM
+    cron_tz: str            # IANA timezone (e.g. "Europe/Dublin")

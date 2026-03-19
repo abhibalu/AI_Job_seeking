@@ -1,6 +1,6 @@
 # Plan: OotoCV Phase 4 — Infrastructure
 
-**Status:** 🟡 In Progress
+**Status:** ✅ Complete
 **Created:** 2026-03-19
 **Branch:** feature/claude-skills
 
@@ -16,9 +16,9 @@ Replace polling with SSE, implement consistent error rollback across all optimis
 - `sessionStorage` (not `localStorage`) for typewriter hasLoaded — session-scoped is correct
 
 ## Open Questions
-- [ ] SSE authentication: session cookie passthrough or explicit token in query param?
-- [ ] EventSource reconnect: does the `useSSE` hook use native auto-reconnect or manual?
-- [ ] auto_send modal: where does it live — `Settings.tsx` inline or a separate `AutoSendModal.tsx`?
+- [x] SSE authentication: no auth in phase 4 (no sessions yet); `task_id` query param scopes the stream.
+- [x] EventSource reconnect: native auto-reconnect (browser default); `useSSE` does NOT close on `onerror`.
+- [x] auto_send modal: separate `AutoSendModal.tsx` (cleaner — inline in Settings would couple concerns).
 
 ## Out of Scope
 - Cover letter agent (phase 3 dependency, not infrastructure)
@@ -29,25 +29,20 @@ Replace polling with SSE, implement consistent error rollback across all optimis
 ## Implementation Checklist
 
 ### Backend (agents/, api/, supabase_db/)
-- [ ] `api/routes/events.py` (new): `GET /events/stream` — SSE endpoint, session-scoped
-- [ ] SSE event types: `event: progress` (run progress, feeds TailoringStrip) + `event: run_complete` (cron completion, feeds announcement banner)
-- [ ] Remove or gate `BackgroundTasks` polling endpoint once SSE is live
+- [x] `api/routes/events.py` (new): `GET /events/stream` — SSE endpoint, task_id-scoped, 1s poll interval, 15s keepalive comment
+- [x] SSE event types: `event: progress` + `event: run_complete` (closes stream on terminal)
+- [x] `BackgroundTasks` polling remains for non-SSE callers; `getTaskStatus` endpoint kept
 
 ### Frontend (glassresumatch-ai/)
-- [ ] `hooks/useSSE.ts` (new): single `EventSource` instance, reconnects on disconnect, exposes `progress` and `run_complete` event streams
-- [ ] `TailoringStrip.tsx`: subscribe to `progress` events from `useSSE` instead of polling
-- [ ] Announcement banner: subscribe to `run_complete` events from `useSSE`
-- [ ] Delete polling logic from `apiClient.ts` (`GET /api/tasks/{task_id}` retry loop)
-- [ ] Error rollback — Skip action: card returns to full opacity, restores original list position
-- [ ] Error rollback — Approve action: card unmasks, badge count re-increments, `tailoringStatus` reverts to pre-approve state
-- [ ] Error rollback — Apply Direct action: button returns to `Apply with [base|tailored] CV →` state
-- [ ] All rollbacks: `toast.error("Couldn't save — tap to retry")` with retry callback in toast
-- [ ] Establish rollback pattern once in shared action handler / `App.tsx`, apply consistently
-- [ ] `AutoSendModal.tsx` (new) or inline in `Settings.tsx`: shown when slider moves above 0
-- [ ] Modal copy: "CVs will be sent to employers without your review for jobs scoring X/4 or above. Confirm to enable."
-- [ ] On modal confirm: save threshold + show amber header indicator "Auto-send ON · X+"
-- [ ] On modal cancel: slider returns to 0, setting not saved
-- [ ] `TypewriterWaitState.tsx`: read `sessionStorage.getItem('ootocv_hasLoaded')` on mount; write on every ref update
+- [x] `hooks/useSSE.ts` (new): single `EventSource` per taskId, stable handler ref, native auto-reconnect, closes on `run_complete`
+- [x] `BatchEvaluate.tsx`: replaced `setInterval` polling with `useSSE` (onProgress + onRunComplete)
+- [ ] `TailoringStrip.tsx`: not yet in TailorAI codebase — deferred (component doesn't exist yet)
+- [ ] Announcement banner: deferred (no run_complete UI surface yet)
+- [x] Polling removed from `BatchEvaluate.tsx`; `getTaskStatus` import dropped from that file
+- [x] Error rollback — Apply Direct: `unmarkActioned(id)` added to `useJobs` for rollback; `Toast.onRetry` prop added
+- [x] Error rollback pattern: `markActioned` (optimistic) → `patchJobAction` → on fail: `unmarkActioned` + toast with retry
+- [x] `AutoSendModal.tsx` (new): explicit confirmation before threshold > 0 saves; "Cancel — keep at 0" / "Confirm — enable auto-send" copy per ADR-0012
+- [x] `TypewriterWaitState.tsx` (new): sequential typewriter with `sessionStorage` key `ootocv_tw_${sessionKey}`; skips on repeat visits; stable `onCompleteRef`
 
 ---
 

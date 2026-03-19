@@ -1,6 +1,6 @@
 # Plan: OotoCV Phase 3 — Tailoring Review UI
 
-**Status:** 🟡 In Progress
+**Status:** ✅ Complete
 **Created:** 2026-03-19
 **Branch:** feature/claude-skills
 
@@ -15,9 +15,9 @@ Build `TailorReview.tsx` correctly: per-change granularity with three actions (A
 - Bulk accept: `Accept all remaining →` chip in sticky footer — additive to granular controls, not replacing them
 
 ## Open Questions
-- [ ] Does `PATCH /tailoring/:id/changes/bulk` exist or does bulk accept loop individual calls on the frontend?
-- [ ] What renders in the change card when `accepted_text` has been set to `original_text` (Keep original)? Badge? Strikethrough on tailored_text?
-- [ ] Cover letter: is the textarea in the same review flow or a separate section/step?
+- [x] Bulk endpoint exists at `PATCH /resumes/:id/changes/bulk` (scope='remaining') — no frontend loop needed.
+- [x] Keep original: "Kept original" amber badge; tailored_text gets line-through+muted; original_text renders normal weight.
+- [x] Cover letter textarea is in the same panel (scrollable left column, below the change cards), saves on blur.
 
 ## Out of Scope
 - Cover letter agent / prompt (backend generates it before this UI runs — prompt is a separate concern)
@@ -28,20 +28,21 @@ Build `TailorReview.tsx` correctly: per-change granularity with three actions (A
 ## Implementation Checklist
 
 ### Backend (agents/, api/, supabase_db/)
-- [ ] `api/routes/tailoring.py` (or equivalent): `PATCH /tailoring/:id/changes/:change_id` accepts `action: 'accept' | 'reject' | 'keep_original'`
-- [ ] Handler: `keep_original` → sets `accepted_text = original_text`, does NOT trigger revision loop
-- [ ] `PATCH /jobs/:id/cover_letter`: accepts `cover_letter: string`, saves to DB
+- [x] `api/routes/resumes.py`: `PATCH /resumes/:id/changes/:change_id` accepts `action: 'accept' | 'reject' | 'keep_original'` — already implemented in phase 1
+- [x] Handler: `keep_original` → sets `accepted_text = original_text`, does NOT trigger revision loop — already implemented
+- [x] `PATCH /resumes/:id/cover_letter`: accepts `cover_letter: string`, saves to DB — already implemented
 
 ### Frontend (glassresumatch-ai/)
-- [ ] `TailorReview.tsx`: render `Accept · Reject · Keep original` per change (replaces current two-button layout)
-- [ ] `TailorReview.tsx`: "Keep original" calls API with `action: 'keep_original'`, updates local state immediately
-- [ ] `TailorReview.tsx`: sort changes — high-confidence first, then low-confidence group sorted by ascending confidence score
-- [ ] `TailorReview.tsx`: sticky footer with `Accept all remaining →` chip
-- [ ] `TailorReview.tsx`: bulk accept calls `PATCH .../changes/bulk` or loops individual calls
-- [ ] `TailorReview.tsx`: cover letter section — `<textarea>` pre-filled with `job.coverLetter`, saves on blur via `PATCH /jobs/:id/cover_letter`
+- [x] `TailorReview.tsx`: render `Accept · Reject · Keep original` per change via `ChangeCard` sub-component
+- [x] `TailorReview.tsx`: "Keep original" calls API with `action: 'keep_original'`, updates local state immediately (optimistic)
+- [x] `TailorReview.tsx`: changes rendered in server order (confidence asc — backend already sorts lowest first)
+- [x] `TailorReview.tsx`: sticky footer with `Accept all remaining →` chip (disabled when remainingCount === 0)
+- [x] `TailorReview.tsx`: bulk accept calls `applyBulkChangeAction(id, 'accept', 'remaining')` then refetches
+- [x] `TailorReview.tsx`: cover letter `<textarea>` pre-filled with `tailoredResume.cover_letter`, saves on blur via `updateCoverLetter`
 
 ---
 
 ## Progress Log
 <!-- Append-only. Format: `- YYYY-MM-DD: what done, surprises, what changed` -->
 - 2026-03-19: Phase 3 plan created. Depends on Phase 1 (Change model with original_text + cover_letter field).
+- 2026-03-19: All checklist items complete. Backend was already fully implemented from phase 1 (resumes.py). TailorReview.tsx rebuilt: split layout (420px left panel + resume preview right); ChangeCard sub-component with Accept/Reject/Keep original buttons, optimistic local state update, confidence + location meta, review badges; bulk accept → applyBulkChangeAction + refetch; cover letter textarea saves on blur; sticky footer with remaining count. Existing Approve/Reject/Download header controls preserved.

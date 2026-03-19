@@ -90,14 +90,74 @@ Apply button copy is conditional on `Job.tailoring_status`:
 Clicking the button: opens `job_url` in a new tab + calls `onAction(jobId, cvVersion)` (passed as
 prop). The parent wires `onAction` to `markActioned` + `patchJobAction`.
 
-## useJobs actioned partitioning (OotoCV phase 2)
+## useJobs actioned partitioning (OotoCV phase 2 + 4)
 
 `useJobs.ts` tracks `actionedIds: Set<string>` and exposes:
-- `markActioned(id)` — call when user clicks Apply in JobCard
+- `markActioned(id)` — optimistic add; call when user clicks Apply in JobCard
+- `unmarkActioned(id)` — rollback remove; call on API failure to revert optimistic update
 - `activeJobs` — jobs not yet actioned; server-side filter pills apply to this partition
 - `actionedJobs` — actioned jobs; render below filtered results, dimmed
 
 The raw `jobs` array (all loaded) is also still returned for backwards compatibility.
+
+Rollback pattern (Apply Direct):
+```ts
+markActioned(id);                    // optimistic
+try { await patchJobAction(id, cv); }
+catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
+```
+
+## SSE hook (`hooks/useSSE.ts`)
+
+`useSSE(taskId: string | null, handlers)` — opens a single `EventSource` per `taskId`.
+
+- Pass `null` to keep hook dormant (no connection opened).
+- `handlers.onProgress(event)` — fired on `event: progress` SSE events.
+- `handlers.onRunComplete(event)` — fired on `event: run_complete`; hook closes the connection.
+- `handlers.onError(err)` — fired on `es.onerror`; **do NOT close** — native auto-reconnect handles it.
+- Handler refs are stable (`useRef`) — changing handlers never restarts the `EventSource`.
+- `useEffect` depends only on `taskId`; cleans up (`es.close()`) on unmount or `taskId` change.
+
+## Toast rollback pattern
+
+`Toast` accepts optional `onRetry?: () => void`. When set, renders an underlined "Retry" button
+beside the dismiss `✕`. Use for any optimistic-update failure where the user should be able to
+retry the action in-place.
+
+## TailorReview (OotoCV phase 3)
+
+Split layout: 420px left panel (change list + cover letter) + `flex-1` resume preview right.
+
+`ChangeCard` sub-component renders one `ResumeChange` with:
+- Accept / Reject / Keep original buttons (optimistic local state, syncs via `applyChangeAction`)
+- Confidence % badge — sort changes ascending by confidence (lowest first — needs most attention)
+- `action_type` badge, section location label, review-state badges
+
+Bulk accept: calls `applyBulkChangeAction(resumeId, 'accept', 'remaining')` then refetches changes.
+
+Cover letter `<textarea>` pre-filled from `tailoredResume.cover_letter`; saves on `onBlur` via
+`updateCoverLetter`. No save button — blur is the save trigger.
+
+Sticky footer: remaining unreviewed count + "Accept all remaining →" (disabled when 0).
+Existing Approve/Reject/Download/Export header buttons are preserved above the split layout.
+
+## TypewriterWaitState component
+
+`TypewriterWaitState` animates through a messages array character-by-character.
+
+- `sessionKey` prop → reads `sessionStorage.getItem(\`ootocv_tw_${sessionKey}\`)` on mount.
+  If key exists, fires `onComplete` immediately (no animation on repeat visits in same session).
+  Writes the key when the last message finishes animating.
+- Use `sessionStorage` (not `localStorage`) — skip state is session-scoped by design.
+- `onCompleteRef` is a stable ref internally — safe to pass inline arrow functions without extra deps.
+
+## AutoSendModal component (ADR-0012)
+
+Show `<AutoSendModal>` when `auto_send_threshold` slider is moved above 0. Slider alone is not
+consent — modal forces deliberate confirmation before the value is saved.
+
+Props: `threshold` (the new value 1–4), `onConfirm`, `onCancel`.
+`onCancel` resets slider to 0. Clicking the backdrop also calls `onCancel`.
 
 ## Browser history / view mode sync
 

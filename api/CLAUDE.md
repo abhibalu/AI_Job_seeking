@@ -41,7 +41,20 @@ return {"message": "...", "task_id": task_id}
 Status enum (in order): `queued` → `running` → `completed` / `failed`
 
 Worker function updates status via `save_task_status(task_id, "running", {...})` as it progresses.
-Frontend polls `GET /api/tasks/{task_id}` to track progress.
+
+**Push transport (ADR-0009):** Frontend streams progress via SSE (`GET /api/events/stream?task_id=...`)
+rather than polling. `GET /api/tasks/{task_id}` remains for non-SSE callers but is no longer used
+by the main UI.
+
+## SSE endpoint (`api/routes/events.py`)
+
+`GET /api/events/stream?task_id=<id>` — `StreamingResponse` with `text/event-stream`.
+
+- Polls `get_task_status()` every 1s; emits `event: progress` while running.
+- Emits `event: run_complete` and closes the generator on terminal status (`completed` / `failed`).
+- Sends `: keepalive` comment every 15s to prevent proxy/browser timeouts.
+- Headers: `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`.
+- No auth in phase 4 — `task_id` query param scopes the stream.
 
 ## Pagination
 
@@ -75,7 +88,8 @@ Frontend polls `GET /api/tasks/{task_id}` to track progress.
 | PATCH  | `/api/resumes/{resume_id}/changes/{id}`     | Accept / Reject / Keep original on one change  |
 | PATCH  | `/api/resumes/{resume_id}/changes/bulk`     | Bulk action on remaining or all changes        |
 | PATCH  | `/api/resumes/{resume_id}/cover_letter`     | Save user-edited cover letter (ADR-0011)       |
-| GET    | `/api/tasks/{task_id}`                      | Background task status polling                 |
+| GET    | `/api/events/stream`                        | SSE progress stream for a task (ADR-0009)      |
+| GET    | `/api/tasks/{task_id}`                      | Background task status (non-SSE callers)       |
 | GET    | `/api/scheduler`                            | Scheduler job status                           |
 
 ## OotoCV schema additions (`api/schemas.py`)

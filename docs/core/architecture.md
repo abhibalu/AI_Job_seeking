@@ -84,8 +84,9 @@ no nested checkpointing.
 ## Cross-cutting: background task status tracking
 
 User-triggered long-running operations (batch eval, tailoring) follow:
-`save_task_status()` in `agents/database.py` → frontend polls `GET /api/tasks/{task_id}`.
-See `api/CLAUDE.md` for the full sequence.
+`save_task_status()` in `agents/database.py` → frontend streams via SSE `GET /api/events/stream?task_id=...`
+(ADR-0009). `GET /api/tasks/{task_id}` remains for non-SSE callers.
+See `api/CLAUDE.md` for the full sequence and SSE event schema.
 
 ---
 

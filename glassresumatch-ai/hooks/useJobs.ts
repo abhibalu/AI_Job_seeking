@@ -81,7 +81,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
 
             return { jobs: mapped, total: result.total, stats: statsResult };
         } else {
-            const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
+            const isEvaluatedFilter = viewMode === 'pending' ? false : true;
             const companyFilter = filters.searchQuery || undefined;
             const result = await fetchJobsWithEvaluations(page, ITEMS_PER_PAGE, companyFilter, isEvaluatedFilter);
             return { jobs: result.data, total: result.total, stats: statsResult };

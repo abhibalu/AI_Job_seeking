@@ -141,6 +141,15 @@ no concurrency concern).
 Key-value store for user-level settings. Keys: `cron_time` (HH:MM), `cron_tz` (IANA, e.g. `Europe/Dublin`), `auto_send_threshold` (integer 0–4).
 Functions: `get_system_config(key)`, `set_system_config(key, value)`.
 
+## v_jobs_enriched view (migration 006 + 014)
+
+Extends `jobs` table with computed columns. Both `list_jobs` and `get_job` query this view.
+
+- `is_evaluated` — `EXISTS` subquery on `job_evaluations` (migration 006)
+- `tailoring_status` — latest non-master resume's `tailoring_status` (migration 014)
+
+Source: `supabase_db/migrations/006_jobs_evaluated_view.sql`, `014_jobs_tailoring_status.sql`.
+
 ## DB migration idempotency rule
 
 Any INSERT that copies rows by primary key **must** include `ON CONFLICT (id) DO NOTHING`.

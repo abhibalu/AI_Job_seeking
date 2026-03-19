@@ -87,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ actionableBadge }) => {
   }, []);
 
   const navItems = [
-    { path: '/', label: 'Feed', hint: 'Today\'s jobs', icon: LayoutGrid },
+    { path: '/', label: 'Feed', hint: 'Today\'s matches', icon: LayoutGrid },
     { path: '/tracker', label: 'Tracker', hint: 'Applications', icon: ClipboardList },
     { path: '/settings', label: 'Settings', hint: 'Config', icon: Settings },
   ];
@@ -132,15 +132,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ actionableBadge }) => {
             >
               <Icon className="w-4 h-4" />
               <span>{label}</span>
-              {label === 'Feed' && actionableBadge > 0 && (
-                <span className="ml-auto px-1.5 py-0.5 rounded-md bg-accent/10 text-accent text-[10px] font-mono font-bold">
-                  {actionableBadge}
-                </span>
-              )}
               <span className={cn(
                 'ml-auto text-[10px] font-mono tracking-tight text-gray-500',
                 'opacity-0 group-hover:opacity-100 transition-opacity',
-                label === 'Feed' && actionableBadge > 0 && 'hidden'
               )}>
                 {hint}
               </span>

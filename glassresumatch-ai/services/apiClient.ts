@@ -319,6 +319,7 @@ export interface Job {
     company_website: string | null;
     job_url?: string | null;
     updated_at?: string | null;
+    salary_info?: string | null;
     description_text?: string | null;
     description_html?: string | null;
     // OotoCV: tailoring pipeline state (drives button copy and card verdict)

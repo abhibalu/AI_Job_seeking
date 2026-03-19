@@ -1,23 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import type { Evaluation, Gaps } from '../types';
 
 interface MatchBriefProps {
   evaluation: Evaluation;
-}
-
-// Map score to signal dots and label
-function getSignalInfo(score: number | null) {
-  const filled = score != null ? Math.round((score / 100) * 4) : 0;
-  let label = 'Unknown';
-  if (score != null) {
-    if (score >= 80) label = 'Strong position';
-    else if (score >= 60) label = 'Solid match';
-    else if (score >= 40) label = 'Worth considering';
-    else label = 'Uphill battle';
-  }
-  return { filled, label };
 }
 
 function getStrengths(evaluation: Evaluation): Array<{ text: string; chip: string; chipColor: string }> {
@@ -63,10 +50,16 @@ const severityChip: Record<string, string> = {
   significant: 'bg-semantic-red/10 text-semantic-red',
 };
 
+const DEFAULT_VISIBLE = 3;
+
 export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
-  const { filled, label } = getSignalInfo(evaluation.job_match_score);
+  const [expanded, setExpanded] = useState(false);
   const strengths = getStrengths(evaluation);
   const gapItems = getGapItems(evaluation.gaps);
+
+  const visibleStrengths = expanded ? strengths : strengths.slice(0, DEFAULT_VISIBLE);
+  const visibleGaps = expanded ? gapItems : gapItems.slice(0, DEFAULT_VISIBLE);
+  const hiddenCount = Math.max(0, strengths.length - DEFAULT_VISIBLE) + Math.max(0, gapItems.length - DEFAULT_VISIBLE);
 
   return (
     <div className="space-y-4 p-6 rounded-xl border border-white/5 bg-surface">
@@ -78,30 +71,14 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
         </span>
       </div>
 
-      {/* Signal dots */}
-      <div className="flex items-center gap-2">
-        <div className="flex gap-1">
-          {[0, 1, 2, 3].map(i => (
-            <div
-              key={i}
-              className={cn(
-                'w-2 h-2 rounded-full',
-                i < filled ? 'bg-semantic-green' : 'bg-white/[0.08]'
-              )}
-            />
-          ))}
-        </div>
-        <span className="text-[10px] font-mono text-gray-500">{label}</span>
-      </div>
-
       {/* Strengths */}
-      {strengths.length > 0 && (
+      {visibleStrengths.length > 0 && (
         <div>
           <div className="text-[10px] font-mono uppercase tracking-widest text-gray-500 mb-2">
             Lead with these
           </div>
           <div className="space-y-1.5">
-            {strengths.map((s, i) => (
+            {visibleStrengths.map((s, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, x: -8 }}
@@ -123,18 +100,18 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
       )}
 
       {/* Gaps */}
-      {gapItems.length > 0 && (
+      {visibleGaps.length > 0 && (
         <div>
           <div className="text-[10px] font-mono uppercase tracking-widest text-gray-500 mb-2">
             Handle these
           </div>
           <div className="space-y-1.5">
-            {gapItems.map((g, i) => (
+            {visibleGaps.map((g, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: (strengths.length + i) * 0.08, duration: 0.3 }}
+                transition={{ delay: (visibleStrengths.length + i) * 0.08, duration: 0.3 }}
               >
                 <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-base/50 border-l-2 border-semantic-amber/35">
                   <span className={cn(
@@ -154,6 +131,16 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Expand toggle */}
+      {hiddenCount > 0 && !expanded && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="text-[9px] font-mono text-gray-600 hover:text-gray-400 mt-1 cursor-pointer"
+        >
+          +{hiddenCount} more
+        </button>
       )}
     </div>
   );

@@ -12,7 +12,6 @@ import { ApplicationTracker } from './pages/ApplicationTracker';
 import { SetupPage } from './pages/SetupPage';
 import { Toast } from './components/Toast';
 import type { FilterOptions, Job } from './types';
-import { Briefcase } from 'lucide-react';
 
 const App: React.FC = () => {
   const navigate = useNavigate();
@@ -214,9 +213,8 @@ const App: React.FC = () => {
                         onSkip={handleSkip}
                       />
                     ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-gray-600">
-                        <Briefcase className="w-8 h-8 mb-3 opacity-30" />
-                        <p className="text-[11px] font-mono">Select a job to view details</p>
+                      <div className="h-full flex items-center justify-center">
+                        <p className="text-[11px] font-mono text-gray-600">Select a job to view details</p>
                       </div>
                     )}
                   </div>

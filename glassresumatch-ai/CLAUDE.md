@@ -146,6 +146,10 @@ at a time. Dashboard cards are disabled via `isTailoring` prop during active run
 Wiring "Tailor CV" to the apply handler silently applies the job without tailoring it.
 See agent-lessons #16.
 
+**Dashboard freshness signal** (Theme B): Both `TailorCard` and `ApplyDirectCard` now append `formatTimeAgo(job.posted_at)`
+to the company row. Example: "Google · San Francisco · 2d ago". Reduces information density gap between list and detail view;
+provides quick job-age signal without clicking into detail. Uses existing `posted_at` field from job list response.
+
 ## useJobs actioned partitioning (OotoCV phase 2 + 4)
 
 `useJobs.ts` tracks `actionedIds: Set<string>` and exposes:
@@ -326,9 +330,63 @@ Pass alongside `sentApplication?: Application` so the banner can show the applic
 - "Skip for now" link sets `onboarding_complete=true` without uploading (user uploads later via My Resume tab).
 - Gate in App.tsx: `useState(!localStorage.getItem('onboarding_complete'))`.
 
-## JobDetail component (OotoCV phase 5 polish)
+## JobDetail component (OotoCV phase 5 + density overhaul)
 
 `JobDetail.tsx` displays a single job's evaluation, parsed JD, and tailored resume changes.
+
+### UI Density Overhaul (ADR-0015 candidate)
+
+Content area spacing tightened per UI Info Density Guidelines:
+- Hero content: `p-8 space-y-6` → `p-6 space-y-4` (16px + 32px total savings)
+- Job section columns: `gap-14` → `gap-6` (32px savings, maintains visual separation)
+- Footer padding: `px-8` → `px-6` (symmetry with content area)
+- Hype copy footer text removed entirely (0 IU, verdict block is the canonical signal)
+- Empty states compacted: removed centered icon, kept minimal inline text
+
+### Metadata Row (New — Theme B)
+
+Horizontal metadata row between tags and verdict block displays:
+```
+[Clock] 2d ago  ·  [Users] 47 applicants  ·  [DollarSign] $120-150k  ·  [Mail] recruiter@co.com
+```
+
+Uses `job.posted_at` (via `formatTimeAgo()`), `job.applicants_count`, `job.salary_info`, `eval_.recruiter_email`.
+All fields null-safe with gap-3 separators. Metadata row only renders if at least one field is truthy.
+
+### MatchBrief Progressive Disclosure (Theme C)
+
+- Default: shows first 3 strengths + 3 gaps (was 5+5 = 10 items)
+- If more items exist: shows "+N more" toggle to expand to full list (up to 5 each)
+- Removed signal dots section from MatchBrief (hero verdict block is the canonical signal; ADR-0007 already settled this)
+- Saves ~200px on average detail view, recovery button visible if expansion needed
+
+### Apply Verdict Full Layout (Theme E)
+
+Apply verdict layout changed from `JobSection` only to full layout:
+```tsx
+<MatchBrief /> + <JobSection /> + <CVDiff />
+```
+
+APPLY jobs now show decision-supporting data (strengths/gaps from eval + job requirements + CV changes if ready).
+Gains ~400px of high-IU content; matches TAILOR/BORDERLINE layout schema.
+
+### Layer 3 — Collapsible Deep-Dive Sections (Theme D)
+
+Collapsible component (inline in JobDetail.tsx) provides progressive disclosure for lower-priority details.
+Shows only for non-SKIP verdicts. Sections:
+
+1. **Interview Prep** — `high_priority_topics` (topic + why + prep) and `questions_to_ask` from `eval_.interview_tips`
+   - Topics rendered in bordered boxes; questions as bullet list
+2. **ATS Keywords** — `ats_keywords` from parsed JD as inline pill badges
+   - Tailor + Borderline only (Apply Direct skips ATS signal)
+3. **Company** — Shows `applicants_count` when > 0
+   - Future: company_employees_count, company_description (needs JobDetail fetch per ADR-0015)
+
+Each collapsible is a lightweight header line (no rounded bg, no border, just a divider line) with ChevronDown icon for rotation animation.
+
+### Tag Redundancy Cleanup (Theme F)
+
+Location removed from tags — already shown in company row. Saves a badge slot, prevents duplication.
 
 **Verdict typewriter**: Uses module-scoped `seenVerdicts: Set<string>` (not useRef) to persist replay state
 across unmounts/remounts. When a job ID is already in the set, the typewriter skips animation and shows text immediately.
@@ -350,9 +408,6 @@ data source: `resume_edits` from evaluation, not job requirements. See agent-les
 
 **Removed CompanyIntel**: Deleted component and all usages. Company/location/posted-at data was
 duplicated from hero section. Added `eval_.summary` inline in verdict block (guarded against duplication with reason).
-
-**Borderline hype copy**: Conditional message: if technical gaps exist, shows "Main gap: X. Tailoring can close it."
-Else: "Could go either way. Tailoring tips the odds."
 
 **Skip button dedup**: Hidden when verdict !== 'borderline' to prevent two skip buttons (borderline has its own contextual "Skip This One").
 

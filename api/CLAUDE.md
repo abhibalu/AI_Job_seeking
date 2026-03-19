@@ -108,9 +108,11 @@ New schemas added for OotoCV Phase 1:
 - `ResumeChangeBulkActionRequest` — body for bulk PATCH (`action`, `scope: remaining | all`)
 - `SystemConfigItem` / `CronConfigRequest` — system config read/write
 
-`JobBase` includes `tailoring_status` (inherited by `JobDetail`). `JobDetail` adds `cover_letter`.
-`tailoring_status` is surfaced via `v_jobs_enriched` view (migration 014) — both `list_jobs` and
-`get_job` query this view, so the field is present on list and detail responses.
+`JobBase` includes `tailoring_status` (inherited by `JobDetail`) and `salary_info` (optional, for UI metadata display).
+`JobDetail` adds `cover_letter` and fuller company metadata (`company_employees_count`, `company_description`).
+Both `tailoring_status` and `salary_info` are surfaced via `v_jobs_enriched` view (migration 014) — both `list_jobs` and
+`get_job` query this view, so these fields are present on list and detail responses. Use `salary_info` in the
+metadata row of the JobDetail hero section to display salary band when available.
 
 ## Environment variables for API
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — required for all DB operations

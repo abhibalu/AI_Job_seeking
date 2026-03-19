@@ -46,6 +46,7 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 | cross-cutting (>1 domain)                 | docs/active/TEMPLATE.md + domain files|
 | import rules, full data flow              | docs/core/architecture.md             |
 | feature behaviour, state machines         | docs/features/<feature>.md            |
+| UI layout, spacing, component sizing      | docs/core/ui-density-guidelines.md    |
 
 ## Active tasks
 - `docs/active/ootocv-frontend-rebuild.md` — OotoCV frontend rebuild ✅ (phases 1–8 complete; new pages live, old components removed)

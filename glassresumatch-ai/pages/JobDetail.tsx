@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Building2, Briefcase } from 'lucide-react';
+import { ExternalLink, Building2, Clock, Users, DollarSign, Mail, ChevronDown } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { MatchBrief } from '../components/MatchBrief';
 import { JobWithEvaluation } from '../services/jobService';
 import { apiClient } from '../services/apiClient';
 import type { Evaluation, ResumeChange, ParseResult } from '../types';
+import { formatTimeAgo } from '../utils/format';
 
 interface JobDetailProps {
   job: JobWithEvaluation;
@@ -95,7 +96,7 @@ const JobSection: React.FC<{ evaluation: Evaluation; parsedJd: ParseResult | nul
       <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em]">
         The job (no fluff)
       </div>
-      <div className="grid grid-cols-2 gap-14">
+      <div className="grid grid-cols-2 gap-6">
         {/* How to strengthen your CV */}
         <div>
           <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2.5">
@@ -202,6 +203,23 @@ const CVDiff: React.FC<{ changes: ResumeChange[]; loading?: boolean; error?: str
   );
 };
 
+// --- Collapsible ---
+const Collapsible: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-white/5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between py-3 text-[9px] font-mono text-gray-500 uppercase tracking-[0.08em] hover:text-gray-400 cursor-pointer"
+      >
+        {label}
+        <ChevronDown className={cn('w-3 h-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && <div className="pb-4">{children}</div>}
+    </div>
+  );
+};
+
 // --- Main JobDetail ---
 export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onAction, onSkip }) => {
   const navigate = useNavigate();
@@ -240,10 +258,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
   if (!eval_) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <Briefcase className="w-8 h-8 text-gray-600 mx-auto mb-3" />
-          <p className="text-[11px] font-mono text-gray-600">Not yet evaluated</p>
-        </div>
+        <p className="text-[11px] font-mono text-gray-600">Not yet evaluated</p>
       </div>
     );
   }
@@ -258,7 +273,6 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
   if (eval_.required_exp) tags.push(eval_.required_exp);
   if (parsedJd?.domain) tags.push(parsedJd.domain);
   if (parsedJd?.seniority) tags.push(parsedJd.seniority);
-  if (job.location) tags.push(job.location);
 
   const handleTailor = () => {
     if (job.tailoring_status === 'ready') {
@@ -279,19 +293,10 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
     setTimeout(() => setActionInFlight(null), 1500);
   };
 
-  // Hype copy
-  const hypeCopy = verdict === 'tailor'
-    ? "This one's yours. Don't overthink it."
-    : verdict === 'borderline'
-      ? (eval_.gaps?.technical?.[0]
-        ? `Main gap: ${eval_.gaps.technical[0]}. Tailoring can close it.`
-        : "Could go either way. Tailoring tips the odds.")
-      : '';
-
   return (
     <div className="h-full flex flex-col">
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto p-8 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {/* Hero */}
         <div>
           {/* Company row */}
@@ -323,6 +328,26 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
               ))}
             </div>
           )}
+
+          {/* Metadata row */}
+          {(() => {
+            const metaItems: React.ReactNode[] = [];
+            const freshness = formatTimeAgo(job.posted_at);
+            if (freshness) metaItems.push(<span key="posted" className="flex items-center gap-1"><Clock className="w-3 h-3" />{freshness}</span>);
+            if (job.applicants_count && job.applicants_count > 0) metaItems.push(<span key="applicants" className="flex items-center gap-1"><Users className="w-3 h-3" />{job.applicants_count} applicants</span>);
+            if (job.salary_info) metaItems.push(<span key="salary" className="flex items-center gap-1"><DollarSign className="w-3 h-3" />{job.salary_info}</span>);
+            if (eval_.recruiter_email) metaItems.push(<a key="recruiter" href={`mailto:${eval_.recruiter_email}`} className="flex items-center gap-1 hover:text-gray-400"><Mail className="w-3 h-3" />{eval_.recruiter_email}</a>);
+            return metaItems.length > 0 ? (
+              <div className="flex items-center gap-3 text-[10px] font-mono text-gray-500 mb-3">
+                {metaItems.map((item, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && <span className="text-gray-700">·</span>}
+                    {item}
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : null;
+          })()}
 
           {/* Verdict block */}
           <div className={cn(
@@ -375,7 +400,9 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
         {verdict === 'apply' && (
           <>
+            <MatchBrief evaluation={eval_} />
             <JobSection evaluation={eval_} parsedJd={parsedJd} />
+            <CVDiff changes={changes} loading={changesLoading} error={changesError} />
           </>
         )}
 
@@ -391,17 +418,72 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             <JobSection evaluation={eval_} parsedJd={parsedJd} muted />
           </>
         )}
+
+        {/* Layer 3 — Collapsible deep-dive sections */}
+        {verdict !== 'skip' && (
+          <div className="mt-2">
+            {/* Interview Prep */}
+            {(eval_.interview_tips?.high_priority_topics?.length || eval_.interview_tips?.questions_to_ask?.length) && (
+              <Collapsible label="Interview Prep">
+                {eval_.interview_tips?.high_priority_topics && eval_.interview_tips.high_priority_topics.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2">High priority topics</div>
+                    <div className="space-y-2">
+                      {eval_.interview_tips.high_priority_topics.map((t, i) => (
+                        <div key={i} className="p-[8px_10px] border border-white/[0.07] rounded-[6px]">
+                          <div className="text-[11px] font-sans text-gray-300 font-medium">{t.topic}</div>
+                          <div className="text-[10px] font-sans text-gray-500 mt-0.5">Why: {t.why}</div>
+                          <div className="text-[10px] font-sans text-gray-500 mt-0.5">Prep: {t.prep}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {eval_.interview_tips?.questions_to_ask && eval_.interview_tips.questions_to_ask.length > 0 && (
+                  <div>
+                    <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2">Questions to ask</div>
+                    <div className="space-y-1">
+                      {eval_.interview_tips.questions_to_ask.map((q, i) => (
+                        <div key={i} className="flex gap-1.5">
+                          <div className="w-[3px] h-[3px] rounded-full bg-gray-600 mt-[5px] flex-shrink-0" />
+                          <span className="text-[11px] font-sans text-gray-400 leading-relaxed">{q}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Collapsible>
+            )}
+
+            {/* ATS Keywords */}
+            {parsedJd?.ats_keywords && parsedJd.ats_keywords.length > 0 && (verdict === 'tailor' || verdict === 'borderline') && (
+              <Collapsible label="ATS Keywords">
+                <div className="flex flex-wrap gap-1.5">
+                  {parsedJd.ats_keywords.map((kw, i) => (
+                    <span key={i} className="text-[9px] font-mono text-gray-500 bg-surface/60 border border-white/[0.07] rounded-[3px] px-1.5 py-0.5">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </Collapsible>
+            )}
+
+            {/* Company */}
+            {job.applicants_count != null && job.applicants_count > 0 && (
+              <Collapsible label="Company">
+                <div className="text-[11px] font-sans text-gray-400">
+                  <span className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em]">Applicants: </span>
+                  {job.applicants_count}
+                </div>
+              </Collapsible>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sticky CTA footer */}
-      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-8 py-3 flex items-center gap-2">
-        {/* Hype copy */}
-        {hypeCopy && (
-          <div className="flex-1 text-[9px] font-sans text-gray-600 leading-relaxed italic">
-            {hypeCopy}
-          </div>
-        )}
-        {!hypeCopy && <div className="flex-1" />}
+      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-6 py-3 flex items-center gap-2">
+        <div className="flex-1" />
 
         {/* Skip button — hidden for borderline (has its own contextual skip) */}
         {verdict !== 'borderline' && (

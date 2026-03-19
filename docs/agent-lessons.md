@@ -440,6 +440,113 @@ except Exception as e:
 
 ---
 
+## 21. `print()` in background tasks silently discards structured log context
+
+**Source**: ADR-0017 (2026-03-19)
+
+**Mistake**: Background task functions (`run_jd_parser_task`, `run_eval_worker`, `run_scrape_worker`,
+`run_tailoring_worker`) used `print()` and `traceback.print_exc()` for error reporting. These bypass
+the JSON logger entirely — no `correlation_id`, no `timestamp`, no structured fields, no log rotation.
+Errors disappeared into stdout with no traceability.
+
+**Correct pattern**: Use `logger = logging.getLogger(__name__)` at module level. Inside `except` blocks,
+use `logger.exception(msg)` (equivalent to `logger.error(msg, exc_info=True)`) — never `print()`.
+Terminal UX `print()` in CLI scripts is acceptable; keep alongside `logger.exception()`.
+
+```python
+# Wrong
+except Exception as e:
+    print(f"Error in background task: {e}")
+    traceback.print_exc()
+
+# Correct
+except Exception as e:
+    logger.exception("Background task failed", extra={"job_id": job_id})
+```
+
+**Propagated to**: `agents/CLAUDE.md` (logging conventions section), `services/CLAUDE.md`
+
+---
+
+## 22. Missing `exc_info` swallows stack traces from exception handlers
+
+**Source**: ADR-0017 (2026-03-19)
+
+**Mistake**: ~15 `except` blocks called `logger.error(f"... {e}")` or `logger.warning(f"... {e}")`
+without `exc_info=True`. These emit a one-line message with no traceback — impossible to diagnose
+the root cause from logs alone. The bug surface (file, line, call stack) is entirely lost.
+
+**Correct pattern**:
+- Inside an `except` block: use `logger.exception(msg)` for errors (auto-adds `exc_info=True`)
+- Use `logger.warning(msg, exc_info=True)` for warnings (no `.warningexc()` exists in stdlib)
+- Never use f-string with `{e}` as the only error context — `exc_info` captures far more
+
+```python
+# Wrong
+except Exception as e:
+    logger.error(f"Parsing failed: {e}")
+
+# Correct
+except Exception as e:
+    logger.exception("Parsing failed", extra={"job_id": job_id})
+
+# Correct for warnings
+except Exception as e:
+    logger.warning("Non-fatal issue: %s", e, exc_info=True)
+```
+
+**Propagated to**: `agents/CLAUDE.md` (logging conventions section), `services/CLAUDE.md`
+
+---
+
+## 23. Apostrophes in Drive API query strings break folder/doc lookup
+
+**Source**: ADR-0018 (2026-03-19)
+
+**Mistake**: `_get_or_create_folder` and `_find_existing_doc` interpolated folder/doc names
+directly into the Drive API `q` parameter using f-strings with single-quote delimiters.
+Company names containing apostrophes (e.g. "Europe's Favourite Airline") broke the query
+syntax, returning a 400 "Invalid Value" error.
+
+**Correct pattern**: Escape single quotes in user-supplied strings before interpolation into
+Drive API query parameters.
+
+```python
+safe_name = folder_name.replace("'", "\\'")
+query = f"name = '{safe_name}' and ..."
+```
+
+**Propagated to**: `services/CLAUDE.md`, `docs/features/gdoc_base_resume.md`
+
+---
+
+## 24. Positional zip across incompatible skills formats destroys GDoc formatting
+
+**Source**: ADR-0018 (2026-03-19)
+
+**Mistake**: `_build_gdoc_replacements` used `zip(base_skills, tailored_skills)` to match
+skills positionally. When the base resume had structured category lines
+(`"Programming: Python, SQL"`) but the tailored data had bare keywords (`"Python"`), the
+zip paired them by position — replacing each structured line with a single keyword. The
+GDoc's skills section was destroyed (5 formatted lines → 9 unformatted keywords).
+
+**Correct pattern**: Before processing skills, check format compatibility. If one list uses
+`Category: keywords` format (contains `:`) and the other uses bare keywords (no `:`), skip
+skills replacement entirely. Preserving the base GDoc's formatted skills is better than
+breaking them.
+
+```python
+base_has_categories = any(':' in str(s) for s in base_skills)
+tailored_has_categories = any(':' in str(s) for s in tailored_skills)
+if base_has_categories != tailored_has_categories:
+    logger.warning("Skills format mismatch — skipping")
+    return  # preserve base GDoc formatting
+```
+
+**Propagated to**: `services/CLAUDE.md`, `docs/features/gdoc_base_resume.md`
+
+---
+
 ## 17. Synchronous tailoring endpoint wastes LLM credits on cancel
 
 **Source**: 2026-03-19

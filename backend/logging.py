@@ -26,6 +26,7 @@ class JSONFormatter(logging.Formatter):
             "timestamp": getattr(record, "asctime", datetime.utcnow().isoformat()),
             "level": record.levelname,
             "logger": record.name,
+            "correlation_id": getattr(record, "correlation_id", "-"),
             "message": record.message,
             "module": record.module,
             "function": record.funcName,
@@ -44,7 +45,7 @@ class JSONFormatter(logging.Formatter):
             "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
             "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
             "created", "msecs", "relativeCreated", "thread", "threadName",
-            "processName", "process", "message", "asctime"
+            "processName", "process", "message", "asctime", "correlation_id",
         }
         
         for key, value in record.__dict__.items():
@@ -73,7 +74,18 @@ def setup_logging(config_path="backend/logging_config.json", logs_dir="logs"):
         
         # Apply configuration
         logging.config.dictConfig(config)
-        print(f"✅ Logging configuration loaded from {config_path}")
+
+        # Wire CorrelationFilter onto all handlers so every log line gets correlation_id
+        from backend.log_context import CorrelationFilter
+        _filter = CorrelationFilter()
+        root = logging.getLogger()
+        for handler in root.handlers:
+            handler.addFilter(_filter)
+        for name in ("api", "agents", "services", "backend"):
+            for h in logging.getLogger(name).handlers:
+                h.addFilter(_filter)
+
+        logging.getLogger(__name__).info("Logging configuration loaded from %s", config_path)
     else:
         print(f"⚠️  Logging configuration file not found at {config_path}. Using default.")
         logging.basicConfig(level=logging.INFO)

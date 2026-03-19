@@ -25,8 +25,10 @@ All workers follow this run-tracking wrapper:
 ```python
 from services.pipeline_runs import start_run, finish_run
 from services.telegram_notifier import notify_eval_complete, notify_pipeline_error
+from backend.log_context import set_correlation_id, new_request_id
 
 run_id = start_run("evaluate", metadata={...})
+set_correlation_id(f"run:{run_id[:8]}")   # APScheduler threads do NOT inherit contextvars
 try:
     # do work
     finish_run(run_id, status="completed", jobs_found=n, jobs_processed=m)
@@ -34,7 +36,18 @@ try:
 except Exception as e:
     finish_run(run_id, status="failed", error_detail=str(e))
     notify_pipeline_error("WorkerName", str(e))
+finally:
+    set_correlation_id(None)
 ```
+
+> **Why explicit?** APScheduler's `BackgroundScheduler` uses OS threads; `contextvars` are NOT
+> copied into threads automatically. Always call `set_correlation_id` at the top of every
+> APScheduler job function, and `set_correlation_id(None)` in `finally`.
+
+## Logging conventions (ADR-0017)
+
+- Inside `except` blocks: use `logger.exception(msg)` for errors, `logger.warning(msg, exc_info=True)` for warnings. Never bare `logger.error(f"... {e}")` — the stack trace is lost.
+- Never use `print()` in worker functions. `print()` bypasses the JSON formatter and loses `correlation_id`, timestamps, and log rotation.
 
 Files:
 - `services/eval_worker.py` — evaluates pending jobs via LangGraph
@@ -55,8 +68,12 @@ Source: `services/telegram_notifier.py`.
 **Import**: Reuses `ResumeParserAgent` pipeline to parse raw GDoc text — no separate parsing logic.
 Endpoint: `POST /api/resumes/import-gdoc` with `document_id`.
 
-**Export**: Two paths controlled by `GOOGLE_BASE_RESUME_DOC_ID` env var (ADR-0015):
-- **Copy-and-fill** (when set): Copy base resume GDoc to company subfolder, apply `replaceAllText` for changed strings. Preserves all formatting.
+**Export**: Two paths controlled by `GOOGLE_BASE_RESUME_DOC_ID` env var (ADR-0015, ADR-0018):
+- **Copy-and-fill** (when set): Copy base resume GDoc to company subfolder, apply two-phase update:
+  1. `replaceAllText` for changed strings (rewording).
+  2. `insertText` for additions — new skills lines or extra experience bullets (ADR-0018).
+  Safety guards: skills format compatibility check (structured vs keywords → skip if mismatch);
+  apostrophe escaping in Drive API queries.
 - **Plain-text insert** (default): Create blank doc, insert resume as plain text. Works without a base template.
 
 **OAuth error handling**: `get_credentials()` catches `RefreshError` when the cached token is

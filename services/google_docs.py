@@ -30,7 +30,7 @@ def get_credentials():
             try:
                 creds.refresh(Request())
             except Exception as e:
-                logger.error(f"OAuth token refresh failed: {e}")
+                logger.exception("OAuth token refresh failed")
                 # Delete stale token so next call triggers re-auth
                 if os.path.exists(TOKEN_FILE):
                     os.remove(TOKEN_FILE)
@@ -55,8 +55,9 @@ def _get_or_create_folder(drive_service, folder_name: str, parent_id: str) -> st
     """Find an existing folder by name inside a parent, or create it.
     Returns the folder ID.
     """
+    safe_name = folder_name.replace("'", "\\'")
     query = (
-        f"name = '{folder_name}' "
+        f"name = '{safe_name}' "
         f"and '{parent_id}' in parents "
         f"and mimeType = 'application/vnd.google-apps.folder' "
         f"and trashed = false"
@@ -80,8 +81,9 @@ def _get_or_create_folder(drive_service, folder_name: str, parent_id: str) -> st
 
 def _find_existing_doc(drive_service, doc_title: str, folder_id: str) -> str | None:
     """Find an existing doc by title inside a folder. Returns file ID or None."""
+    safe_title = doc_title.replace("'", "\\'")
     query = (
-        f"name = '{doc_title}' "
+        f"name = '{safe_title}' "
         f"and '{folder_id}' in parents "
         f"and mimeType = 'application/vnd.google-apps.document' "
         f"and trashed = false"
@@ -106,6 +108,47 @@ def _extract_doc_paragraphs(docs_service, doc_id: str) -> list[str]:
     return paragraphs
 
 
+def _extract_doc_structure(docs_service, doc_id: str) -> list[dict]:
+    """Return every non-empty paragraph with its text and position indices.
+
+    Used to find insertion points after replaceAllText has been applied.
+    """
+    doc = docs_service.documents().get(documentId=doc_id).execute()
+    paragraphs = []
+    for element in doc.get('body', {}).get('content', []):
+        para = element.get('paragraph', {})
+        text = ''.join(
+            run.get('textRun', {}).get('content', '')
+            for run in para.get('elements', [])
+        ).strip()
+        if text:
+            paragraphs.append({
+                "text": text,
+                "start": element.get('startIndex', 0),
+                "end": element.get('endIndex', 0),
+            })
+    return paragraphs
+
+
+def _find_paragraph_in_structure(
+    target_text: str, doc_structure: list[dict]
+) -> dict | None:
+    """Find the doc_structure entry whose word overlap with target is highest (>= 0.5)."""
+    target_words = set(target_text.lower().split())
+    if not target_words:
+        return None
+    best, best_score = None, 0.0
+    for para in doc_structure:
+        para_words = set(para["text"].lower().split())
+        if not para_words:
+            continue
+        score = len(target_words & para_words) / max(len(target_words), len(para_words))
+        if score > best_score:
+            best_score = score
+            best = para
+    return best if best_score >= 0.5 else None
+
+
 def _find_best_gdoc_match(target: str, paragraphs: list[str]) -> str | None:
     """Find the paragraph whose word overlap with target is highest (>= 0.5)."""
     target_words = set(target.lower().split())
@@ -125,13 +168,19 @@ def _build_gdoc_replacements(
     gdoc_paragraphs: list[str],
     base_data: dict,
     tailored_data: dict,
-) -> dict[str, str]:
-    """Build {gdoc_paragraph: tailored_text} for every field that changed.
+) -> tuple[dict[str, str], list[dict]]:
+    """Build {gdoc_paragraph: tailored_text} for every field that changed,
+    plus a list of insertions for new items not present in the base.
 
     Uses the DB master resume (base_data) as the bridge to locate the right
     GDoc paragraph, since the GDoc is the source of truth for exact wording.
+
+    Returns: (replacements, insertions)
+        insertions: [{"after_text": str, "new_text": str}, ...]
+        after_text is the tailored (post-replacement) text of the sibling paragraph.
     """
     replacements: dict[str, str] = {}
+    insertions: list[dict] = []
 
     def _match_and_add(base_text: str, tailored_text: str) -> None:
         base_text = (base_text or '').strip()
@@ -153,11 +202,46 @@ def _build_gdoc_replacements(
         for b_bullet, t_bullet in zip(b_job.get('achievements', []), t_job.get('achievements', [])):
             _match_and_add(b_bullet, t_bullet)
 
-    # Skills
-    for b_skill, t_skill in zip(base_data.get('skills', []), tailored_data.get('skills', [])):
-        _match_and_add(str(b_skill), str(t_skill))
+    # Skills — only process when both lists use the same format.
+    # Base GDoc may have "Category: kw, kw" lines while tailored data has bare
+    # keywords.  Positional zip across incompatible formats destroys formatting.
+    base_skills = base_data.get('skills', [])
+    tailored_skills = tailored_data.get('skills', [])
+    base_has_categories = any(':' in str(s) for s in base_skills)
+    tailored_has_categories = any(':' in str(s) for s in tailored_skills)
+    skills_compatible = base_has_categories == tailored_has_categories
 
-    return replacements
+    if skills_compatible:
+        for b_skill, t_skill in zip(base_skills, tailored_skills):
+            _match_and_add(str(b_skill), str(t_skill))
+
+        # ── Extra skills beyond what the base has ────────────────────────────
+        if len(tailored_skills) > len(base_skills) and base_skills:
+            last_idx = len(base_skills) - 1
+            after_text = str(tailored_skills[last_idx])
+            for extra in tailored_skills[len(base_skills):]:
+                insertions.append({"after_text": after_text, "new_text": str(extra)})
+                # All extras reference the same sibling — reversed processing in
+                # _apply_insertions handles ordering correctly
+    else:
+        logger.warning(
+            "Skills format mismatch (structured vs keywords) — "
+            "skipping skills replacement to preserve GDoc formatting"
+        )
+
+    # Extra experience bullets
+    for b_job, t_job in zip(
+        base_data.get('experience', []), tailored_data.get('experience', [])
+    ):
+        b_bullets = b_job.get('achievements', [])
+        t_bullets = t_job.get('achievements', [])
+        if len(t_bullets) > len(b_bullets) and b_bullets:
+            last_idx = len(b_bullets) - 1
+            after_text = t_bullets[last_idx]
+            for extra in t_bullets[len(b_bullets):]:
+                insertions.append({"after_text": after_text, "new_text": extra})
+
+    return replacements, insertions
 
 
 def _build_replace_requests(replacements: dict) -> list[dict]:
@@ -170,6 +254,52 @@ def _build_replace_requests(replacements: dict) -> list[dict]:
         for old, new in replacements.items()
         if old.strip() and old != new
     ]
+
+
+def _apply_insertions(
+    docs_service, doc_id: str, insertions: list[dict]
+) -> None:
+    """Insert new paragraphs (skills lines, experience bullets) into the GDoc.
+
+    Each insertion specifies after_text (the sibling to insert after) and
+    new_text (the content to add).  Insertions are processed bottom-to-top
+    so that earlier inserts don't shift the indices of later ones.
+
+    The new paragraph inherits the paragraph style (font, spacing, indent,
+    bullet style) of the sibling because insertText with \\n splits the
+    paragraph and the new paragraph copies the style.
+    """
+    if not insertions:
+        return
+
+    # Re-read doc structure to get fresh indices (after replaceAllText shifted things)
+    doc_structure = _extract_doc_structure(docs_service, doc_id)
+
+    # Build insertion requests — process bottom-to-top (reversed) so that
+    # indices computed from the current doc state remain valid.
+    requests = []
+    for ins in reversed(insertions):
+        sibling = _find_paragraph_in_structure(ins["after_text"], doc_structure)
+        if sibling:
+            # Insert \n + new text just before the sibling's trailing newline.
+            # This creates a new paragraph that inherits the sibling's style.
+            insert_index = sibling["end"] - 1
+            requests.append({
+                'insertText': {
+                    'location': {'index': insert_index},
+                    'text': '\n' + ins["new_text"]
+                }
+            })
+        else:
+            logger.warning(
+                f"No sibling paragraph found for insertion after: {ins['after_text']!r}"
+            )
+
+    if requests:
+        docs_service.documents().batchUpdate(
+            documentId=doc_id, body={'requests': requests}
+        ).execute()
+        logger.info(f"Applied {len(requests)} text insertions to {doc_id}")
 
 
 def create_tailored_resume_doc(
@@ -231,7 +361,9 @@ def create_tailored_resume_doc(
         # Build replacements from actual GDoc paragraph texts (not DB-parsed text)
         if base_resume_data:
             gdoc_paragraphs = _extract_doc_paragraphs(docs_service, document_id)
-            replacements = _build_gdoc_replacements(gdoc_paragraphs, base_resume_data, resume_data)
+            replacements, insertions = _build_gdoc_replacements(
+                gdoc_paragraphs, base_resume_data, resume_data
+            )
             replace_requests = _build_replace_requests(replacements)
             if replace_requests:
                 docs_service.documents().batchUpdate(
@@ -241,6 +373,10 @@ def create_tailored_resume_doc(
                 logger.info(f"Applied {len(replace_requests)} text replacements to {document_id}")
             else:
                 logger.info("No text differences found between base and tailored resume")
+
+            # Insert new paragraphs (extra skills lines, experience bullets)
+            if insertions:
+                _apply_insertions(docs_service, document_id, insertions)
 
         return f"https://docs.google.com/document/d/{document_id}/edit"
 

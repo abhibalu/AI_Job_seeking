@@ -59,13 +59,23 @@ def node_x(state: MyState) -> dict:
         result = agent.run(...)
         return {"my_field": result, "status": "done"}
     except Exception as e:
-        logger.error(f"[Graph] <action> failed: {e}")
+        logger.exception("[Graph] <action> failed", extra={"job_id": state.get("job_id")})
         return {"errors": [f"<action> failed: {str(e)}"], "status": "error"}
 ```
 
 - Always return **partial dicts** — LangGraph merges them into state.
 - Routing functions check `state.get("errors")` first before inspecting other fields.
 - Logging prefix: `[Graph]` in `pipeline_graph.py`, `[SubGraph]` in `tailoring_subgraph.py`.
+- Inside `except`: **always** use `logger.exception(msg)` for errors, `logger.warning(msg, exc_info=True)` for warnings. Never `logger.error(f"... {e}")` without `exc_info`.
+
+## Logging conventions (ADR-0017)
+
+- `logger = logging.getLogger(__name__)` at module level in every file — no `print()`.
+- **Exception handlers**: `logger.exception(msg, extra={...})` (errors) or `logger.warning(msg, exc_info=True)` (warnings). Always captures the full stack trace.
+- **Correlation IDs**: available via `backend.log_context`. Every log line carries `correlation_id` automatically once `setup_logging()` has run.
+- **LLM call timing**: `agents/base.py` logs `duration_ms`, `prompt_tokens`, `completion_tokens` on every successful completion.
+- **Node timing**: `tailoring_subgraph.py` wraps each node body with `_timed_node(name, job_id)`, which emits `duration_ms` on exit.
+- **Routing decisions**: routing functions in `pipeline_graph.py` and `tailoring_subgraph.py` log their chosen route + context (score, violations, etc.) on every call.
 
 ## State schema rules
 

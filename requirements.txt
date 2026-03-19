@@ -46,7 +46,6 @@ apscheduler>=3.10.0
 
 # ── Background / Utilities ──
 python-dotenv>=1.0.0
-structlog>=24.0.0
 
 # ── Dev / Testing ──
 pytest>=7.4.0

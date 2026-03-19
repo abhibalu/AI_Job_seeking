@@ -58,8 +58,9 @@ def _build_trigger(cron_expr: str, interval_hours: int, label: str):
             return trigger
         except Exception as e:
             logger.warning(
-                f"[Scheduler] Invalid cron expression for {label} ('{cron_expr}'): {e}. "
-                f"Falling back to interval of {interval_hours}h."
+                "[Scheduler] Invalid cron expression for %s ('%s'): %s. Falling back to interval of %dh.",
+                label, cron_expr, e, interval_hours,
+                exc_info=True,
             )
     logger.info(f"[Scheduler] {label}: using IntervalTrigger every {interval_hours}h")
     return IntervalTrigger(hours=interval_hours)

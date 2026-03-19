@@ -71,7 +71,7 @@ by the main UI.
 
 - `CORSMiddleware` — `allow_origins=["*"]`, exposes `X-Total-Count`
 - `LangfuseMiddleware` — request-level tracing
-- `RequestLoggingMiddleware` — structured request logging
+- `RequestLoggingMiddleware` — structured request logging; generates `X-Request-ID` (from header or UUID[:8]), sets `correlation_id` context var for the request lifetime, echoes `X-Request-ID` back in the response
 
 ## Adding a new route
 

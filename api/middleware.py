@@ -42,19 +42,24 @@ class LangfuseMiddleware(BaseHTTPMiddleware):
 import time
 import logging
 
+from backend.log_context import set_correlation_id, new_request_id
+
 logger = logging.getLogger(__name__)
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
     Middleware to log every request and response in structured JSON.
+    Generates a correlation ID (X-Request-ID) and threads it through all log lines.
     """
     async def dispatch(self, request: Request, call_next) -> Response:
+        request_id = request.headers.get("X-Request-ID") or new_request_id()
+        set_correlation_id(request_id)
         start_time = time.time()
-        
+
         try:
             response = await call_next(request)
             process_time = time.time() - start_time
-            
+
             logger.info(
                 "Request processed",
                 extra={
@@ -62,10 +67,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "url": str(request.url),
                     "client_ip": request.client.host if request.client else "unknown",
                     "duration": f"{process_time:.4f}s",
-                    "status_code": response.status_code
+                    "status_code": response.status_code,
+                    "request_id": request_id,
                 }
             )
-            
+
+            response.headers["X-Request-ID"] = request_id
             return response
         except Exception as e:
             process_time = time.time() - start_time
@@ -76,8 +83,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "url": str(request.url),
                     "client_ip": request.client.host if request.client else "unknown",
                     "duration": f"{process_time:.4f}s",
-                    "error": str(e)
+                    "error": str(e),
+                    "request_id": request_id,
                 },
                 exc_info=True
             )
             raise e
+        finally:
+            set_correlation_id(None)

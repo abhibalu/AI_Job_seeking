@@ -380,7 +380,7 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
                 "tailoring_status": tailoring_status_map.get(status, "ready"),
             }).eq("id", record_id).execute()
         except Exception as e:
-            logger.warning(f"Failed to save edit_plan for resume {record_id}: {e}")
+            logger.warning("Failed to save edit_plan for resume %s: %s", record_id, e, exc_info=True)
 
         # Write normalised resume_changes rows (ADR-0010)
         _save_resume_changes(record_id, job_id, edit_plan)
@@ -425,7 +425,7 @@ def _save_resume_changes(resume_id: str, job_id: str, edit_plan: dict) -> None:
             client.table("resume_changes").insert(rows).execute()
             logger.info(f"Saved {len(rows)} resume_changes for resume {resume_id}")
         except Exception as e:
-            logger.warning(f"Failed to save resume_changes for resume {resume_id}: {e}")
+            logger.warning("Failed to save resume_changes for resume %s: %s", resume_id, e, exc_info=True)
 
 
 def get_tailored_resume(record_id: str) -> dict | None:

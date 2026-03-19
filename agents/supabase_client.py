@@ -3,7 +3,10 @@ Supabase client for TailorAI.
 
 Provides connection to Supabase for storing evaluation results.
 """
+import logging
 from functools import lru_cache
+
+logger = logging.getLogger(__name__)
 
 from supabase import create_client, Client
 
@@ -32,5 +35,5 @@ def check_connection() -> bool:
         client.table("jobs").select("id").limit(1).execute()
         return True
     except Exception as e:
-        print(f"Supabase connection error: {e}")
+        logger.exception("Supabase connection check failed")
         return False

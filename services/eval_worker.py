@@ -18,6 +18,7 @@ from agents.pipeline_graph import build_pipeline_graph
 from agents.supabase_checkpointer import SupabaseSaver
 from services.pipeline_runs import start_run, finish_run
 from services.telegram_notifier import notify_eval_complete, notify_pipeline_error
+from backend.log_context import set_correlation_id, new_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ def run_eval_worker() -> None:
     logger.info(f"[GraphWorker] Starting LangGraph batch (max={MAX_JOBS_PER_RUN})")
 
     run_id = start_run("evaluate", metadata={"max_jobs": MAX_JOBS_PER_RUN, "orchestration": "langgraph"})
+    set_correlation_id(f"run:{run_id[:8]}" if run_id else f"run:{new_request_id()}")
 
     try:
         jobs = _get_unevaluated_jobs(MAX_JOBS_PER_RUN)
@@ -154,3 +156,5 @@ def run_eval_worker() -> None:
         logger.error(f"[GraphWorker] Unhandled error: {e}", exc_info=True)
         finish_run(run_id, status="failed", error_detail=str(e))
         notify_pipeline_error("GraphWorker", str(e))
+    finally:
+        set_correlation_id(None)

@@ -123,9 +123,14 @@ function extractGoogleDocId(input: string): string {
 Two export paths (selected via presence of `GOOGLE_BASE_RESUME_DOC_ID`):
 
 #### Path A: Copy-and-Fill (Formatting Preserved) — When `GOOGLE_BASE_RESUME_DOC_ID` is set
-- **Mechanism:** Copy the base resume GDoc into the company subfolder, then apply `replaceAllText` batchUpdates for each string that differs between base and tailored resumes.
-- **Build Step:** `_build_replacement_map(base_data, tailored_data)` in `api/routes/resumes.py` returns `{old_text: new_text}` for summary, experience bullets, and skills (position-matched via `zip`).
-- **Apply Step:** `_build_replace_requests(replacements)` in `services/google_docs.py` converts the map to Docs API `replaceAllText` requests (case-sensitive, literal string match).
+- **Mechanism:** Copy the base resume GDoc into the company subfolder, then apply a two-phase update:
+  1. `replaceAllText` for changed strings (rewording existing content).
+  2. `insertText` for additions — new skills lines or extra experience bullets not present in the base (ADR-0018).
+- **Build Step:** `_build_gdoc_replacements(gdoc_paragraphs, base_data, tailored_data)` returns `(replacements, insertions)`. Replacements use GDoc paragraph text as match target (fuzzy word overlap). Insertions are detected when tailored data has more items than base data.
+- **Apply Step:** `_build_replace_requests(replacements)` converts to Docs API `replaceAllText` requests. Then `_apply_insertions()` re-reads doc structure for fresh indices and inserts `\n{new_text}` at the sibling paragraph's `endIndex - 1`, bottom-to-top. New paragraphs inherit the sibling's formatting.
+- **Safety Guards:**
+  - Skills format compatibility: if base uses structured categories (`"Category: kw, kw"`) but tailored uses bare keywords (`"Python"`), skills replacement is skipped to avoid destroying GDoc formatting.
+  - Apostrophe escaping: single quotes in folder/doc names are escaped in Drive API queries.
 - **Folder Structure:** `OtooCV / <Company Name> / <Resume Doc>`
 - **Replace Logic:** If a doc with the same title already exists, delete it and create a fresh copy to avoid stale content.
 - **Benefit:** Exported doc inherits all formatting from the base GDoc — fonts, styles, layout preserved.

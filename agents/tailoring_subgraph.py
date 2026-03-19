@@ -1,4 +1,6 @@
 import logging
+import time
+from contextlib import contextmanager
 from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, START, END
 
@@ -8,6 +10,20 @@ from agents.resume_critic import ResumeCriticAgent
 from agents.resume_validator import validate_structure, validate_planned_edits
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _timed_node(name: str, job_id: str):
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        logger.info("[SubGraph] %s complete", name, extra={
+            "node": name,
+            "job_id": job_id,
+            "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
+        })
+
 
 # 1. Sub-Graph State Definition
 class TailoringState(TypedDict):
@@ -30,21 +46,22 @@ def node_plan(state: TailoringState) -> dict:
     logger.info(f"[SubGraph] Planning edits for job {state['job_id']}")
 
     agent = ChangePlannerAgent()
-    try:
-        edit_plan = agent.run(
-            base_resume=state["base_resume"],
-            jd_context=state["jd_context"],
-            approved_skills=state["approved_skills"],
-        )
+    with _timed_node("plan", state["job_id"]):
+        try:
+            edit_plan = agent.run(
+                base_resume=state["base_resume"],
+                jd_context=state["jd_context"],
+                approved_skills=state["approved_skills"],
+            )
 
-        logger.info(f"[SubGraph] Edit plan: {len(edit_plan.get('edits', []))} edits planned")
-        return {
-            "edit_plan": edit_plan,
-            "status": "planned"
-        }
-    except Exception as e:
-        logger.error(f"[SubGraph] Planning failed: {e}", exc_info=True)
-        return {"errors": [f"Planning failed: {str(e)}"], "status": "error"}
+            logger.info(f"[SubGraph] Edit plan: {len(edit_plan.get('edits', []))} edits planned")
+            return {
+                "edit_plan": edit_plan,
+                "status": "planned"
+            }
+        except Exception as e:
+            logger.error(f"[SubGraph] Planning failed: {e}", exc_info=True)
+            return {"errors": [f"Planning failed: {str(e)}"], "status": "error"}
 
 
 def node_draft(state: TailoringState) -> dict:
@@ -52,45 +69,47 @@ def node_draft(state: TailoringState) -> dict:
     logger.info(f"[SubGraph] Executing edits for job {state['job_id']} (Revision {state.get('revision_count', 0)})")
 
     agent = ResumeTailorAgent()
-    try:
-        # Pass critique if this is a revision pass
-        critique_context = "\n".join(state.get("critique", []))
+    with _timed_node("draft", state["job_id"]):
+        try:
+            # Pass critique if this is a revision pass
+            critique_context = "\n".join(state.get("critique", []))
 
-        result = agent.run(
-            base_resume=state["base_resume"],
-            edit_plan=state.get("edit_plan", {}),
-            approved_skills=state["approved_skills"],
-            critique=critique_context
-        )
+            result = agent.run(
+                base_resume=state["base_resume"],
+                edit_plan=state.get("edit_plan", {}),
+                approved_skills=state["approved_skills"],
+                critique=critique_context
+            )
 
-        return {
-            "draft_resume": result,
-            "revision_count": state.get("revision_count", 0) + 1,
-            "status": "drafted"
-        }
-    except Exception as e:
-        logger.error(f"[SubGraph] Drafting failed: {e}", exc_info=True)
-        return {"errors": [f"Drafting failed: {str(e)}"], "status": "error"}
+            return {
+                "draft_resume": result,
+                "revision_count": state.get("revision_count", 0) + 1,
+                "status": "drafted"
+            }
+        except Exception as e:
+            logger.error(f"[SubGraph] Drafting failed: {e}", exc_info=True)
+            return {"errors": [f"Drafting failed: {str(e)}"], "status": "error"}
 
 
 def node_validate(state: TailoringState) -> dict:
     """Programmatic structural validation — no LLM call needed."""
     logger.info(f"[SubGraph] Validating draft structure for job {state['job_id']}")
 
-    violations = validate_structure(state["base_resume"], state["draft_resume"])
+    with _timed_node("validate", state["job_id"]):
+        violations = validate_structure(state["base_resume"], state["draft_resume"])
 
-    # Also check that only planned locations were modified
-    plan_violations = validate_planned_edits(
-        state["base_resume"], state["draft_resume"], state.get("edit_plan", {})
-    )
-    violations.extend(plan_violations)
+        # Also check that only planned locations were modified
+        plan_violations = validate_planned_edits(
+            state["base_resume"], state["draft_resume"], state.get("edit_plan", {})
+        )
+        violations.extend(plan_violations)
 
-    if violations:
-        logger.warning(f"[SubGraph] Validation violations found: {violations}")
-    else:
-        logger.info("[SubGraph] Draft passed structural and plan validation.")
+        if violations:
+            logger.warning(f"[SubGraph] Validation violations found: {violations}")
+        else:
+            logger.info("[SubGraph] Draft passed structural and plan validation.")
 
-    return {"critique": violations, "status": "validated"}
+        return {"critique": violations, "status": "validated"}
 
 
 def route_validate(state: TailoringState) -> Literal["critique", "revise", "error"]:
@@ -103,15 +122,19 @@ def route_validate(state: TailoringState) -> Literal["critique", "revise", "erro
     MAX_REVISIONS = 2
 
     if not critique:
-        # Structurally valid — proceed to LLM critic for content review
-        return "critique"
+        route = "critique"
     elif revision_count >= MAX_REVISIONS:
-        # Can't revise further — let it through to critic anyway
         logger.warning("[SubGraph] Structural issues persist at max revisions. Proceeding to critic.")
-        return "critique"
+        route = "critique"
     else:
-        # Structural issues found — send back to draft without wasting a critic LLM call
-        return "revise"
+        route = "revise"
+
+    logger.info("[SubGraph] route_validate → %s", route, extra={
+        "job_id": state.get("job_id"),
+        "revision_count": revision_count,
+        "violations": len(critique),
+    })
+    return route
 
 
 def node_critique(state: TailoringState) -> dict:
@@ -119,21 +142,22 @@ def node_critique(state: TailoringState) -> dict:
     logger.info(f"[SubGraph] Critiquing draft for job {state['job_id']}")
 
     agent = ResumeCriticAgent()
-    try:
-        critique_list = agent.run(
-            draft_resume=state["draft_resume"],
-            base_resume=state["base_resume"],
-            edit_plan=state.get("edit_plan", {}),
-            approved_skills=state["approved_skills"]
-        )
+    with _timed_node("critique", state["job_id"]):
+        try:
+            critique_list = agent.run(
+                draft_resume=state["draft_resume"],
+                base_resume=state["base_resume"],
+                edit_plan=state.get("edit_plan", {}),
+                approved_skills=state["approved_skills"]
+            )
 
-        return {
-            "critique": critique_list,
-            "status": "critiqued"
-        }
-    except Exception as e:
-        logger.error(f"[SubGraph] Critiquing failed: {e}", exc_info=True)
-        return {"errors": [f"Critiquing failed: {str(e)}"], "status": "error"}
+            return {
+                "critique": critique_list,
+                "status": "critiqued"
+            }
+        except Exception as e:
+            logger.error(f"[SubGraph] Critiquing failed: {e}", exc_info=True)
+            return {"errors": [f"Critiquing failed: {str(e)}"], "status": "error"}
 
 
 def node_save(state: TailoringState) -> dict:
@@ -142,40 +166,43 @@ def node_save(state: TailoringState) -> dict:
 
     from agents.database import save_tailored_resume
 
-    try:
-        final_resume = state["draft_resume"]
-        # Strip backend metadata from the resume JSON
-        clean_resume = {k: v for k, v in final_resume.items() if not k.startswith('_')}
+    with _timed_node("save", state["job_id"]):
+        try:
+            final_resume = state["draft_resume"]
+            # Strip backend metadata from the resume JSON
+            clean_resume = {k: v for k, v in final_resume.items() if not k.startswith('_')}
 
-        # Differentiate force-saved (unresolved flaws) from critic-approved
-        is_force_save = bool(state.get("critique", []))
-        save_status = "needs_review" if is_force_save else "pending"
-        if is_force_save:
-            logger.info(f"[SubGraph] Force-saving with status='needs_review' ({len(state['critique'])} unresolved flaws)")
+            # Differentiate force-saved (unresolved flaws) from critic-approved
+            is_force_save = bool(state.get("critique", []))
+            save_status = "needs_review" if is_force_save else "pending"
+            if is_force_save:
+                logger.info(f"[SubGraph] Force-saving with status='needs_review' ({len(state['critique'])} unresolved flaws)")
 
-        # Clean edit_plan metadata before saving
-        edit_plan = state.get("edit_plan", {})
-        clean_plan = {k: v for k, v in edit_plan.items() if not k.startswith('_')} if edit_plan else None
+            # Clean edit_plan metadata before saving
+            edit_plan = state.get("edit_plan", {})
+            clean_plan = {k: v for k, v in edit_plan.items() if not k.startswith('_')} if edit_plan else None
 
-        record_id = save_tailored_resume(
-            job_id=state["job_id"],
-            version=state.get("revision_count", 0),
-            content=clean_resume,
-            status=save_status,
-            edit_plan=clean_plan
-        )
-        return {
-            "final_resume_id": record_id,
-            "status": "saved"
-        }
-    except Exception as e:
-        logger.error(f"[SubGraph] Saving failed: {e}", exc_info=True)
-        return {"errors": [f"Saving failed: {str(e)}"], "status": "error"}
+            record_id = save_tailored_resume(
+                job_id=state["job_id"],
+                version=state.get("revision_count", 0),
+                content=clean_resume,
+                status=save_status,
+                edit_plan=clean_plan
+            )
+            return {
+                "final_resume_id": record_id,
+                "status": "saved"
+            }
+        except Exception as e:
+            logger.error(f"[SubGraph] Saving failed: {e}", exc_info=True)
+            return {"errors": [f"Saving failed: {str(e)}"], "status": "error"}
 
 
 # 3. Routing Logic
 def route_critique(state: TailoringState) -> Literal["revise", "save", "error"]:
     if state.get("errors"):
+        logger.warning("[SubGraph] route_critique → error",
+                       extra={"job_id": state.get("job_id"), "errors": state.get("errors")})
         return "error"
 
     critique = state.get("critique", [])

@@ -48,7 +48,7 @@ def node_evaluate(state: JobApplicationState) -> dict:
         )
         return {"evaluation": result, "status": "evaluated"}
     except Exception as e:
-        logger.error(f"[Graph] Evaluation failed: {e}")
+        logger.exception("[Graph] Evaluation failed", extra={"job_id": state.get("job_id")})
         return {"errors": [f"Evaluation failed: {str(e)}"], "status": "error"}
 
 
@@ -65,10 +65,10 @@ def node_parse(state: JobApplicationState) -> dict:
             from agents.database import save_jd_parsed
             save_jd_parsed(result)
         except Exception as e:
-            logger.warning(f"[Graph] Failed to save parsed JD to DB: {e}")
+            logger.warning("[Graph] Failed to save parsed JD to DB: %s", e, exc_info=True)
         return {"parsed_jd": result, "status": "parsed"}
     except Exception as e:
-        logger.error(f"[Graph] JD Parsing failed: {e}")
+        logger.exception("[Graph] JD Parsing failed", extra={"job_id": state.get("job_id")})
         return {"errors": [f"JD Parse failed: {str(e)}"], "status": "error"}
 
 
@@ -135,43 +135,53 @@ def node_tailor(state: JobApplicationState) -> dict:
 def node_notify_apply(state: JobApplicationState) -> dict:
     logger.info(f"[Graph] Notifying apply for job {state['job_id']}")
     eval_res = state["evaluation"]
-    notify_high_match(
+    ok = notify_high_match(
         company=state["job_details"].get("company_name", "Unknown"),
         title=state["job_details"].get("title", "Unknown"),
         score=eval_res.get("job_match_score", 0),
         job_id=state["job_id"],
         action="apply",
     )
+    logger.info("[Graph] Notification dispatched", extra={
+        "job_id": state["job_id"], "action": "apply", "ok": ok,
+    })
     return {"status": "notified_apply"}
 
 
 def node_notify_tailored(state: JobApplicationState) -> dict:
     logger.info(f"[Graph] Notifying tailored for job {state['job_id']}")
     eval_res = state["evaluation"]
-    # Send a notification that tailoring is complete
-    notify_high_match(
+    ok = notify_high_match(
         company=state["job_details"].get("company_name", "Unknown"),
         title=state["job_details"].get("title", "Unknown"),
         score=eval_res.get("job_match_score", 0),
         job_id=state["job_id"],
-        action="review_tailored", # custom action for tailored resumes
+        action="review_tailored",
     )
+    logger.info("[Graph] Notification dispatched", extra={
+        "job_id": state["job_id"], "action": "review_tailored", "ok": ok,
+    })
     return {"status": "notified_tailored"}
 
 
 # 3. Routing Logic
 def route_after_evaluation(state: JobApplicationState) -> Literal["skip", "apply", "tailor", "error"]:
     if state.get("errors"):
+        logger.warning("[Graph] route → error after evaluation",
+                       extra={"job_id": state.get("job_id"), "errors": state["errors"]})
         return "error"
-        
+
     action = state["evaluation"].get("recommended_action", "skip").lower()
-    
-    if action == "apply":
-        return "apply"
-    elif action == "tailor":
-        return "tailor"
-        
-    return "skip"
+    score = state["evaluation"].get("job_match_score", 0)
+    route = "apply" if action == "apply" else "tailor" if action == "tailor" else "skip"
+    logger.info("[Graph] Routing decision", extra={
+        "job_id": state.get("job_id"),
+        "route": route,
+        "score": score,
+        "company": state["job_details"].get("company_name"),
+        "title": state["job_details"].get("title"),
+    })
+    return route
 
 
 def build_pipeline_graph() -> StateGraph:
@@ -201,7 +211,11 @@ def build_pipeline_graph() -> StateGraph:
 
     def route_after_parse(state: JobApplicationState) -> str:
         if state.get("errors"):
+            logger.warning("[Graph] route → error after parse",
+                           extra={"job_id": state.get("job_id"), "errors": state.get("errors")})
             return "error"
+        logger.info("[Graph] Parse succeeded, routing to tailor",
+                    extra={"job_id": state.get("job_id")})
         return "tailor"
 
     workflow.add_conditional_edges(

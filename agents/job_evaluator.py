@@ -31,7 +31,7 @@ class JobEvaluatorAgent(BaseAgent):
                 self.resume = self._normalize_resume(db_resume)
                 return
         except Exception as e:
-            logger.warning(f"Failed to load resume from DB: {e}")
+            logger.warning("Failed to load resume from DB: %s", e, exc_info=True)
 
         # 2. Fallback to file
         resume_path = Path("agent_prompts/base_resume.json")

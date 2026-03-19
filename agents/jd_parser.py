@@ -3,7 +3,10 @@ JD Parser Agent - Extracts structured signals from job descriptions.
 
 Returns must-haves, skills, keywords, and normalized skill mappings.
 """
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from .base import BaseAgent
 
@@ -79,17 +82,17 @@ def run_jd_parser_task(job_id: str, description_text: str):
         
         # specific check to avoid re-parsing if already done (though API might have checked too)
         if is_job_parsed(job_id):
-            print(f"Job {job_id} already parsed. Skipping.")
+            logger.info("Job %s already parsed. Skipping.", job_id, extra={"job_id": job_id})
             return
 
-        print(f"Starting background JD parsing for {job_id}...")
+        logger.info("Starting background JD parsing for %s", job_id, extra={"job_id": job_id})
         agent = JDParserAgent()
         result = agent.run(job_id=job_id, description_text=description_text)
-        
+
         # Save to DB
         save_jd_parsed(result)
-        print(f"Successfully parsed and saved JD for {job_id}")
-        
+        logger.info("Successfully parsed and saved JD for %s", job_id, extra={"job_id": job_id})
+
     except Exception as e:
-        print(f"Error in background JD parsing for {job_id}: {e}")
+        logger.exception("Error in background JD parsing for %s", job_id, extra={"job_id": job_id})
 

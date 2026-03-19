@@ -81,6 +81,27 @@ no nested checkpointing.
 
 ---
 
+## Cross-cutting: structured logging and correlation IDs (ADR-0017)
+
+All log lines are emitted as JSON via `JSONFormatter` in `backend/logging.py`. Every line includes
+a `correlation_id` field injected by `CorrelationFilter` (from `backend/log_context.py`).
+
+Set at:
+- **HTTP requests** — `RequestLoggingMiddleware` sets `X-Request-ID` (from header or generated),
+  echoes it back in the response, clears in `finally`.
+- **APScheduler workers** — `run_eval_worker` / `run_scrape_worker` set `run:{run_id[:8]}` /
+  `scrape:{run_id[:8]}` at entry, clear in `finally`. APScheduler threads do **not** inherit
+  `contextvars` automatically — must be set explicitly.
+- **FastAPI background tasks** and `run_in_threadpool` inherit context automatically.
+
+`backend/log_context.py` is the single source of truth for correlation ID state.
+
+**Rule**: Never use `print()` in any background task or service. Always `logger.exception()` or
+`logger.warning(..., exc_info=True)` inside `except` blocks — bare `logger.error(f"... {e}")`
+silently drops the stack trace.
+
+---
+
 ## Cross-cutting: background task status tracking
 
 User-triggered long-running operations (batch eval, tailoring) follow:

@@ -56,8 +56,10 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 See `docs/agent-lessons.md` for recurring mistake patterns and fixes.
 
 ## Architecture decisions
-Recorded in `docs/decisions/`. ADR-0001 through ADR-0016 cover all major architectural shifts.
+Recorded in `docs/decisions/`. ADR-0001 through ADR-0017 cover all major architectural shifts.
 - ADR-0013: Application tracker uses `status_history JSONB` over a separate events table (single-user, bounded history, no join needed).
 - ADR-0014: Tailoring endpoint converted from sync to background task + SSE + cancel (reuses existing infra from ADR-0009).
 - ADR-0015: Google Docs export uses copy-and-fill path (copy base GDoc + replaceAllText) when `GOOGLE_BASE_RESUME_DOC_ID` is set, preserving formatting.
 - ADR-0016: Settings page shows current resume indicator (name + timestamp + source GDoc link); `gdoc_url` column reused for source URL on master rows vs export URL on tailored rows.
+- ADR-0017: Structured logging with stdlib only (structlog removed); correlation IDs via `ContextVar` in `backend/log_context.py`; set at HTTP middleware + APScheduler worker entry points.
+- ADR-0018: GDoc export extended with `insertText` for additions (new skills/bullets); safety guards for apostrophe escaping and skills format mismatch.

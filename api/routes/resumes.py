@@ -193,7 +193,7 @@ def update_master_resume(resume: ResumeData):
                 
         return {"status": "success", "message": "Resume updated successfully"}
     except Exception as e:
-        print(f"Error updating resume: {e}")
+        logger.exception("Error updating master resume")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -220,7 +220,7 @@ async def process_resume_background(full_text: str, gdoc_url: str = None):
                 json.dump(result, f, indent=2)
 
     except Exception as e:
-        print(f"Background parsing exception: {e}")
+        logger.exception("Background resume parsing failed")
         save_resume({"status": "error", "error": str(e)}, is_master=True)
 
 @router.post("/upload")
@@ -257,7 +257,7 @@ async def upload_resume(background_tasks: BackgroundTasks, file: UploadFile = Fi
         return processing_status
 
     except Exception as e:
-        print(f"Error starting resume process: {e}")
+        logger.exception("Error starting resume upload process")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -397,8 +397,7 @@ def run_tailoring_worker(task_id: str, job_id: str, initial_state: dict):
         save_task_status(task_id, "completed", {"completed": 4, "total": 4, "stage": "done", "resume_id": record_id})
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("Tailoring worker unhandled exception", extra={"task_id": task_id, "job_id": job_id})
         save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "error"}, error=str(e))
 
 

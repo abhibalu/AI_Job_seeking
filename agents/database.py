@@ -293,7 +293,7 @@ def get_task_status(task_id: str) -> dict | None:
 # RESUME FUNCTIONS
 # ============================================
 
-def save_resume(content: dict, name: str = "Master Resume", is_master: bool = False, status: str = None, job_id: str = None, version: int = None) -> str:
+def save_resume(content: dict, name: str = "Master Resume", is_master: bool = False, status: str = None, job_id: str = None, version: int = None, gdoc_url: str = None) -> str:
     """Save parsed resume to database (United Resumes Table).
 
     Args:
@@ -323,6 +323,8 @@ def save_resume(content: dict, name: str = "Master Resume", is_master: bool = Fa
         "version": version,
         "updated_at": datetime.now().isoformat(),
     }
+    if gdoc_url is not None:
+        data["gdoc_url"] = gdoc_url
 
     client.table("resumes").insert(data).execute()
     return record_id
@@ -332,9 +334,10 @@ def get_master_resume() -> dict | None:
     """Get the latest master resume."""
     client = _get_supabase()
     try:
-        result = client.table("resumes").select("content").eq("status", "master").order("created_at", desc=True).limit(1).execute()
+        result = client.table("resumes").select("content, updated_at, gdoc_url").eq("status", "master").order("created_at", desc=True).limit(1).execute()
         if result.data:
-            return result.data[0]["content"]
+            row = result.data[0]
+            return {"content": row["content"], "updated_at": row.get("updated_at"), "gdoc_url": row.get("gdoc_url")}
     except Exception:
         pass
 
@@ -443,6 +446,12 @@ def update_tailored_resume_status(record_id: str, status: str):
     """Update status (approved/rejected)."""
     client = _get_supabase()
     client.table("resumes").update({"status": status}).eq("id", record_id).execute()
+
+
+def update_gdoc_url(resume_id: str, gdoc_url: str) -> None:
+    """Save the Google Docs export URL to a tailored resume."""
+    client = _get_supabase()
+    client.table("resumes").update({"gdoc_url": gdoc_url}).eq("id", resume_id).execute()
 
 
 def update_cover_letter(resume_id: str, cover_letter: str) -> None:

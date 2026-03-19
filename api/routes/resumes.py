@@ -100,10 +100,13 @@ def _to_frontend_format(json_resume: dict) -> dict:
 @router.get("/master")
 def get_master_resume():
     """Get the current master resume JSON in frontend format."""
-    resume = get_db_master_resume()
-    if resume:
-        return _to_frontend_format(resume)
-        
+    row = get_db_master_resume()
+    if row:
+        data = _to_frontend_format(row["content"])
+        data["updatedAt"] = row.get("updated_at")
+        data["sourceGdocUrl"] = row.get("gdoc_url")
+        return data
+
     # Fallback to file for backward compatibility during migration
     if os.path.exists(MASTER_RESUME_PATH):
         try:
@@ -111,7 +114,7 @@ def get_master_resume():
                 return _to_frontend_format(json.load(f))
         except:
             pass
-            
+
     raise HTTPException(status_code=404, detail="Master resume not found. Please upload a resume first.")
 
 from api.schemas import ResumeData
@@ -196,12 +199,12 @@ def update_master_resume(resume: ResumeData):
 
 from fastapi.concurrency import run_in_threadpool
 
-async def process_resume_background(full_text: str):
+async def process_resume_background(full_text: str, gdoc_url: str = None):
     """Background task to parse resume and save to DB."""
     try:
         agent = ResumeParserAgent()
         result = await run_in_threadpool(agent.run, resume_text=full_text)
-        
+
         if "error" in result:
             logger.error(f"Background parsing failed: {result.get('error')}")
             save_resume({"status": "error", "error": result.get("error")}, is_master=True)
@@ -210,12 +213,12 @@ async def process_resume_background(full_text: str):
             save_resume({"status": "error", "error": f"Resume parsed but failed schema validation: {result.get('_validation_error', 'Unknown')}"}, is_master=True)
         else:
             # Save final results
-            save_resume(result, name="Master Resume", is_master=True)
+            save_resume(result, name="Master Resume", is_master=True, gdoc_url=gdoc_url)
 
             # Also update file backup
             with open(MASTER_RESUME_PATH, "w") as f:
                 json.dump(result, f, indent=2)
-            
+
     except Exception as e:
         print(f"Background parsing exception: {e}")
         save_resume({"status": "error", "error": str(e)}, is_master=True)
@@ -274,8 +277,9 @@ async def import_from_google_doc(request: GDocImportRequest, background_tasks: B
         processing_status = {"status": "processing", "uploaded_at": datetime.now().isoformat()}
         save_resume(processing_status, name="Master Resume", is_master=True)
 
-        # Reuse existing background parsing flow
-        background_tasks.add_task(process_resume_background, doc_text)
+        # Reuse existing background parsing flow, threading source URL through
+        source_url = f"https://docs.google.com/document/d/{request.document_id}/edit"
+        background_tasks.add_task(process_resume_background, doc_text, source_url)
         return {"status": "processing", "message": "Parsing Google Doc content..."}
 
     except HTTPException:
@@ -538,35 +542,6 @@ def save_cover_letter(resume_id: str, body: dict):
     return {"ok": True}
 
 
-def _build_replacement_map(base: dict, tailored: dict) -> dict[str, str]:
-    """Return a {old_text: new_text} map of strings that differ between base and tailored resumes.
-
-    Both dicts must be in frontend format (fullName, experience, skills, summary…).
-    Only non-empty, changed strings are included.
-    """
-    replacements: dict[str, str] = {}
-
-    def _add(old: str, new: str) -> None:
-        old, new = (old or "").strip(), (new or "").strip()
-        if old and new and old != new:
-            replacements[old] = new
-
-    # Summary
-    _add(base.get("summary", ""), tailored.get("summary", ""))
-
-    # Experience bullets (matched by position)
-    base_exp = base.get("experience", [])
-    tail_exp = tailored.get("experience", [])
-    for b_job, t_job in zip(base_exp, tail_exp):
-        for b_bullet, t_bullet in zip(b_job.get("achievements", []), t_job.get("achievements", [])):
-            _add(b_bullet, t_bullet)
-
-    # Skills (frontend format stores each skill as a plain string)
-    for b_skill, t_skill in zip(base.get("skills", []), tailored.get("skills", [])):
-        _add(str(b_skill), str(t_skill))
-
-    return replacements
-
 
 @router.post("/export-gdoc/{job_id}")
 async def export_to_google_docs(job_id: str):
@@ -591,11 +566,18 @@ async def export_to_google_docs(job_id: str):
         # 3. Get settings
         from backend.settings import settings
         folder_id = settings.GOOGLE_DRIVE_FOLDER_ID or None
-        base_doc_id = settings.GOOGLE_BASE_RESUME_DOC_ID or None
+        raw = settings.GOOGLE_BASE_RESUME_DOC_ID or ""
+        # Accept either bare ID or full URL like https://docs.google.com/document/d/<ID>/edit
+        if "/document/d/" in raw:
+            raw = raw.split("/document/d/")[1].split("/")[0]
+        base_doc_id = raw.strip() or None
 
-        # 4. Build replacement map when copy-and-fill path is active
-        # TODO: replacements disabled for progressive testing — verify copy lands first
-        replacements: dict[str, str] = {}
+        # 4. Fetch base resume data for GDoc-aware replacement matching
+        base_resume_data = None
+        if base_doc_id:
+            master_row = get_db_master_resume() or {}
+            base_content = master_row.get("content", master_row)
+            base_resume_data = _to_frontend_format(base_content)
 
         # 5. Generate Google Doc
         doc_url = await run_in_threadpool(
@@ -605,8 +587,14 @@ async def export_to_google_docs(job_id: str):
             resume_data=resume_data,
             folder_id=folder_id,
             base_doc_id=base_doc_id,
-            replacements=replacements,
+            base_resume_data=base_resume_data,
         )
+
+        # 6. Persist GDoc URL on the resume record
+        from agents.database import update_gdoc_url
+        resume_id = latest_version.get("id")
+        if resume_id and doc_url:
+            update_gdoc_url(resume_id, doc_url)
 
         return {"status": "success", "url": doc_url}
 

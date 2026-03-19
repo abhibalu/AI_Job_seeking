@@ -91,8 +91,77 @@ def _find_existing_doc(drive_service, doc_title: str, folder_id: str) -> str | N
     return files[0]['id'] if files else None
 
 
+def _extract_doc_paragraphs(docs_service, doc_id: str) -> list[str]:
+    """Return all non-empty paragraph texts from a GDoc, preserving order."""
+    doc = docs_service.documents().get(documentId=doc_id).execute()
+    paragraphs = []
+    for element in doc.get('body', {}).get('content', []):
+        para = element.get('paragraph', {})
+        text = ''.join(
+            run.get('textRun', {}).get('content', '')
+            for run in para.get('elements', [])
+        ).strip()
+        if text:
+            paragraphs.append(text)
+    return paragraphs
+
+
+def _find_best_gdoc_match(target: str, paragraphs: list[str]) -> str | None:
+    """Find the paragraph whose word overlap with target is highest (>= 0.5)."""
+    target_words = set(target.lower().split())
+    best_para, best_score = None, 0.0
+    for para in paragraphs:
+        para_words = set(para.lower().split())
+        if not para_words:
+            continue
+        score = len(target_words & para_words) / max(len(target_words), len(para_words))
+        if score > best_score:
+            best_score = score
+            best_para = para
+    return best_para if best_score >= 0.5 else None
+
+
+def _build_gdoc_replacements(
+    gdoc_paragraphs: list[str],
+    base_data: dict,
+    tailored_data: dict,
+) -> dict[str, str]:
+    """Build {gdoc_paragraph: tailored_text} for every field that changed.
+
+    Uses the DB master resume (base_data) as the bridge to locate the right
+    GDoc paragraph, since the GDoc is the source of truth for exact wording.
+    """
+    replacements: dict[str, str] = {}
+
+    def _match_and_add(base_text: str, tailored_text: str) -> None:
+        base_text = (base_text or '').strip()
+        tailored_text = (tailored_text or '').strip()
+        if not base_text or not tailored_text or base_text == tailored_text:
+            return
+        gdoc_para = _find_best_gdoc_match(base_text, gdoc_paragraphs)
+        if gdoc_para and gdoc_para != tailored_text:
+            replacements[gdoc_para] = tailored_text
+            logger.debug(f"Replacement matched:\n  GDoc: {gdoc_para!r}\n  → {tailored_text!r}")
+        else:
+            logger.warning(f"No GDoc match for base text: {base_text!r}")
+
+    # Summary
+    _match_and_add(base_data.get('summary', ''), tailored_data.get('summary', ''))
+
+    # Experience bullets (positional match)
+    for b_job, t_job in zip(base_data.get('experience', []), tailored_data.get('experience', [])):
+        for b_bullet, t_bullet in zip(b_job.get('achievements', []), t_job.get('achievements', [])):
+            _match_and_add(b_bullet, t_bullet)
+
+    # Skills
+    for b_skill, t_skill in zip(base_data.get('skills', []), tailored_data.get('skills', [])):
+        _match_and_add(str(b_skill), str(t_skill))
+
+    return replacements
+
+
 def _build_replace_requests(replacements: dict) -> list[dict]:
-    """Build replaceAllText batchUpdate requests from an old→new text map."""
+    """Build replaceAllText batchUpdate requests from a {old: new} map."""
     return [
         {'replaceAllText': {
             'containsText': {'text': old, 'matchCase': True},
@@ -109,7 +178,7 @@ def create_tailored_resume_doc(
     resume_data: dict,
     folder_id: str = None,
     base_doc_id: str | None = None,
-    replacements: dict[str, str] | None = None,
+    base_resume_data: dict | None = None,
 ) -> str:
     """Creates (or replaces) a Google Doc with the tailored resume content.
 
@@ -117,8 +186,10 @@ def create_tailored_resume_doc(
     If a doc with the same title already exists in the company folder, it is replaced.
 
     When base_doc_id is provided, copies the base resume GDoc (preserving all
-    formatting) and applies replaceAllText for each changed string instead of
-    building a plain-text document.
+    formatting) and swaps in tailored text via replaceAllText. base_resume_data
+    (DB master, frontend format) is used to locate the right GDoc paragraph for
+    each changed field — the actual GDoc text is used as the match target so that
+    LLM-parsing drift between the GDoc and DB doesn't break replacements.
 
     Returns the URL of the Google Doc.
     """
@@ -157,8 +228,10 @@ def create_tailored_resume_doc(
         document_id = copied['id']
         logger.info(f"Copied base doc {base_doc_id} → {document_id} ({doc_title})")
 
-        # Apply text replacements (content only; paragraph styles are untouched)
-        if replacements:
+        # Build replacements from actual GDoc paragraph texts (not DB-parsed text)
+        if base_resume_data:
+            gdoc_paragraphs = _extract_doc_paragraphs(docs_service, document_id)
+            replacements = _build_gdoc_replacements(gdoc_paragraphs, base_resume_data, resume_data)
             replace_requests = _build_replace_requests(replacements)
             if replace_requests:
                 docs_service.documents().batchUpdate(
@@ -166,6 +239,8 @@ def create_tailored_resume_doc(
                     body={'requests': replace_requests}
                 ).execute()
                 logger.info(f"Applied {len(replace_requests)} text replacements to {document_id}")
+            else:
+                logger.info("No text differences found between base and tailored resume")
 
         return f"https://docs.google.com/document/d/{document_id}/edit"
 

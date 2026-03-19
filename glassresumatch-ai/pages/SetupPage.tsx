@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, Loader2, X, Link2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { apiClient } from '../services/apiClient';
 import { Toast } from '../components/Toast';
+import { formatTimeAgo } from '../utils/format';
 
 interface SetupPageProps {
   isOnboarding: boolean;
@@ -29,6 +30,20 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
   const fileRef = useRef<HTMLInputElement>(null);
   const [flow, setFlow] = useState<FlowPhase>({ phase: 'idle' });
   const [settingsToast, setSettingsToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [currentResume, setCurrentResume] = useState<{ fullName: string; updatedAt?: string; sourceGdocUrl?: string } | null>(null);
+
+  useEffect(() => {
+    if (isOnboarding) return;
+    apiClient.getMasterResume()
+      .then(r => setCurrentResume({ fullName: r.fullName, updatedAt: r.updatedAt, sourceGdocUrl: r.sourceGdocUrl }))
+      .catch(() => {});
+  }, [isOnboarding]);
+
+  function refreshCurrentResume() {
+    apiClient.getMasterResume()
+      .then(r => setCurrentResume({ fullName: r.fullName, updatedAt: r.updatedAt, sourceGdocUrl: r.sourceGdocUrl }))
+      .catch(() => {});
+  }
 
   function startPolling(onSuccess: () => void, onTimeout: () => void) {
     const poll = setInterval(async () => {
@@ -67,6 +82,7 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
           } else {
             setFlow({ phase: 'idle' });
             setSettingsToast({ message: "CV updated. You're good to go.", type: 'success' });
+            refreshCurrentResume();
           }
         },
         () => {
@@ -101,6 +117,7 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
           } else {
             setFlow({ phase: 'idle' });
             setSettingsToast({ message: "CV updated. You're good to go.", type: 'success' });
+            refreshCurrentResume();
           }
         },
         () => {
@@ -267,19 +284,42 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
 
             {/* Idle: two pill buttons */}
             {flow.phase === 'idle' && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-surface-hover text-gray-300 hover:border-white/15 transition-colors cursor-pointer font-mono text-sm"
-                >
-                  <Upload className="w-4 h-4" /> Upload file
-                </button>
-                <button
-                  onClick={() => setFlow({ phase: 'gdoc_input', url: '', urlError: null })}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-surface-hover text-gray-300 hover:border-white/15 transition-colors cursor-pointer font-mono text-sm"
-                >
-                  <Link2 className="w-4 h-4" /> Google Doc
-                </button>
+              <div>
+                {currentResume && (
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="font-mono text-[11px] text-semantic-green">✓</span>
+                    <span className="font-mono text-sm text-gray-300">{currentResume.fullName}</span>
+                    {currentResume.updatedAt && (
+                      <span className="font-mono text-[11px] text-gray-600">
+                        · updated {formatTimeAgo(currentResume.updatedAt)}
+                      </span>
+                    )}
+                    {currentResume.sourceGdocUrl && (
+                      <a
+                        href={currentResume.sourceGdocUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-[11px] text-gray-600 hover:text-gray-400 transition-colors"
+                      >
+                        · open doc ↗
+                      </a>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-surface-hover text-gray-300 hover:border-white/15 transition-colors cursor-pointer font-mono text-sm"
+                  >
+                    <Upload className="w-4 h-4" /> Upload file
+                  </button>
+                  <button
+                    onClick={() => setFlow({ phase: 'gdoc_input', url: '', urlError: null })}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-surface-hover text-gray-300 hover:border-white/15 transition-colors cursor-pointer font-mono text-sm"
+                  >
+                    <Link2 className="w-4 h-4" /> Google Doc
+                  </button>
+                </div>
               </div>
             )}
 

@@ -16,10 +16,12 @@ interface DashboardProps {
   loadMore: () => void;
   selectedJobId: string | null;
   onJobClick: (job: JobWithEvaluation) => void;
+  onTailorStart: (jobId: string) => void;
   onAction: (jobId: string, cvVersion: 'base' | 'tailored') => void;
   onSkip: (jobId: string) => void;
   verdictFilter: string[];
   onVerdictFilterChange: (verdicts: string[]) => void;
+  isTailoring?: boolean;
 }
 
 type VerdictType = 'tailor' | 'apply' | 'borderline' | 'skip';
@@ -63,9 +65,10 @@ const TailorCard: React.FC<{
   job: JobWithEvaluation;
   selected: boolean;
   onClick: () => void;
-  onAction: (cv: 'base' | 'tailored') => void;
+  onTailorStart: () => void;
   onSkip: () => void;
-}> = ({ job, selected, onClick, onAction, onSkip }) => {
+  isTailoring?: boolean;
+}> = ({ job, selected, onClick, onTailorStart, onSkip, isTailoring }) => {
   const eval_ = job.evaluation;
   const score = eval_?.job_match_score ?? 0;
   const filled = Math.round((score / 100) * 4);
@@ -155,10 +158,14 @@ const TailorCard: React.FC<{
           Skip
         </button>
         <button
-          onClick={(e) => { e.stopPropagation(); onAction(job.tailoring_status === 'ready' ? 'tailored' : 'base'); }}
-          className="text-[9px] font-bold px-2 py-1 rounded-[5px] bg-accent text-[#0d0d0d] hover:bg-accent-hover transition-colors"
+          onClick={(e) => { e.stopPropagation(); onTailorStart(); }}
+          disabled={isTailoring}
+          className={cn(
+            "text-[9px] font-bold px-2 py-1 rounded-[5px] bg-accent text-[#0d0d0d] hover:bg-accent-hover transition-colors",
+            isTailoring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+          )}
         >
-          {isTailor ? 'Tailor & Approve' : 'Tailor Anyway'}
+          {job.tailoring_status === 'ready' ? 'Review & Send' : 'Tailor CV'}
         </button>
       </div>
     </motion.div>
@@ -257,10 +264,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   loadMore,
   selectedJobId,
   onJobClick,
+  onTailorStart,
   onAction,
   onSkip,
   verdictFilter,
   onVerdictFilterChange,
+  isTailoring,
 }) => {
   const [showSkips, setShowSkips] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -341,11 +350,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         job={job}
         selected={selectedJobId === job.id}
         onClick={() => onJobClick(job)}
-        onAction={(cv) => onAction(job.id, cv)}
+        onTailorStart={() => onTailorStart(job.id)}
         onSkip={() => onSkip(job.id)}
+        isTailoring={isTailoring}
       />
     );
-  }, [selectedJobId, onJobClick, onAction, onSkip]);
+  }, [selectedJobId, onJobClick, onTailorStart, onAction, onSkip, isTailoring]);
 
   return (
     <div className="w-80 flex-shrink-0 border-r border-white/5 flex flex-col h-full bg-base">

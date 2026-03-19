@@ -120,23 +120,25 @@ export const TailoringReview: React.FC = () => {
   const [coverLetter, setCoverLetter] = useState('');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const [approving, setApproving] = useState(false);
   const approveRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
 
-    // Load resume and changes
+    // Load resume by its own ID (not job_id) and its changes
     Promise.all([
-      apiClient.getTailoredVersions(id).catch(() => []),
+      apiClient.getResumeById(id),
       apiClient.getResumeChanges(id).catch(() => []),
-    ]).then(([versions, ch]) => {
-      const v = versions.find(v => v.id === id) || versions[0];
-      if (v) {
-        setResume(v);
-        setCoverLetter(v.cover_letter || '');
+    ]).then(([resumeData, ch]) => {
+      if (resumeData) {
+        setResume(resumeData);
+        setCoverLetter(resumeData.cover_letter || '');
       }
       setChanges(ch.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1)));
+      setLoading(false);
+    }).catch(() => {
       setLoading(false);
     });
   }, [id]);
@@ -171,9 +173,31 @@ export const TailoringReview: React.FC = () => {
   }, [id]);
 
   const handleApprove = useCallback(async () => {
-    if (!id || !resume) return;
+    if (!id || !resume || approving) return;
+    setApproving(true);
     try {
       await apiClient.updateTailoredStatus(id, 'approved');
+
+      // Export to Google Docs
+      try {
+        const result = await apiClient.exportToGoogleDocs(resume.job_id);
+        if (result.url) {
+          window.open(result.url, '_blank');
+        }
+      } catch {
+        // Non-fatal — approve succeeded, GDoc export is best-effort
+        setToast({ message: 'Approved, but Google Docs export failed.', type: 'error' });
+      }
+
+      // Record application in tracker
+      try {
+        await apiClient.createApplication(resume.job_id, 'tailored', {
+          jobTitle: resume.content?.fullName ? undefined : undefined,
+          resumeId: id,
+        });
+      } catch {
+        // Non-fatal — approve + export succeeded, tracking is best-effort
+      }
 
       // Confetti + button hype
       if (approveRef.current) {
@@ -193,8 +217,9 @@ export const TailoringReview: React.FC = () => {
       setTimeout(() => navigate('/'), 600);
     } catch {
       setToast({ message: 'Approval failed. Try again.', type: 'error' });
+      setApproving(false);
     }
-  }, [id, resume, navigate]);
+  }, [id, resume, approving, navigate]);
 
   const handleCoverLetterBlur = useCallback(async () => {
     if (!id) return;
@@ -254,7 +279,7 @@ export const TailoringReview: React.FC = () => {
       </div>
 
       {/* Sticky approve footer */}
-      <div className="sticky bottom-0 border-t border-white/[0.08] bg-base/[0.97] backdrop-blur-sm flex items-center gap-3 px-8 py-3 z-10">
+      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base flex items-center gap-3 px-8 py-3">
         <div className="flex-1 flex items-center gap-3 text-[10px] font-mono">
           <span className="text-semantic-green">{accepted} accepted</span>
           <span className="text-gray-500">·</span>
@@ -282,9 +307,13 @@ export const TailoringReview: React.FC = () => {
         <button
           ref={approveRef}
           onClick={handleApprove}
-          className="bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer"
+          disabled={approving}
+          className={cn(
+            'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer',
+            approving && 'opacity-50 cursor-not-allowed',
+          )}
         >
-          Approve & Send →
+          {approving ? 'Sending…' : 'Approve & Send →'}
         </button>
       </div>
 

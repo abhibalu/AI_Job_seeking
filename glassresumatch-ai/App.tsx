@@ -105,35 +105,63 @@ const App: React.FC = () => {
     const job = allJobs.find(j => j.id === jobId);
     if (!job) return;
 
+    // Already tailored — navigate to existing review
+    if (job.tailoring_status === 'ready') {
+      apiClient.getTailoredVersions(jobId).then(versions => {
+        if (versions.length > 0) navigate(`/tailoring/${versions[0].id}`);
+      }).catch(() => {});
+      return;
+    }
+
+    // Already in progress — don't fire another run
+    if (job.tailoring_status === 'processing') {
+      setToast({ message: 'Already tailoring this job', type: 'error' });
+      return;
+    }
+
+    // Concurrency guard — one tailoring at a time
+    if (tailoringJob) {
+      setToast({ message: `Already tailoring ${tailoringJob.title}`, type: 'error' });
+      return;
+    }
+
     try {
       const result = await apiClient.tailorResume(jobId);
+      // Show TailoringStrip with real SSE tracking
       setTailoringJob(job);
-      // If the tailoring returns a task_id for SSE tracking
-      if ((result as any).task_id) {
-        setTailoringTaskId((result as any).task_id);
-      }
+      setTailoringTaskId(result.task_id);
     } catch (err: any) {
       setToast({ message: `Tailoring failed: ${err.message}`, type: 'error' });
     }
-  }, [allJobs]);
+  }, [allJobs, navigate, tailoringJob]);
 
-  const handleTailorComplete = useCallback((jobId: string) => {
+  const handleTailorComplete = useCallback((jobId: string, resumeId?: string) => {
     setTailoringJob(null);
     setTailoringTaskId(null);
     refresh(true);
 
-    // Navigate to review
-    apiClient.getTailoredVersions(jobId).then(versions => {
-      if (versions.length > 0) {
-        navigate(`/tailoring/${versions[0].id}`);
-      }
-    }).catch(() => {});
+    if (resumeId) {
+      navigate(`/tailoring/${resumeId}`);
+    } else {
+      // Fallback: fetch versions
+      apiClient.getTailoredVersions(jobId).then(versions => {
+        if (versions.length > 0) {
+          navigate(`/tailoring/${versions[0].id}`);
+        }
+      }).catch(() => {});
+    }
   }, [refresh, navigate]);
 
-  const handleTailorCancel = useCallback(() => {
+  const handleTailorCancel = useCallback(async () => {
+    if (tailoringTaskId) {
+      try {
+        await apiClient.cancelTask(tailoringTaskId);
+      } catch {}
+    }
     setTailoringJob(null);
     setTailoringTaskId(null);
-  }, []);
+    setToast({ message: 'Tailoring stopped', type: 'success' });
+  }, [tailoringTaskId]);
 
   // Onboarding gate
   if (showOnboarding) {
@@ -168,14 +196,16 @@ const App: React.FC = () => {
                     loadMore={loadMore}
                     selectedJobId={selectedJobId}
                     onJobClick={handleJobClick}
+                    onTailorStart={handleTailorStart}
                     onAction={handleAction}
                     onSkip={handleSkip}
                     verdictFilter={verdictFilter}
                     onVerdictFilterChange={setVerdictFilter}
+                    isTailoring={!!tailoringJob}
                   />
 
                   {/* Detail pane */}
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 h-full overflow-hidden">
                     {selectedJob ? (
                       <JobDetail
                         job={selectedJob}

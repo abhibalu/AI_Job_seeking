@@ -260,18 +260,16 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
   if (parsedJd?.seniority) tags.push(parsedJd.seniority);
   if (job.location) tags.push(job.location);
 
-  const handleTailor = async () => {
-    setActionInFlight('tailor');
-    try {
-      if (job.tailoring_status === 'ready') {
-        const versions = await apiClient.getTailoredVersions(job.id);
+  const handleTailor = () => {
+    if (job.tailoring_status === 'ready') {
+      apiClient.getTailoredVersions(job.id).then(versions => {
         if (versions.length > 0) navigate(`/tailoring/${versions[0].id}`);
-      } else {
-        onTailorStart(job.id);
-      }
-    } finally {
-      setActionInFlight(null);
+      });
+      return;
     }
+    setActionInFlight('tailor');
+    onTailorStart(job.id);
+    // Don't clear actionInFlight — navigation will unmount this component
   };
 
   const handleApplyDirect = () => {
@@ -396,7 +394,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
       </div>
 
       {/* Sticky CTA footer */}
-      <div className="sticky bottom-0 border-t border-white/[0.08] bg-base/[0.97] backdrop-blur-sm px-8 py-3 flex items-center gap-2 z-10">
+      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-8 py-3 flex items-center gap-2">
         {/* Hype copy */}
         {hypeCopy && (
           <div className="flex-1 text-[9px] font-sans text-gray-600 leading-relaxed italic">
@@ -441,7 +439,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
               actionInFlight && 'opacity-50 cursor-not-allowed',
             )}
           >
-            {actionInFlight === 'tailor' ? 'Tailoring…' : job.tailoring_status === 'ready' ? 'Review & Send →' : 'Tailor & Approve →'}
+            {actionInFlight === 'tailor' ? 'Tailoring…' : job.tailoring_status === 'ready' ? 'Review & Send →' : 'Tailor CV →'}
           </button>
         )}
 
@@ -455,7 +453,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
                 actionInFlight && 'opacity-50 cursor-not-allowed',
               )}
             >
-              {actionInFlight === 'tailor' ? 'Tailoring…' : 'Tailor Anyway'}
+              {actionInFlight === 'tailor' ? 'Tailoring…' : 'Tailor CV →'}
             </button>
             <button
               onClick={() => onSkip(job.id)}

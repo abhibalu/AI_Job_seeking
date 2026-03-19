@@ -15,6 +15,8 @@ interface TypewriterWaitStateProps {
     speed?: number;
     /** Pause between messages in ms. Default 800. */
     delayBetweenMessages?: number;
+    /** Loop back to the first message instead of stopping. Default false. */
+    loop?: boolean;
     /** Optional CSS class override for the container. */
     className?: string;
 }
@@ -29,6 +31,7 @@ export const TypewriterWaitState: React.FC<TypewriterWaitStateProps> = ({
     sessionKey,
     speed = 30,
     delayBetweenMessages = 800,
+    loop = false,
     className = '',
 }) => {
     const [displayed, setDisplayed] = useState('');
@@ -63,6 +66,11 @@ export const TypewriterWaitState: React.FC<TypewriterWaitStateProps> = ({
         const t = setTimeout(() => {
             if (msgIdx + 1 < messages.length) {
                 setMsgIdx(m => m + 1);
+                setCharIdx(0);
+                setDisplayed('');
+            } else if (loop) {
+                // Cycle back to the first message
+                setMsgIdx(0);
                 setCharIdx(0);
                 setDisplayed('');
             } else {

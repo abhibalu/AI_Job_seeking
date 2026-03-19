@@ -67,6 +67,14 @@ async def event_stream(task_id: str = Query(..., description="Task ID to track")
                 yield f"event: run_complete\ndata: {payload}\n\n"
                 return
 
+            elif status == "cancelled":
+                payload = json.dumps({
+                    "task_id": task_id,
+                    "status": "cancelled",
+                })
+                yield f"event: run_complete\ndata: {payload}\n\n"
+                return
+
             elif status == "failed":
                 payload = json.dumps({
                     "task_id": task_id,

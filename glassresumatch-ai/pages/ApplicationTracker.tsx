@@ -126,7 +126,7 @@ export const ApplicationTracker: React.FC = () => {
                   </button>
 
                   {openDropdown === app.id && (
-                    <div className="absolute right-0 top-full mt-1 bg-surface border border-white/10 rounded-lg shadow-xl z-20 py-1 min-w-[120px]">
+                    <div className="absolute right-0 top-full mt-1 bg-surface border border-white/10 rounded-lg z-20 py-1 min-w-[120px]">
                       {allStatuses.map(s => (
                         <button
                           key={s}

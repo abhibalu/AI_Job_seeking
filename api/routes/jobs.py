@@ -86,7 +86,7 @@ def get_job(job_id: str):
     """Get single job details."""
     client = get_supabase_client()
     
-    result = client.table("jobs").select("*").eq("id", job_id).execute()
+    result = client.table("v_jobs_enriched").select("*").eq("id", job_id).execute()
     
     if not result.data:
         logger.warning(f"Job {job_id} not found")

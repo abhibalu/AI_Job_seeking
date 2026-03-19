@@ -425,6 +425,13 @@ def _save_resume_changes(resume_id: str, job_id: str, edit_plan: dict) -> None:
             logger.warning(f"Failed to save resume_changes for resume {resume_id}: {e}")
 
 
+def get_tailored_resume(record_id: str) -> dict | None:
+    """Get a single tailored resume by its record ID (primary key)."""
+    client = _get_supabase()
+    result = client.table("resumes").select("*").eq("id", record_id).single().execute()
+    return result.data
+
+
 def get_tailored_resumes(job_id: str) -> list[dict]:
     """Get all tailored versions for a job."""
     client = _get_supabase()

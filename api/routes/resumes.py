@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from typing import Annotated
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 import pdfplumber
@@ -22,6 +23,7 @@ from agents.database import (
     get_master_resume as get_db_master_resume,
     save_resume,
     save_tailored_resume,
+    get_tailored_resume,
     get_tailored_resumes,
     update_tailored_resume_status,
     update_cover_letter,
@@ -30,7 +32,6 @@ from agents.database import (
     apply_bulk_change_action,
 )
 from agents.resume_tailor import ResumeTailorAgent
-from agents.tailoring_subgraph import build_tailoring_subgraph
 from agents.database import get_evaluation, get_jd_parsed
 
 APPROVED_SKILLS_PATH = "agent_prompts/approved_skills.md"
@@ -284,26 +285,135 @@ async def import_from_google_doc(request: GDocImportRequest, background_tasks: B
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 
-@router.post("/tailor/{job_id}")
-async def tailor_resume(job_id: str):
-    """
-    Generate a tailored resume for a specific job.
-    """
+def run_tailoring_worker(task_id: str, job_id: str, initial_state: dict):
+    """Background worker that runs tailoring pipeline with per-stage progress and cancellation."""
+    from agents.database import save_task_status, get_task_status
+    from agents.tailoring_subgraph import (
+        node_plan, node_draft, node_validate, node_critique, node_save,
+        route_validate, route_critique,
+    )
+
+    def is_cancelled():
+        task = get_task_status(task_id)
+        return task and task.get("status") == "cancelled"
+
+    state = dict(initial_state)
+    # Ensure required fields
+    state.setdefault("errors", [])
+    state.setdefault("status", "queued")
+    state.setdefault("draft_resume", {})
+    state.setdefault("final_resume_id", "")
+
     try:
-        # 1. Get Base Resume
+        # --- Stage 1: Planning ---
+        save_task_status(task_id, "running", {"completed": 0, "total": 4, "stage": "planning"})
+        if is_cancelled(): return
+
+        result = node_plan(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "planning"}, error="; ".join(state["errors"]))
+            return
+
+        # --- Stage 2: Drafting + Validation (may loop) ---
+        save_task_status(task_id, "running", {"completed": 1, "total": 4, "stage": "drafting"})
+        if is_cancelled(): return
+
+        result = node_draft(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state["errors"]))
+            return
+
+        # Validate
+        result = node_validate(state)
+        state.update(result)
+
+        # Route after validation — may loop back to draft
+        route = route_validate(state)
+        while route == "revise":
+            if is_cancelled(): return
+            result = node_draft(state)
+            state.update(result)
+            if state.get("errors"):
+                save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state["errors"]))
+                return
+            result = node_validate(state)
+            state.update(result)
+            route = route_validate(state)
+
+        if route == "error":
+            save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state.get("errors", ["Unknown error"])))
+            return
+
+        # --- Stage 3: Critiquing (may loop back to draft) ---
+        save_task_status(task_id, "running", {"completed": 2, "total": 4, "stage": "critiquing"})
+        if is_cancelled(): return
+
+        result = node_critique(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state["errors"]))
+            return
+
+        # Route after critique — may loop back
+        route = route_critique(state)
+        while route == "revise":
+            if is_cancelled(): return
+            save_task_status(task_id, "running", {"completed": 2, "total": 4, "stage": "revising"})
+            result = node_draft(state)
+            state.update(result)
+            if state.get("errors"):
+                save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "revising"}, error="; ".join(state["errors"]))
+                return
+            result = node_validate(state)
+            state.update(result)
+            result = node_critique(state)
+            state.update(result)
+            if state.get("errors"):
+                save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state["errors"]))
+                return
+            route = route_critique(state)
+
+        if route == "error":
+            save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state.get("errors", ["Unknown error"])))
+            return
+
+        # --- Stage 4: Saving ---
+        save_task_status(task_id, "running", {"completed": 3, "total": 4, "stage": "saving"})
+        if is_cancelled(): return
+
+        result = node_save(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 3, "total": 4, "stage": "saving"}, error="; ".join(state["errors"]))
+            return
+
+        record_id = state.get("final_resume_id", "")
+        save_task_status(task_id, "completed", {"completed": 4, "total": 4, "stage": "done", "resume_id": record_id})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "error"}, error=str(e))
+
+
+@router.post("/tailor/{job_id}")
+async def tailor_resume(job_id: str, background_tasks: BackgroundTasks):
+    """Trigger tailoring as a background task. Returns task_id for SSE tracking."""
+    from agents.database import save_task_status
+
+    try:
+        # 1. Get Base Resume (fast DB read)
         base_resume = get_db_master_resume()
         if not base_resume:
-             # Fallback
-             if os.path.exists(MASTER_RESUME_PATH):
-                 with open(MASTER_RESUME_PATH, "r") as f:
-                     base_resume = json.load(f)
-        
+            if os.path.exists(MASTER_RESUME_PATH):
+                with open(MASTER_RESUME_PATH, "r") as f:
+                    base_resume = json.load(f)
         if not base_resume:
             raise HTTPException(status_code=400, detail="No base resume found.")
-        
-        # Normalize to JSON Resume format (handles both frontend and JSON Resume formats)
+
         base_resume = _to_json_resume_format(base_resume)
-        
         if not base_resume:
             raise HTTPException(status_code=400, detail="No base resume found.")
 
@@ -312,13 +422,10 @@ async def tailor_resume(job_id: str):
         if os.path.exists(APPROVED_SKILLS_PATH):
             with open(APPROVED_SKILLS_PATH, "r") as f:
                 approved_skills = f.read()
-        else:
-            print("Warning: Approved skills file not found.")
 
         # 3. Construct JD Context
         eval_res = get_evaluation(job_id) or {}
         jd_parsed = get_jd_parsed(job_id) or {}
-
         jd_context = {
             "role": eval_res.get("title_role", "Unknown"),
             "company": eval_res.get("company_name", "Unknown"),
@@ -329,7 +436,7 @@ async def tailor_resume(job_id: str):
             "improvement_suggestions": eval_res.get("improvement_suggestions", []),
         }
 
-        # 4. Construct Initial State for Sub-Graph
+        # 4. Initial state
         initial_state = {
             "job_id": job_id,
             "base_resume": base_resume,
@@ -340,48 +447,31 @@ async def tailor_resume(job_id: str):
             "critique": [],
         }
 
-        # 5. Compile and Invoke Sub-Graph
-        subgraph = build_tailoring_subgraph().compile()
-        
-        # Run the subgraph synchronously
-        final_state = await run_in_threadpool(
-            subgraph.invoke,
-            initial_state
-        )
+        # 5. Create task and fire background worker
+        task_id = str(uuid.uuid4())
+        save_task_status(task_id, "queued", {"completed": 0, "total": 4, "stage": "queued"})
 
-        if final_state.get("errors"):
-            raise HTTPException(status_code=500, detail="; ".join(final_state["errors"]))
-            
-        record_id = final_state.get("final_resume_id")
-        if not record_id:
-            raise HTTPException(status_code=500, detail="Tailoring subgraph returned no final_resume_id")
+        background_tasks.add_task(run_tailoring_worker, task_id, job_id, initial_state)
 
-        # 6. Return Result
-        # We need to fetch the newly saved tailored resume from DB to return it,
-        # or we could return draft_resume from final_state. Let's return draft_resume.
-        tailored_content = final_state.get("draft_resume", {})
-        version = final_state.get("revision_count", 0) # This is roughly the version
+        return {"task_id": task_id, "message": "Tailoring started"}
 
-        return {
-            "id": record_id,
-            "version": version,
-            "status": "pending",
-            "content": _to_frontend_format(tailored_content)
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
-        
-        # Check for rate limit / quota errors
-        error_str = str(e).lower()
-        if "429" in str(e) or "rate" in error_str or "quota" in error_str or "too many requests" in error_str:
-            raise HTTPException(
-                status_code=429, 
-                detail="Rate limit exceeded. The AI model is temporarily unavailable. Please wait 1-2 minutes and try again."
-            )
-        
-        raise HTTPException(status_code=500, detail=f"Tailoring failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start tailoring: {str(e)}")
+
+
+@router.get("/tailored/record/{record_id}")
+def get_tailored_resume_by_id(record_id: str):
+    """Get a single tailored resume by its record ID."""
+    resume = get_tailored_resume(record_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    if resume.get("content"):
+        resume["content"] = _to_frontend_format(resume["content"])
+    return resume
 
 
 @router.get("/tailored/{job_id}")

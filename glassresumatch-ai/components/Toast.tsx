@@ -10,7 +10,7 @@ interface ToastProps {
 
 export const Toast: React.FC<ToastProps> = ({ message, type, onDismiss, onRetry }) => (
     <div
-        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-[13px] font-medium ${
+        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl text-[13px] font-medium ${
             type === 'error'
                 ? 'bg-semantic-red/10 border border-semantic-red/20 text-semantic-red'
                 : 'bg-semantic-green/10 border border-semantic-green/20 text-semantic-green'

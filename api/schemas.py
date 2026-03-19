@@ -17,6 +17,7 @@ class JobBase(BaseModel):
     company_website: str | None = None
     job_url: str | None = None
     updated_at: str | None = None
+    tailoring_status: Literal['not_started', 'processing', 'ready', 'cancelled', 'needs_review'] | None = None
 
 
 class JobDetail(JobBase):
@@ -50,9 +51,6 @@ class JobDetail(JobBase):
     # URLs
     apply_url: str | None = None
     input_url: str | None = None
-
-    # OotoCV: tailoring pipeline state (separate from status which is user review decision)
-    tailoring_status: Literal['not_started', 'processing', 'ready', 'cancelled', 'needs_review'] | None = None
 
     # OotoCV: cover letter (AI-generated, user-editable)
     cover_letter: str | None = None

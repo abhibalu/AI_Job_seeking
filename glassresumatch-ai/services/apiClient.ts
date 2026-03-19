@@ -190,14 +190,18 @@ class ApiClient {
     }
 
     // Tailored Resume endpoints
-    async tailorResume(jobId: string) {
-        return this.request<TailoredResume>(`/api/resumes/tailor/${jobId}`, {
+    async tailorResume(jobId: string): Promise<{ task_id: string; message: string }> {
+        return this.request<{ task_id: string; message: string }>(`/api/resumes/tailor/${jobId}`, {
             method: 'POST',
         });
     }
 
     async getTailoredVersions(jobId: string) {
         return this.request<TailoredResume[]>(`/api/resumes/tailored/${jobId}`);
+    }
+
+    async getResumeById(resumeId: string) {
+        return this.request<TailoredResume>(`/api/resumes/tailored/record/${resumeId}`);
     }
 
     async exportToGoogleDocs(jobId: string) {
@@ -289,6 +293,12 @@ class ApiClient {
         return this.request<Application>(`/api/applications/${applicationId}/status`, {
             method: 'PATCH',
             body: JSON.stringify({ status }),
+        });
+    }
+
+    async cancelTask(taskId: string): Promise<{ status: string }> {
+        return this.request<{ status: string }>(`/api/tasks/${taskId}/cancel`, {
+            method: 'POST',
         });
     }
 

@@ -10,7 +10,7 @@ export interface SSEProgressEvent {
 
 export interface SSERunCompleteEvent {
     task_id: string;
-    status: 'completed' | 'failed';
+    status: 'completed' | 'failed' | 'cancelled';
     progress?: { completed: number; total: number; failed?: number } | null;
     error?: string | null;
 }

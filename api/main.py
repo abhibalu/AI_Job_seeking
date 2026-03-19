@@ -58,6 +58,9 @@ app.include_router(events.router, prefix="/api/events", tags=["Events"])
 from .routes import scheduler
 app.include_router(scheduler.router, prefix="/api/scheduler", tags=["Scheduler"])
 
+from .routes import applications
+app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
+
 
 @app.on_event("shutdown")
 def on_shutdown():

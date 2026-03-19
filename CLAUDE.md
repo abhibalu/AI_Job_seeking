@@ -48,10 +48,14 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 | feature behaviour, state machines         | docs/features/<feature>.md            |
 
 ## Active tasks
-See `docs/active/` for in-progress cross-cutting task scaffolds.
+- `docs/active/ootocv-phase1-foundation.md` — Data model (tailoringStatus, Change fields, cover_letter, cron_tz)
+- `docs/active/ootocv-phase2-feed.md` — Feed + card (⋯ quick actions, conditional button copy, sort/filter rules)
+- `docs/active/ootocv-phase3-tailoring-review.md` — Change-level review UI (Accept/Reject/Keep original, bulk accept, CL textarea)
+- `docs/active/ootocv-phase4-infrastructure.md` — SSE, error rollback, auto_send modal, typewriter sessionStorage
+- `docs/active/ootocv-phase5-tracker-and-onboarding.md` — Tracker link-back, timeline dots, onboarding Step 0
 
 ## Lessons log
 See `docs/agent-lessons.md` for recurring mistake patterns and fixes.
 
 ## Architecture decisions
-Recorded in `docs/decisions/`. ADR-0001 through ADR-0008 cover all major architectural shifts.
+Recorded in `docs/decisions/`. ADR-0001 through ADR-0012 cover all major architectural shifts.

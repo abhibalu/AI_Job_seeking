@@ -8,20 +8,38 @@ Load me when: task touches frontend components, hooks, types, or apiClient.
 
 ```
 glassresumatch-ai/
-  App.tsx             — main app, job list rendering, view mode routing
+  App.tsx             — shell: Sidebar + Routes + TailoringStrip
+  index.tsx           — React entry point (BrowserRouter)
+  index.css           — @tailwindcss import + @theme tokens + base styles
   types.ts            — ALL shared TypeScript types
-  components/         — one component per file, PascalCase
-  hooks/              — custom React hooks
+  pages/              — full-page route components
+    Dashboard.tsx     — feed pane (4 card formats: TailorCard, ApplyDirectCard, SkipCard + Borderline)
+    JobDetail.tsx     — detail pane (verdict-conditional layout, typewriter, MatchBrief, CVDiff)
+    TailoringReview.tsx — change-level review (Accept/Reject, cover letter, approve footer)
+    ApplicationTracker.tsx — tracker cards with status chips and timeline dots
+    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false)
+  components/         — shared/reusable components only
+    Sidebar.tsx       — nav + logo + cron status indicator
+    TailoringStrip.tsx — SSE-driven bottom strip during active tailoring (real stage progress + stop)
+    TypewriterWaitState.tsx — animated wait state with sessionStorage skip
+    MatchBrief.tsx    — strengths/gaps signal display in JobDetail
+    Toast.tsx         — floating notification (error/success)
+  hooks/              — custom React hooks (useJobs, useSSE, useResumeState, useJobSelection)
+  lib/
+    utils.ts          — cn() helper (clsx + tailwind-merge)
   services/
     apiClient.ts      — singleton API client
-  utils/
+  utils/              — format helpers (formatTimeAgo, etc.)
 ```
 
 ## Component conventions
 
+- Full-page routes go in `pages/`, shared pieces go in `components/`.
 - One component per file, PascalCase filename.
-- Place in `components/`.
 - No `alert()` — use Toast component for user feedback.
+- No shadows, blur, or gradients — spec §1.5.
+- bg-accent buttons must use `text-[#0d0d0d]`, not `text-base`.
+- Semantic colors: semantic-green, semantic-amber, semantic-red, semantic-slate (all -400 level).
 
 ## Shared types (`types.ts`)
 
@@ -71,6 +89,12 @@ OotoCV methods added: `getResumeChanges(resumeId)`, `applyChangeAction(resumeId,
 `patchJobAction(jobId, cvVersion: 'base' | 'tailored')` — PATCH `/api/jobs/:id/action`, fire-and-forget
 to record which CV version the user applied with (called from JobCard quick action).
 
+`tailorResume(jobId)` — now returns `{ task_id: string; message: string }` (background task, not
+the full tailored resume). Frontend tracks progress via SSE using the returned `task_id`.
+
+`cancelTask(taskId)` — `POST /api/tasks/{taskId}/cancel`. Stops a running tailoring pipeline at
+the next node boundary.
+
 `getSchedulerStatus()` — `GET /api/scheduler`, returns `SchedulerStatus` with `scheduler_running: bool`,
 `last_runs: Record<string, PipelineRun>`, `jobs: Array<{name, next_run_utc}>`. Used by Sidebar to poll
 and display real cron/scraper status (active/sleeping/error).
@@ -86,24 +110,41 @@ and display real cron/scraper status (active/sleeping/error).
 
 Uses `formatTimeAgo(last_run.finished_at)` to display "Last run" time. Gracefully degrades if backend unavailable.
 
+## Dashboard feed: only evaluated jobs
+
+`useJobs('all', filters)` passes `is_evaluated: true` to the jobs API. Unevaluated jobs are
+excluded from the Dashboard feed — they have no verdict, score, or summary data, so rendering
+them produces empty verdict blocks and misleading "borderline" grouping.
+
 ## Feed sort rule (OotoCV)
 
 Within equal `matchScore`, APPLY DIRECT (`recommended_action === 'apply'`) sorts before TAILOR.
 Implemented in `utils/sort.ts` smart sort tier. Less friction = more urgent.
 
-## JobCard quick actions (OotoCV phase 2)
+## Dashboard card quick actions (OotoCV rebuild)
 
-`JobCard.tsx` carries a permanent `⋯` (`MoreHorizontal`) icon at `opacity-30` on the card's
-top-right, always discoverable. On desktop hover (`group-hover`): icon goes full opacity and the
-apply button slides in via `translate-x` + `opacity` transition. On touch: tapping `⋯` toggles
-`showActions` local state, revealing buttons inline (no hover required).
+`Dashboard.tsx` renders four card formats. `TailorCard` and `ApplyDirectCard` both have hover-reveal
+quick action buttons.
 
-Apply button copy is conditional on `Job.tailoring_status`:
-- `'ready'` → `"Apply with tailored CV →"` (`cv_version: 'tailored'`)
-- anything else → `"Apply with base CV →"` (`cv_version: 'base'`)
+**TailorCard** (verdict: tailor or borderline) — two distinct props:
+- `onTailorStart()` — primary button ("Tailor CV" / "Review & Send"). Wired
+  to `handleTailorStart` in App.tsx, which checks `tailoring_status` first:
+  - `'ready'` → `getTailoredVersions(jobId)` then `navigate('/tailoring/:id')` (existing review)
+  - `'processing'` → toast "Already tailoring this job" (no duplicate run)
+  - otherwise → `tailorResume(jobId)` returns `task_id` → sets `tailoringJob` + `tailoringTaskId` → TailoringStrip appears with SSE tracking
+- `onSkip()` — ghost "Skip" button. Wired to `handleSkip` (marks actioned, no API call).
+- `isTailoring?: boolean` — disables tailor button when another tailoring run is active.
 
-Clicking the button: opens `job_url` in a new tab + calls `onAction(jobId, cvVersion)` (passed as
-prop). The parent wires `onAction` to `markActioned` + `patchJobAction`.
+Button label is conditional on `job.tailoring_status`:
+- `'ready'` → `"Review & Send"` (don't re-run pipeline)
+- otherwise → `"Tailor CV"` (for both tailor and borderline verdicts)
+
+**Concurrency guard**: `handleTailorStart` checks `tailoringJob` state — only one tailoring run
+at a time. Dashboard cards are disabled via `isTailoring` prop during active runs.
+
+**Important**: `onTailorStart` and `onAction` (apply) are separate props — never conflate them.
+Wiring "Tailor CV" to the apply handler silently applies the job without tailoring it.
+See agent-lessons #16.
 
 ## useJobs actioned partitioning (OotoCV phase 2 + 4)
 
@@ -128,10 +169,24 @@ catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 
 - Pass `null` to keep hook dormant (no connection opened).
 - `handlers.onProgress(event)` — fired on `event: progress` SSE events.
-- `handlers.onRunComplete(event)` — fired on `event: run_complete`; hook closes the connection.
+- `handlers.onRunComplete(event)` — fired on `event: run_complete` (`completed` / `failed` / `cancelled`); hook closes the connection.
 - `handlers.onError(err)` — fired on `es.onerror`; **do NOT close** — native auto-reconnect handles it.
 - Handler refs are stable (`useRef`) — changing handlers never restarts the `EventSource`.
 - `useEffect` depends only on `taskId`; cleans up (`es.close()`) on unmount or `taskId` change.
+
+## TailoringStrip (SSE-driven progress + cancel)
+
+`TailoringStrip.tsx` shows real pipeline progress via SSE and allows cancellation.
+
+- Reads `progress.stage` from SSE `onProgress` events and maps to user-facing messages:
+  `queued` → "Starting up…", `planning` → "Analyzing job requirements…",
+  `drafting` → "Tailoring your CV…", `critiquing` → "Reviewing changes…",
+  `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
+- On `run_complete` with `status !== 'cancelled'`: extracts `progress.resume_id` and calls
+  `onComplete(jobId, resumeId)` for direct navigation to review page.
+- "Stop Tailoring" button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
+  Shows "Stopping…" while cancel is in-flight.
+- Animated green pulse dot indicates active processing.
 
 ## Toast rollback pattern
 

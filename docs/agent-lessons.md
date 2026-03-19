@@ -328,3 +328,85 @@ to `CVDiff` component, which renders appropriate UI:
 - Data: full diff list
 
 **Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 16. Feed card primary button wired to apply handler instead of tailor handler
+**Source**: 2026-03-19
+
+**Mistake**: `TailorCard` in `Dashboard.tsx` had `onAction: (cv: 'base' | 'tailored') => void` as its
+primary button prop. The button labelled "Tailor & Approve" called `onAction(cv)`, which in App.tsx
+was `handleAction` — the **apply** handler that opens the job URL, records a CV version, and creates
+an application. Clicking "Tailor & Approve" silently opened the job posting in a new tab and recorded
+an application, as though the user had already applied. `onTailorStart` was never added to `DashboardProps`
+so there was no route to the tailoring pipeline from the feed card.
+
+**Correct pattern**: Feed card CTAs that trigger distinct flows need distinct prop names wired to the
+correct App-level handlers. "Tailor" and "Apply" are different actions; conflating them into a shared
+`onAction` prop hides the mismatch. Additionally, `handleTailorStart` in App.tsx should check
+`tailoring_status === 'ready'` first and navigate to the existing review instead of re-running the
+pipeline — avoids redundant API calls when tailoring is already complete.
+
+```tsx
+// Dashboard: correct prop interface
+interface DashboardProps {
+  onTailorStart: (jobId: string) => void;  // triggers pipeline or navigates to review
+  onAction: (jobId: string, cvVersion: 'base' | 'tailored') => void;  // apply only
+}
+
+// TailorCard: correct button handler
+<button onClick={() => onTailorStart()}>
+  {job.tailoring_status === 'ready' ? 'Review & Send' : 'Tailor & Approve'}
+</button>
+
+// App.tsx: handleTailorStart handles both states
+if (job.tailoring_status === 'ready') {
+  apiClient.getTailoredVersions(jobId).then(v => navigate(`/tailoring/${v[0].id}`));
+  return;
+}
+// else trigger pipeline as normal
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+## 18. Unevaluated jobs leak into Dashboard feed as empty cards
+
+**Source**: 2026-03-19
+
+**Mistake**: `useJobs('all', filters)` passed `is_evaluated: undefined` to the jobs API. All jobs
+were returned, including unevaluated ones. Unevaluated jobs have no evaluation data, so
+`getVerdictType` defaulted to `'borderline'`, placing them in the "Your call" section with
+empty verdict blocks (no wit_line, no summary, no gaps). The card rendered with blank text
+areas and a generic "Review required" fallback.
+
+**Correct pattern**: The Dashboard feed is designed for evaluated jobs. Pass `is_evaluated: true`
+as the default for any viewMode that renders evaluation-dependent UI (verdict blocks, scores,
+summaries). Only use `is_evaluated: false` for the explicit "pending" viewMode.
+
+```ts
+// Wrong: undefined lets unevaluated jobs through
+const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
+
+// Correct: default to true — feed cards need evaluation data
+const isEvaluatedFilter = viewMode === 'pending' ? false : true;
+```
+
+**Propagated to**: `glassresumatch-ai/CLAUDE.md`
+
+---
+
+## 17. Synchronous tailoring endpoint wastes LLM credits on cancel
+
+**Source**: 2026-03-19
+
+**Mistake**: `POST /api/resumes/tailor/{job_id}` ran the full LangGraph pipeline synchronously.
+The frontend "Cancel" button only cleared UI state — the backend kept running all 3-4 LLM calls
+to completion. No concurrency guard meant clicking multiple cards fired parallel pipelines.
+Dashboard card buttons had no `disabled` guard, enabling rapid-fire accidental clicks.
+
+**Correct pattern**: Use the background task + SSE pattern (already proven for batch evaluation).
+Endpoint returns `task_id` immediately, worker checks `get_task_status()` at each node boundary
+for cancellation. Frontend tracks real progress via SSE. One tailoring run at a time via
+App-level `tailoringJob` guard. Dashboard buttons disabled during active tailoring.
+
+**Propagated to**: `api/CLAUDE.md`, `glassresumatch-ai/CLAUDE.md`, `docs/decisions/ADR-0014`

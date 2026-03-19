@@ -48,16 +48,13 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 | feature behaviour, state machines         | docs/features/<feature>.md            |
 
 ## Active tasks
-- **`docs/active/ootocv-frontend-rebuild.md`** — Full frontend rebuild to match OotoCV spec (8 phases: deps → shell → feed → detail → review → tracker → settings → polish)
-- `docs/active/ootocv-phase1-foundation.md` — Data model (tailoringStatus, Change fields, cover_letter, cron_tz) ✅
-- `docs/active/ootocv-phase2-feed.md` — Feed + card (⋯ quick actions, conditional button copy, sort/filter rules) ✅
-- `docs/active/ootocv-phase3-tailoring-review.md` — Change-level review UI (Accept/Reject/Keep original, bulk accept, CL textarea) ✅
-- `docs/active/ootocv-phase4-infrastructure.md` — SSE, error rollback, auto_send modal, typewriter sessionStorage ✅
-- `docs/active/ootocv-phase5-tracker-and-onboarding.md` — Tracker link-back, timeline dots, onboarding Step 0 ✅
+- `docs/active/ootocv-frontend-rebuild.md` — OotoCV frontend rebuild ✅ (phases 1–8 complete; new pages live, old components removed)
+- `docs/active/tailoring-ux-overhaul.md` — Tailoring UX overhaul 🟡 (background task + SSE + cancel + button fixes)
 
 ## Lessons log
 See `docs/agent-lessons.md` for recurring mistake patterns and fixes.
 
 ## Architecture decisions
-Recorded in `docs/decisions/`. ADR-0001 through ADR-0013 cover all major architectural shifts.
+Recorded in `docs/decisions/`. ADR-0001 through ADR-0014 cover all major architectural shifts.
 - ADR-0013: Application tracker uses `status_history JSONB` over a separate events table (single-user, bounded history, no join needed).
+- ADR-0014: Tailoring endpoint converted from sync to background task + SSE + cancel (reuses existing infra from ADR-0009).

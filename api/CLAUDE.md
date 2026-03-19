@@ -38,9 +38,13 @@ background_tasks.add_task(my_worker_fn, task_id, ...other_args)
 return {"message": "...", "task_id": task_id}
 ```
 
-Status enum (in order): `queued` → `running` → `completed` / `failed`
+Status enum (in order): `queued` → `running` → `completed` / `failed` / `cancelled`
 
 Worker function updates status via `save_task_status(task_id, "running", {...})` as it progresses.
+
+**Cancellation**: `POST /api/tasks/{task_id}/cancel` sets status to `"cancelled"`. Workers check
+`get_task_status(task_id)` at node boundaries and exit early if cancelled. At most one in-flight
+LLM call is wasted.
 
 **Push transport (ADR-0009):** Frontend streams progress via SSE (`GET /api/events/stream?task_id=...`)
 rather than polling. `GET /api/tasks/{task_id}` remains for non-SSE callers but is no longer used
@@ -51,7 +55,7 @@ by the main UI.
 `GET /api/events/stream?task_id=<id>` — `StreamingResponse` with `text/event-stream`.
 
 - Polls `get_task_status()` every 1s; emits `event: progress` while running.
-- Emits `event: run_complete` and closes the generator on terminal status (`completed` / `failed`).
+- Emits `event: run_complete` and closes the generator on terminal status (`completed` / `failed` / `cancelled`).
 - Sends `: keepalive` comment every 15s to prevent proxy/browser timeouts.
 - Headers: `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`.
 - No auth in phase 4 — `task_id` query param scopes the stream.
@@ -82,7 +86,7 @@ by the main UI.
 | GET/POST | `/api/jobs`                               | Job CRUD and search                            |
 | GET    | `/api/evaluations`                          | Evaluation results with filtering              |
 | GET/POST | `/api/resumes`                            | Master resume management                       |
-| POST   | `/api/resumes/tailor/{job_id}`              | Triggers tailoring subgraph                    |
+| POST   | `/api/resumes/tailor/{job_id}`              | Background task: tailoring pipeline (returns `task_id`) |
 | POST   | `/api/resumes/export-gdoc/{id}`             | Export to Google Docs                          |
 | GET    | `/api/resumes/{resume_id}/changes`          | Per-change review records (OotoCV ADR-0010)    |
 | PATCH  | `/api/resumes/{resume_id}/changes/{id}`     | Accept / Reject / Keep original on one change  |
@@ -90,6 +94,7 @@ by the main UI.
 | PATCH  | `/api/resumes/{resume_id}/cover_letter`     | Save user-edited cover letter (ADR-0011)       |
 | GET    | `/api/events/stream`                        | SSE progress stream for a task (ADR-0009)      |
 | GET    | `/api/tasks/{task_id}`                      | Background task status (non-SSE callers)       |
+| POST   | `/api/tasks/{task_id}/cancel`               | Cancel a running task (sets status=cancelled)  |
 | GET    | `/api/applications`                         | List applications (tracker), newest first      |
 | POST   | `/api/applications`                         | Record a new application (called on Apply)     |
 | PATCH  | `/api/applications/{id}/status`             | Update status, append to status_history        |
@@ -103,7 +108,9 @@ New schemas added for OotoCV Phase 1:
 - `ResumeChangeBulkActionRequest` — body for bulk PATCH (`action`, `scope: remaining | all`)
 - `SystemConfigItem` / `CronConfigRequest` — system config read/write
 
-`JobDetail` now includes `tailoring_status` and `cover_letter` fields.
+`JobBase` includes `tailoring_status` (inherited by `JobDetail`). `JobDetail` adds `cover_letter`.
+`tailoring_status` is surfaced via `v_jobs_enriched` view (migration 014) — both `list_jobs` and
+`get_job` query this view, so the field is present on list and detail responses.
 
 ## Environment variables for API
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — required for all DB operations

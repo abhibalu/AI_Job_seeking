@@ -80,10 +80,10 @@ export const TypewriterWaitState: React.FC<TypewriterWaitStateProps> = ({
     if (done) return null;
 
     return (
-        <div className={`flex items-center gap-2 font-mono text-sm text-slate-400 ${className}`}>
+        <div className={`flex items-center gap-2 font-mono text-sm text-gray-500 ${className}`}>
             <span>{displayed}</span>
             {/* Blinking cursor */}
-            <span className="inline-block w-2 h-4 bg-slate-400 animate-pulse align-middle" />
+            <span className="inline-block w-[6px] h-[13px] bg-gray-500 animate-pulse align-middle" />
         </div>
     );
 };

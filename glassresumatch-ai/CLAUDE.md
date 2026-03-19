@@ -20,7 +20,7 @@ glassresumatch-ai/
     SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import. Settings mode fetches `getMasterResume()` on mount to show a "current resume" indicator (✓ name · updated timestamp · open doc ↗). `sourceGdocUrl` link only appears when resume was imported from Google Docs.
   components/         — shared/reusable components only
     Sidebar.tsx       — nav + logo + cron status indicator
-    TailoringStrip.tsx — SSE-driven bottom strip during active tailoring (real stage progress + stop)
+    TailoringStrip.tsx — floating process card during active tailoring (6-stage pipeline track + typewriter + stop)
     TypewriterWaitState.tsx — animated wait state with sessionStorage skip
     MatchBrief.tsx    — strengths/gaps signal display in JobDetail
     Toast.tsx         — floating notification (error/success)
@@ -180,19 +180,33 @@ catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 - Handler refs are stable (`useRef`) — changing handlers never restarts the `EventSource`.
 - `useEffect` depends only on `taskId`; cleans up (`es.close()`) on unmount or `taskId` change.
 
-## TailoringStrip (SSE-driven progress + cancel)
+## TailoringStrip (floating process card + SSE tracking)
 
-`TailoringStrip.tsx` shows real pipeline progress via SSE and allows cancellation.
+`TailoringStrip.tsx` is a floating process card that displays real pipeline progress via SSE and allows cancellation.
 
-- Reads `progress.stage` from SSE `onProgress` events and maps to user-facing messages:
+**Layout**: Fixed positioned `bottom-6 left-1/2 -translate-x-1/2 z-50 w-[420px]` — floats centered above all content, no layout disruption.
+
+**Visual design**:
+- Top accent border: `border-t-2 border-accent` — draws the eye immediately.
+- Container: `bg-surface border border-white/10` — matches surface styling, no shadows/blur.
+- Job context line (top): `job.title · job.company_name` in `text-xs gray-500`, with "Stop Tailoring" button in top-right.
+- Pipeline stage track (middle): 6 dots (`queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`):
+  - Past stages: small filled accent dot
+  - Current stage: larger pulsing accent dot (`animate-pulse`)
+  - Future stages: dim `bg-white/15` dot
+- Stage message (bottom): Uses `TypewriterWaitState` with `key={stage}` to reset animation on each stage advance.
+  After animation completes within a stage, displays static text until next stage transition.
+  Maps `progress.stage` to user-facing messages:
   `queued` → "Starting up…", `planning` → "Analyzing job requirements…",
   `drafting` → "Tailoring your CV…", `critiquing` → "Reviewing changes…",
   `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
+
+**Behavior**:
+- Reads `progress.stage` from SSE `onProgress` events; updates dot track and resets typewriter.
 - On `run_complete` with `status !== 'cancelled'`: extracts `progress.resume_id` and calls
   `onComplete(jobId, resumeId)` for direct navigation to review page.
 - "Stop Tailoring" button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
   Shows "Stopping…" while cancel is in-flight.
-- Animated green pulse dot indicates active processing.
 
 ## Toast rollback pattern
 

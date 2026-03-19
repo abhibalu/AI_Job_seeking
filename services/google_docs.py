@@ -91,11 +91,34 @@ def _find_existing_doc(drive_service, doc_title: str, folder_id: str) -> str | N
     return files[0]['id'] if files else None
 
 
-def create_tailored_resume_doc(job_title: str, company: str, resume_data: dict, folder_id: str = None) -> str:
+def _build_replace_requests(replacements: dict) -> list[dict]:
+    """Build replaceAllText batchUpdate requests from an old→new text map."""
+    return [
+        {'replaceAllText': {
+            'containsText': {'text': old, 'matchCase': True},
+            'replaceText': new
+        }}
+        for old, new in replacements.items()
+        if old.strip() and old != new
+    ]
+
+
+def create_tailored_resume_doc(
+    job_title: str,
+    company: str,
+    resume_data: dict,
+    folder_id: str = None,
+    base_doc_id: str | None = None,
+    replacements: dict[str, str] | None = None,
+) -> str:
     """Creates (or replaces) a Google Doc with the tailored resume content.
 
     Folder structure: OtooCV / <Company Name> / <Resume Doc>
     If a doc with the same title already exists in the company folder, it is replaced.
+
+    When base_doc_id is provided, copies the base resume GDoc (preserving all
+    formatting) and applies replaceAllText for each changed string instead of
+    building a plain-text document.
 
     Returns the URL of the Google Doc.
     """
@@ -113,8 +136,40 @@ def create_tailored_resume_doc(job_title: str, company: str, resume_data: dict, 
     else:
         company_folder_id = None
 
-    # 2. Check for existing doc to replace
+    # 2. Doc title (same for both paths)
     doc_title = f"{resume_data.get('fullName', 'Resume')} - {job_title} @ {company_name}"
+
+    # ── Copy-and-fill path (formatted output) ────────────────────────────────
+    if base_doc_id:
+        # Delete any existing doc with this title so we start from a clean copy
+        if company_folder_id:
+            existing_doc_id = _find_existing_doc(drive_service, doc_title, company_folder_id)
+            if existing_doc_id:
+                drive_service.files().delete(fileId=existing_doc_id).execute()
+                logger.info(f"Deleted existing doc before copy: {doc_title}")
+
+        # Copy the base resume GDoc (inherits all formatting)
+        copy_body: dict = {'name': doc_title}
+        if company_folder_id:
+            copy_body['parents'] = [company_folder_id]
+
+        copied = drive_service.files().copy(fileId=base_doc_id, body=copy_body, fields='id').execute()
+        document_id = copied['id']
+        logger.info(f"Copied base doc {base_doc_id} → {document_id} ({doc_title})")
+
+        # Apply text replacements (content only; paragraph styles are untouched)
+        if replacements:
+            replace_requests = _build_replace_requests(replacements)
+            if replace_requests:
+                docs_service.documents().batchUpdate(
+                    documentId=document_id,
+                    body={'requests': replace_requests}
+                ).execute()
+                logger.info(f"Applied {len(replace_requests)} text replacements to {document_id}")
+
+        return f"https://docs.google.com/document/d/{document_id}/edit"
+
+    # ── Plain-text fallback path (original behaviour) ─────────────────────────
     existing_doc_id = None
     if company_folder_id:
         existing_doc_id = _find_existing_doc(drive_service, doc_title, company_folder_id)
@@ -133,7 +188,6 @@ def create_tailored_resume_doc(job_title: str, company: str, resume_data: dict, 
                     'range': {'startIndex': 1, 'endIndex': end_index}
                 }
             })
-        # Insert new content
         text = _build_resume_text(resume_data)
         requests.append({
             'insertText': {

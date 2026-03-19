@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # Google Drive
     GOOGLE_DRIVE_FOLDER_ID: str = Field(default="", env="GOOGLE_DRIVE_FOLDER_ID")
+    GOOGLE_BASE_RESUME_DOC_ID: str = Field(default="", env="GOOGLE_BASE_RESUME_DOC_ID")
     
     # Scheduler Configuration
     # Cron expressions take priority over interval hours when set.

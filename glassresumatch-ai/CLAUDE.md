@@ -17,7 +17,7 @@ glassresumatch-ai/
     JobDetail.tsx     — detail pane (verdict-conditional layout, typewriter, MatchBrief, CVDiff)
     TailoringReview.tsx — change-level review (Accept/Reject, cover letter, approve footer)
     ApplicationTracker.tsx — tracker cards with status chips and timeline dots
-    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false)
+    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import
   components/         — shared/reusable components only
     Sidebar.tsx       — nav + logo + cron status indicator
     TailoringStrip.tsx — SSE-driven bottom strip during active tailoring (real stage progress + stop)

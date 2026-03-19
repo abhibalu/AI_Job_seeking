@@ -119,16 +119,40 @@ function extractGoogleDocId(input: string): string {
 - Same downstream path as PDF upload — `ResumeParserAgent` → `save_resume(is_master=True)`
 
 ### 4. Document Export (`services/google_docs.py::create_tailored_resume_doc`)
+
+Two export paths (selected via presence of `GOOGLE_BASE_RESUME_DOC_ID`):
+
+#### Path A: Copy-and-Fill (Formatting Preserved) — When `GOOGLE_BASE_RESUME_DOC_ID` is set
+- **Mechanism:** Copy the base resume GDoc into the company subfolder, then apply `replaceAllText` batchUpdates for each string that differs between base and tailored resumes.
+- **Build Step:** `_build_replacement_map(base_data, tailored_data)` in `api/routes/resumes.py` returns `{old_text: new_text}` for summary, experience bullets, and skills (position-matched via `zip`).
+- **Apply Step:** `_build_replace_requests(replacements)` in `services/google_docs.py` converts the map to Docs API `replaceAllText` requests (case-sensitive, literal string match).
+- **Folder Structure:** `OtooCV / <Company Name> / <Resume Doc>`
+- **Replace Logic:** If a doc with the same title already exists, delete it and create a fresh copy to avoid stale content.
+- **Benefit:** Exported doc inherits all formatting from the base GDoc — fonts, styles, layout preserved.
+
+#### Path B: Plain-Text Insert (Default) — When `GOOGLE_BASE_RESUME_DOC_ID` is not set
+- **Mechanism:** Create a blank Google Doc and insert resume content as plain text via `insertText` batchUpdate.
+- **Content Format:** Plain text via `_build_resume_text()` — sections, bullets, contact info
 - **Folder Structure:** `OtooCV / <Company Name> / <Resume Doc>`
 - **Replace Logic:** If a doc with the same title exists in the company folder, its content is cleared and replaced (not duplicated)
-- **Content Format:** Plain text via `_build_resume_text()` — sections, bullets, contact info
+- **Limitation:** No formatting inheritance — all docs look the same regardless of base template.
 
-### 5. Frontend Integration (`App.tsx`)
-- "Import Google Doc" button in the resume toolbar opens a modal
-- Modal accepts URL or raw document ID
-- On submit: calls `apiClient.importFromGoogleDoc(documentId)`
-- Polls `apiClient.getMasterResume()` every 2s until status changes
-- 60s timeout on polling
+### 5. Frontend Integration (`glassresumatch-ai/pages/SetupPage.tsx`)
+
+**Onboarding Mode** (isOnboarding=true):
+- Two equal tiles: "Upload file" (PDF/DOCX) and "Google Doc" (paste URL)
+- Clicking "Google Doc" tile expands an input panel below
+- User pastes Google Docs URL; regex validates format (`extractDocId()`)
+- On error: inline red text "That doesn't look like a Google Docs URL"
+- On success: transition to uploading block (spinner + "Pulling your doc…")
+- Polling: calls `apiClient.getMasterResume()` every 2s until status changes / timeout (60s)
+- On complete: navigate to `/` (or call `onComplete` callback)
+
+**Settings Mode** (isOnboarding=false):
+- Two compact pill buttons: "Upload file" and "Google Doc"
+- Same expand/input/import flow as onboarding
+- On complete: show Toast "CV updated. You're good to go." + revert to idle state
+- Settings persist locally (no page reload needed)
 
 ### System State Transition
 - **Before:** `services/google_docs.py` only had export functions (`create_tailored_resume_doc`, `_build_resume_text`).

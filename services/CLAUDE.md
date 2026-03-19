@@ -52,8 +52,12 @@ Source: `services/telegram_notifier.py`.
 
 ## Google Docs integration (`services/google_docs.py`)
 
-Import: reuses `ResumeParserAgent` pipeline to parse raw GDoc text — no separate parsing logic.
-Export: formats tailored resume JSON back to GDoc and uploads to Drive.
+**Import**: Reuses `ResumeParserAgent` pipeline to parse raw GDoc text — no separate parsing logic.
+Endpoint: `POST /api/resumes/import-gdoc` with `document_id`.
+
+**Export**: Two paths controlled by `GOOGLE_BASE_RESUME_DOC_ID` env var (ADR-0015):
+- **Copy-and-fill** (when set): Copy base resume GDoc to company subfolder, apply `replaceAllText` for changed strings. Preserves all formatting.
+- **Plain-text insert** (default): Create blank doc, insert resume as plain text. Works without a base template.
 
 **OAuth error handling**: `get_credentials()` catches `RefreshError` when the cached token is
 expired/revoked. On failure it deletes `google-token.json` and raises `ValueError` with an
@@ -62,7 +66,7 @@ must re-authenticate manually (delete token, run OAuth flow from terminal).
 
 Env vars needed:
 - `GOOGLE_DRIVE_FOLDER_ID` — target Drive folder for exports
-- `BASE_RESUME` — document ID for the base resume GDoc import
+- `GOOGLE_BASE_RESUME_DOC_ID` — optional; base resume GDoc ID for copy-and-fill exports
 
 ## Apify / Scraper
 

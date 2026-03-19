@@ -117,7 +117,8 @@ metadata row of the JobDetail hero section to display salary band when available
 ## Environment variables for API
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — required for all DB operations
 - `OPENROUTER_API_KEY` — required for evaluation/tailoring routes
-- `GOOGLE_DRIVE_FOLDER_ID` — required for GDoc export route
+- `GOOGLE_DRIVE_FOLDER_ID` — required for GDoc export route (target folder for exports)
+- `GOOGLE_BASE_RESUME_DOC_ID` — optional; when set, enables copy-and-fill export path (ADR-0015) that preserves base GDoc formatting
 
 ---
 

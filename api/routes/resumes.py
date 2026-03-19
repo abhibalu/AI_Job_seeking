@@ -538,12 +538,42 @@ def save_cover_letter(resume_id: str, body: dict):
     return {"ok": True}
 
 
+def _build_replacement_map(base: dict, tailored: dict) -> dict[str, str]:
+    """Return a {old_text: new_text} map of strings that differ between base and tailored resumes.
+
+    Both dicts must be in frontend format (fullName, experience, skills, summary…).
+    Only non-empty, changed strings are included.
+    """
+    replacements: dict[str, str] = {}
+
+    def _add(old: str, new: str) -> None:
+        old, new = (old or "").strip(), (new or "").strip()
+        if old and new and old != new:
+            replacements[old] = new
+
+    # Summary
+    _add(base.get("summary", ""), tailored.get("summary", ""))
+
+    # Experience bullets (matched by position)
+    base_exp = base.get("experience", [])
+    tail_exp = tailored.get("experience", [])
+    for b_job, t_job in zip(base_exp, tail_exp):
+        for b_bullet, t_bullet in zip(b_job.get("achievements", []), t_job.get("achievements", [])):
+            _add(b_bullet, t_bullet)
+
+    # Skills (frontend format stores each skill as a plain string)
+    for b_skill, t_skill in zip(base.get("skills", []), tailored.get("skills", [])):
+        _add(str(b_skill), str(t_skill))
+
+    return replacements
+
+
 @router.post("/export-gdoc/{job_id}")
 async def export_to_google_docs(job_id: str):
     """Export the latest tailored resume for a job to a Google Doc."""
     try:
         from services.google_docs import create_tailored_resume_doc
-        
+
         # 1. Fetch latest tailored resume for this job (exclude master)
         versions = [v for v in get_tailored_resumes(job_id) if v.get("status") != "master"]
         if not versions:
@@ -552,27 +582,34 @@ async def export_to_google_docs(job_id: str):
         latest_version = versions[0]
         content = latest_version.get("content") or {}
         resume_data = _to_frontend_format(content)
-        
+
         # 2. Get Job Details for the Doc Title
         eval_res = get_evaluation(job_id) or {}
         job_title = eval_res.get("title_role", "Unknown Role")
         company = eval_res.get("company_name", "Unknown Company")
-        
-        # 3. Get Drive Folder ID from settings
+
+        # 3. Get settings
         from backend.settings import settings
         folder_id = settings.GOOGLE_DRIVE_FOLDER_ID or None
-        
-        # 4. Generate Google Doc
+        base_doc_id = settings.GOOGLE_BASE_RESUME_DOC_ID or None
+
+        # 4. Build replacement map when copy-and-fill path is active
+        # TODO: replacements disabled for progressive testing — verify copy lands first
+        replacements: dict[str, str] = {}
+
+        # 5. Generate Google Doc
         doc_url = await run_in_threadpool(
             create_tailored_resume_doc,
             job_title=job_title,
             company=company,
             resume_data=resume_data,
-            folder_id=folder_id
+            folder_id=folder_id,
+            base_doc_id=base_doc_id,
+            replacements=replacements,
         )
-        
+
         return {"status": "success", "url": doc_url}
-        
+
     except Exception as e:
         logger.error(f"Failed to export Google Doc: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")

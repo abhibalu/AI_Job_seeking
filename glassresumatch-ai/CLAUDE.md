@@ -17,7 +17,7 @@ glassresumatch-ai/
     JobDetail.tsx     — detail pane (verdict-conditional layout, typewriter, MatchBrief, CVDiff)
     TailoringReview.tsx — change-level review (Accept/Reject, cover letter, approve footer)
     ApplicationTracker.tsx — tracker cards with status chips and timeline dots
-    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import
+    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import. Settings mode fetches `getMasterResume()` on mount to show a "current resume" indicator (✓ name · updated timestamp · open doc ↗). `sourceGdocUrl` link only appears when resume was imported from Google Docs.
   components/         — shared/reusable components only
     Sidebar.tsx       — nav + logo + cron status indicator
     TailoringStrip.tsx — SSE-driven bottom strip during active tailoring (real stage progress + stop)
@@ -49,6 +49,8 @@ Key types already defined: `Job`, `JobDetail`, `JobStats`, `Evaluation`, `Evalua
 
 `Job.tailoring_status` drives OotoCV button copy: `'not_started' | 'processing' | 'ready' | 'cancelled' | 'needs_review'`.
 `Job.posted_at` is a UTC ISO-8601 string — always pass through `formatTimeAgo()` at render time, never pre-format server-side.
+
+`formatTimeAgo()` output by age: `just now` (< 1m) → `Xm ago` → `Xh ago` → `Xd ago` (up to 7d) → `Mar 12` (same year, > 7d) → `Mar 12, 2023` (different year). Timestamps older than 7 days always render as a calendar date, not a relative string.
 
 `ResumeChange` fields: `original_text` (immutable), `tailored_text` (AI output), `accepted_text` (user choice), `review_action`, `confidence` (sort ascending — lowest confidence first in review UI).
 

@@ -86,6 +86,8 @@ by the main UI.
 | GET/POST | `/api/jobs`                               | Job CRUD and search                            |
 | GET    | `/api/evaluations`                          | Evaluation results with filtering              |
 | GET/POST | `/api/resumes`                            | Master resume management                       |
+| GET    | `/api/resumes/master`                       | Base CV in frontend format; response includes `updatedAt` (ISO timestamp) and `sourceGdocUrl` (non-null only when imported from Google Docs) |
+| POST   | `/api/resumes/import-gdoc`                  | Import base CV from Google Doc; threads source URL through background parser so `sourceGdocUrl` is persisted |
 | POST   | `/api/resumes/tailor/{job_id}`              | Background task: tailoring pipeline (returns `task_id`) |
 | POST   | `/api/resumes/export-gdoc/{id}`             | Export to Google Docs (excludes master resumes)|
 | GET    | `/api/resumes/{resume_id}/changes`          | Per-change review records (OotoCV ADR-0010)    |

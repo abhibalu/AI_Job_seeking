@@ -97,6 +97,29 @@ START → plan (ChangePlannerAgent)
            └→ MAX_REVISIONS (2) reached: force save → END
 ```
 
+## DB helper: `get_master_resume()`
+
+Returns `{"content": dict, "updated_at": str | None, "gdoc_url": str | None}` or `None`.
+**Do not** access `result["content"]` directly — always unpack the dict.
+Callers that need to pass content to `_to_frontend_format()` must do: `row["content"]`.
+
+## DB helper: `save_resume()`
+
+Signature: `save_resume(content, name, is_master, status, job_id, version, gdoc_url=None)`.
+Pass `gdoc_url` when saving a master resume sourced from Google Docs — it is stored in the
+`gdoc_url` column on that row. For tailored resumes, `gdoc_url` holds the *export* URL (set
+separately by `update_gdoc_url(resume_id, url)`). See ADR-0016 for dual-use details.
+
+## `gdoc_url` column — dual use by row type
+
+| Row type (`status`) | `gdoc_url` meaning |
+|---|---|
+| `master` | Source Google Doc the base CV was imported from |
+| tailored (`pending` / `approved` / etc.) | Exported Google Doc created by `export-gdoc` route |
+
+Never conflate the two. The export route already filters out master rows, so there is no
+collision risk, but the semantic distinction must be preserved.
+
 ## Resume status semantics
 
 Two orthogonal status fields on the `resumes` table:

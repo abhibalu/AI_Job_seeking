@@ -33,7 +33,7 @@ def start_run(run_type: RunType, metadata: dict | None = None) -> str:
             "metadata": metadata or {},
         }).execute()
     except Exception as e:
-        logger.warning(f"[pipeline_runs] Could not log run start: {e}")
+        logger.warning("[pipeline_runs] Could not log run start: %s", e, exc_info=True)
     return run_id
 
 
@@ -66,7 +66,7 @@ def finish_run(
 
         client.table("pipeline_runs").update(payload).eq("id", run_id).execute()
     except Exception as e:
-        logger.warning(f"[pipeline_runs] Could not log run finish: {e}")
+        logger.warning("[pipeline_runs] Could not log run finish: %s", e, exc_info=True)
 
 
 def get_recent_runs(limit: int = 20) -> list[dict]:
@@ -82,7 +82,7 @@ def get_recent_runs(limit: int = 20) -> list[dict]:
         )
         return result.data or []
     except Exception as e:
-        logger.error(f"[pipeline_runs] Failed to fetch recent runs: {e}")
+        logger.exception("[pipeline_runs] Failed to fetch recent runs")
         return []
 
 
@@ -100,5 +100,5 @@ def get_last_run(run_type: RunType) -> dict | None:
         )
         return result.data[0] if result.data else None
     except Exception as e:
-        logger.error(f"[pipeline_runs] Failed to fetch last {run_type} run: {e}")
+        logger.exception("[pipeline_runs] Failed to fetch last %s run", run_type)
         return None

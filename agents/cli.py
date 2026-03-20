@@ -10,7 +10,10 @@ Usage:
 """
 import argparse
 import json
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 from .database import (
     init_database,
@@ -88,10 +91,8 @@ def cmd_evaluate(args):
         print(f"   Summary: {result.get('summary', '')[:100]}...")
 
     except Exception as e:
+        logger.exception("Evaluation failed for job %s", job_id)
         print(f"Evaluation failed: {e}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
 
 
 def cmd_parse(args):
@@ -143,10 +144,8 @@ def cmd_parse(args):
         print(f"   Seniority: {result.get('seniority', 'Unknown')}")
 
     except Exception as e:
+        logger.exception("Parse failed for job %s", job_id)
         print(f"Parse failed: {e}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
 
 
 def cmd_run(args):

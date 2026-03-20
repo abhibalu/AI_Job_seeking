@@ -8,10 +8,17 @@ import {
 import { EvaluationStats } from '../services/apiClient';
 import { ViewMode, FilterOptions } from '../types';
 
-const ITEMS_PER_PAGE = 9;
+const ITEMS_PER_PAGE = 20;
 
 interface UseJobsResult {
     jobs: JobWithEvaluation[];
+    /** Unactioned jobs — filter pills apply to this partition */
+    activeJobs: JobWithEvaluation[];
+    /** Jobs the user has applied to — always rendered below, dimmed */
+    actionedJobs: JobWithEvaluation[];
+    markActioned: (id: string) => void;
+    /** Undo markActioned — call on API failure to roll back optimistic update */
+    unmarkActioned: (id: string) => void;
     stats: EvaluationStats | null;
     totalJobs: number;
     loading: boolean;
@@ -27,6 +34,7 @@ interface UseJobsResult {
 
 export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResult {
     const [jobs, setJobs] = useState<JobWithEvaluation[]>([]);
+    const [actionedIds, setActionedIds] = useState<Set<string>>(new Set());
     const [stats, setStats] = useState<EvaluationStats | null>(null);
     const [totalJobs, setTotalJobs] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -38,7 +46,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
     const requestId = useRef(0);
 
     const fetchPage = useCallback(async (page: number) => {
-        if (viewMode === 'resume') return { jobs: [] as JobWithEvaluation[], total: 0, stats: null };
+        if (viewMode === 'resume' || viewMode === 'tracker') return { jobs: [] as JobWithEvaluation[], total: 0, stats: null };
 
         const statsResult = await getEvaluationStats().catch(() => null);
 
@@ -73,7 +81,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
 
             return { jobs: mapped, total: result.total, stats: statsResult };
         } else {
-            const isEvaluatedFilter = viewMode === 'pending' ? false : undefined;
+            const isEvaluatedFilter = viewMode === 'pending' ? false : true;
             const companyFilter = filters.searchQuery || undefined;
             const result = await fetchJobsWithEvaluations(page, ITEMS_PER_PAGE, companyFilter, isEvaluatedFilter);
             return { jobs: result.data, total: result.total, stats: statsResult };
@@ -115,9 +123,10 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
 
     // Reset and reload on filter/view change
     useEffect(() => {
-        if (viewMode === 'resume') return;
+        if (viewMode === 'resume' || viewMode === 'tracker') return;
         setCurrentPage(1);
         setJobs([]);
+        setTotalJobs(0); // reset so hasMore goes false→true, re-triggering the scroll observer
         load(1, false, true);
     }, [viewMode, filters.action, filters.verdict, filters.searchQuery]);
 
@@ -134,8 +143,29 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         load(1, silent, true);
     }, [load]);
 
+    const markActioned = useCallback((id: string) => {
+        setActionedIds(prev => new Set([...prev, id]));
+    }, []);
+
+    const unmarkActioned = useCallback((id: string) => {
+        setActionedIds(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+        });
+    }, []);
+
+    // Partition: filter pills (server-side) apply to unactioned jobs only.
+    // Actioned jobs are always surfaced separately for the dimmed-below section.
+    const activeJobs = jobs.filter(j => !actionedIds.has(j.id));
+    const actionedJobs = jobs.filter(j => actionedIds.has(j.id));
+
     return {
         jobs,
+        activeJobs,
+        actionedJobs,
+        markActioned,
+        unmarkActioned,
         stats,
         totalJobs,
         loading,

@@ -32,14 +32,30 @@ def list_tasks(limit: int = 20):
 def get_task_status(task_id: str):
     """Get status of a specific task."""
     result = get_task_status_db(task_id)
-    
+
     if not result:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
+
     if result.get("progress") and isinstance(result["progress"], str):
         try:
             result["progress"] = json.loads(result["progress"])
         except:
             pass
-    
+
     return result
+
+
+@router.post("/{task_id}/cancel")
+def cancel_task(task_id: str):
+    """Cancel a running task. Worker checks status at node boundaries."""
+    from agents.database import save_task_status
+
+    task = get_task_status_db(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    if task.get("status") in ("completed", "failed", "cancelled"):
+        return {"status": task["status"], "message": "Task already terminated"}
+
+    save_task_status(task_id, "cancelled", task.get("progress"))
+    return {"status": "cancelled"}

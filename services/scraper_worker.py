@@ -18,6 +18,7 @@ from services.telegram_notifier import (
     notify_scrape_complete,
     notify_scrape_failed,
 )
+from backend.log_context import set_correlation_id, new_request_id
 from agents.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ def run_scrape_worker() -> None:
     logger.info(f"[ScrapeWorker] Starting scrape job for {len(urls)} URL(s)")
 
     run_id = start_run("scrape", metadata={"urls": urls, "url_count": len(urls)})
+    set_correlation_id(f"scrape:{run_id[:8]}" if run_id else f"scrape:{new_request_id()}")
 
     total_found = 0
     total_new = 0
@@ -107,3 +109,4 @@ def run_scrape_worker() -> None:
         )
 
     logger.info(f"[ScrapeWorker] Finished. total_found={total_found}, truly_new={total_new}, errors={len(errors)}")
+    set_correlation_id(None)

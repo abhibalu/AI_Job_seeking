@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from typing import Annotated
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 import pdfplumber
@@ -19,14 +20,18 @@ UPLOAD_DIR = "/Users/abhijithm/Documents/Code/TailorAI/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 from agents.database import (
-    get_master_resume as get_db_master_resume, 
+    get_master_resume as get_db_master_resume,
     save_resume,
     save_tailored_resume,
+    get_tailored_resume,
     get_tailored_resumes,
-    update_tailored_resume_status
+    update_tailored_resume_status,
+    update_cover_letter,
+    get_resume_changes,
+    apply_change_action,
+    apply_bulk_change_action,
 )
 from agents.resume_tailor import ResumeTailorAgent
-from agents.tailoring_subgraph import build_tailoring_subgraph
 from agents.database import get_evaluation, get_jd_parsed
 
 APPROVED_SKILLS_PATH = "agent_prompts/approved_skills.md"
@@ -95,10 +100,13 @@ def _to_frontend_format(json_resume: dict) -> dict:
 @router.get("/master")
 def get_master_resume():
     """Get the current master resume JSON in frontend format."""
-    resume = get_db_master_resume()
-    if resume:
-        return _to_frontend_format(resume)
-        
+    row = get_db_master_resume()
+    if row:
+        data = _to_frontend_format(row["content"])
+        data["updatedAt"] = row.get("updated_at")
+        data["sourceGdocUrl"] = row.get("gdoc_url")
+        return data
+
     # Fallback to file for backward compatibility during migration
     if os.path.exists(MASTER_RESUME_PATH):
         try:
@@ -106,7 +114,7 @@ def get_master_resume():
                 return _to_frontend_format(json.load(f))
         except:
             pass
-            
+
     raise HTTPException(status_code=404, detail="Master resume not found. Please upload a resume first.")
 
 from api.schemas import ResumeData
@@ -185,18 +193,18 @@ def update_master_resume(resume: ResumeData):
                 
         return {"status": "success", "message": "Resume updated successfully"}
     except Exception as e:
-        print(f"Error updating resume: {e}")
+        logger.exception("Error updating master resume")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 from fastapi.concurrency import run_in_threadpool
 
-async def process_resume_background(full_text: str):
+async def process_resume_background(full_text: str, gdoc_url: str = None):
     """Background task to parse resume and save to DB."""
     try:
         agent = ResumeParserAgent()
         result = await run_in_threadpool(agent.run, resume_text=full_text)
-        
+
         if "error" in result:
             logger.error(f"Background parsing failed: {result.get('error')}")
             save_resume({"status": "error", "error": result.get("error")}, is_master=True)
@@ -205,14 +213,14 @@ async def process_resume_background(full_text: str):
             save_resume({"status": "error", "error": f"Resume parsed but failed schema validation: {result.get('_validation_error', 'Unknown')}"}, is_master=True)
         else:
             # Save final results
-            save_resume(result, name="Master Resume", is_master=True)
+            save_resume(result, name="Master Resume", is_master=True, gdoc_url=gdoc_url)
 
             # Also update file backup
             with open(MASTER_RESUME_PATH, "w") as f:
                 json.dump(result, f, indent=2)
-            
+
     except Exception as e:
-        print(f"Background parsing exception: {e}")
+        logger.exception("Background resume parsing failed")
         save_resume({"status": "error", "error": str(e)}, is_master=True)
 
 @router.post("/upload")
@@ -249,7 +257,7 @@ async def upload_resume(background_tasks: BackgroundTasks, file: UploadFile = Fi
         return processing_status
 
     except Exception as e:
-        print(f"Error starting resume process: {e}")
+        logger.exception("Error starting resume upload process")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -269,8 +277,9 @@ async def import_from_google_doc(request: GDocImportRequest, background_tasks: B
         processing_status = {"status": "processing", "uploaded_at": datetime.now().isoformat()}
         save_resume(processing_status, name="Master Resume", is_master=True)
 
-        # Reuse existing background parsing flow
-        background_tasks.add_task(process_resume_background, doc_text)
+        # Reuse existing background parsing flow, threading source URL through
+        source_url = f"https://docs.google.com/document/d/{request.document_id}/edit"
+        background_tasks.add_task(process_resume_background, doc_text, source_url)
         return {"status": "processing", "message": "Parsing Google Doc content..."}
 
     except HTTPException:
@@ -280,26 +289,134 @@ async def import_from_google_doc(request: GDocImportRequest, background_tasks: B
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 
-@router.post("/tailor/{job_id}")
-async def tailor_resume(job_id: str):
-    """
-    Generate a tailored resume for a specific job.
-    """
+def run_tailoring_worker(task_id: str, job_id: str, initial_state: dict):
+    """Background worker that runs tailoring pipeline with per-stage progress and cancellation."""
+    from agents.database import save_task_status, get_task_status
+    from agents.tailoring_subgraph import (
+        node_plan, node_draft, node_validate, node_critique, node_save,
+        route_validate, route_critique,
+    )
+
+    def is_cancelled():
+        task = get_task_status(task_id)
+        return task and task.get("status") == "cancelled"
+
+    state = dict(initial_state)
+    # Ensure required fields
+    state.setdefault("errors", [])
+    state.setdefault("status", "queued")
+    state.setdefault("draft_resume", {})
+    state.setdefault("final_resume_id", "")
+
     try:
-        # 1. Get Base Resume
+        # --- Stage 1: Planning ---
+        save_task_status(task_id, "running", {"completed": 0, "total": 4, "stage": "planning"})
+        if is_cancelled(): return
+
+        result = node_plan(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "planning"}, error="; ".join(state["errors"]))
+            return
+
+        # --- Stage 2: Drafting + Validation (may loop) ---
+        save_task_status(task_id, "running", {"completed": 1, "total": 4, "stage": "drafting"})
+        if is_cancelled(): return
+
+        result = node_draft(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state["errors"]))
+            return
+
+        # Validate
+        result = node_validate(state)
+        state.update(result)
+
+        # Route after validation — may loop back to draft
+        route = route_validate(state)
+        while route == "revise":
+            if is_cancelled(): return
+            result = node_draft(state)
+            state.update(result)
+            if state.get("errors"):
+                save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state["errors"]))
+                return
+            result = node_validate(state)
+            state.update(result)
+            route = route_validate(state)
+
+        if route == "error":
+            save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state.get("errors", ["Unknown error"])))
+            return
+
+        # --- Stage 3: Critiquing (may loop back to draft) ---
+        save_task_status(task_id, "running", {"completed": 2, "total": 4, "stage": "critiquing"})
+        if is_cancelled(): return
+
+        result = node_critique(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state["errors"]))
+            return
+
+        # Route after critique — may loop back
+        route = route_critique(state)
+        while route == "revise":
+            if is_cancelled(): return
+            save_task_status(task_id, "running", {"completed": 2, "total": 4, "stage": "revising"})
+            result = node_draft(state)
+            state.update(result)
+            if state.get("errors"):
+                save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "revising"}, error="; ".join(state["errors"]))
+                return
+            result = node_validate(state)
+            state.update(result)
+            result = node_critique(state)
+            state.update(result)
+            if state.get("errors"):
+                save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state["errors"]))
+                return
+            route = route_critique(state)
+
+        if route == "error":
+            save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state.get("errors", ["Unknown error"])))
+            return
+
+        # --- Stage 4: Saving ---
+        save_task_status(task_id, "running", {"completed": 3, "total": 4, "stage": "saving"})
+        if is_cancelled(): return
+
+        result = node_save(state)
+        state.update(result)
+        if state.get("errors"):
+            save_task_status(task_id, "failed", {"completed": 3, "total": 4, "stage": "saving"}, error="; ".join(state["errors"]))
+            return
+
+        record_id = state.get("final_resume_id", "")
+        save_task_status(task_id, "completed", {"completed": 4, "total": 4, "stage": "done", "resume_id": record_id})
+
+    except Exception as e:
+        logger.exception("Tailoring worker unhandled exception", extra={"task_id": task_id, "job_id": job_id})
+        save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "error"}, error=str(e))
+
+
+@router.post("/tailor/{job_id}")
+async def tailor_resume(job_id: str, background_tasks: BackgroundTasks):
+    """Trigger tailoring as a background task. Returns task_id for SSE tracking."""
+    from agents.database import save_task_status
+
+    try:
+        # 1. Get Base Resume (fast DB read)
         base_resume = get_db_master_resume()
         if not base_resume:
-             # Fallback
-             if os.path.exists(MASTER_RESUME_PATH):
-                 with open(MASTER_RESUME_PATH, "r") as f:
-                     base_resume = json.load(f)
-        
+            if os.path.exists(MASTER_RESUME_PATH):
+                with open(MASTER_RESUME_PATH, "r") as f:
+                    base_resume = json.load(f)
         if not base_resume:
             raise HTTPException(status_code=400, detail="No base resume found.")
-        
-        # Normalize to JSON Resume format (handles both frontend and JSON Resume formats)
+
         base_resume = _to_json_resume_format(base_resume)
-        
         if not base_resume:
             raise HTTPException(status_code=400, detail="No base resume found.")
 
@@ -308,13 +425,10 @@ async def tailor_resume(job_id: str):
         if os.path.exists(APPROVED_SKILLS_PATH):
             with open(APPROVED_SKILLS_PATH, "r") as f:
                 approved_skills = f.read()
-        else:
-            print("Warning: Approved skills file not found.")
 
         # 3. Construct JD Context
         eval_res = get_evaluation(job_id) or {}
         jd_parsed = get_jd_parsed(job_id) or {}
-
         jd_context = {
             "role": eval_res.get("title_role", "Unknown"),
             "company": eval_res.get("company_name", "Unknown"),
@@ -325,7 +439,7 @@ async def tailor_resume(job_id: str):
             "improvement_suggestions": eval_res.get("improvement_suggestions", []),
         }
 
-        # 4. Construct Initial State for Sub-Graph
+        # 4. Initial state
         initial_state = {
             "job_id": job_id,
             "base_resume": base_resume,
@@ -336,48 +450,31 @@ async def tailor_resume(job_id: str):
             "critique": [],
         }
 
-        # 5. Compile and Invoke Sub-Graph
-        subgraph = build_tailoring_subgraph().compile()
-        
-        # Run the subgraph synchronously
-        final_state = await run_in_threadpool(
-            subgraph.invoke,
-            initial_state
-        )
+        # 5. Create task and fire background worker
+        task_id = str(uuid.uuid4())
+        save_task_status(task_id, "queued", {"completed": 0, "total": 4, "stage": "queued"})
 
-        if final_state.get("errors"):
-            raise HTTPException(status_code=500, detail="; ".join(final_state["errors"]))
-            
-        record_id = final_state.get("final_resume_id")
-        if not record_id:
-            raise HTTPException(status_code=500, detail="Tailoring subgraph returned no final_resume_id")
+        background_tasks.add_task(run_tailoring_worker, task_id, job_id, initial_state)
 
-        # 6. Return Result
-        # We need to fetch the newly saved tailored resume from DB to return it,
-        # or we could return draft_resume from final_state. Let's return draft_resume.
-        tailored_content = final_state.get("draft_resume", {})
-        version = final_state.get("revision_count", 0) # This is roughly the version
+        return {"task_id": task_id, "message": "Tailoring started"}
 
-        return {
-            "id": record_id,
-            "version": version,
-            "status": "pending",
-            "content": _to_frontend_format(tailored_content)
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
-        
-        # Check for rate limit / quota errors
-        error_str = str(e).lower()
-        if "429" in str(e) or "rate" in error_str or "quota" in error_str or "too many requests" in error_str:
-            raise HTTPException(
-                status_code=429, 
-                detail="Rate limit exceeded. The AI model is temporarily unavailable. Please wait 1-2 minutes and try again."
-            )
-        
-        raise HTTPException(status_code=500, detail=f"Tailoring failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start tailoring: {str(e)}")
+
+
+@router.get("/tailored/record/{record_id}")
+def get_tailored_resume_by_id(record_id: str):
+    """Get a single tailored resume by its record ID."""
+    resume = get_tailored_resume(record_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    if resume.get("content"):
+        resume["content"] = _to_frontend_format(resume["content"])
+    return resume
 
 
 @router.get("/tailored/{job_id}")
@@ -400,40 +497,121 @@ def update_status(record_id: str, status: str):
     update_tailored_resume_status(record_id, status)
     return {"status": "success"}
 
+from api.schemas import ResumeChangeActionRequest, ResumeChangeBulkActionRequest
+
+
+@router.get("/{resume_id}/changes")
+def list_resume_changes(resume_id: str):
+    """Get all per-change review records for a tailored resume (ADR-0010).
+    Sorted by confidence asc — lowest confidence (most uncertain) first.
+    """
+    changes = get_resume_changes(resume_id)
+    return changes
+
+
+@router.patch("/{resume_id}/changes/bulk")
+def bulk_change_action(resume_id: str, body: ResumeChangeBulkActionRequest):
+    """Accept / Reject / Keep original across multiple changes at once (ADR-0010).
+
+    scope='remaining' (default): only unreviewed changes.
+    scope='all': all changes for the resume.
+    """
+    updated = apply_bulk_change_action(resume_id, body.action, body.scope)
+    return {"updated": updated}
+
+
+@router.patch("/{resume_id}/changes/{change_id}")
+def change_action(resume_id: str, change_id: str, body: ResumeChangeActionRequest):
+    """Apply Accept / Reject / Keep original to a single change (ADR-0010).
+
+    'keep_original': sets accepted_text = original_text immediately.
+    No regeneration loop is triggered — the original text is the final value.
+    """
+    apply_change_action(change_id, body.action)
+    return {"ok": True}
+
+
+@router.patch("/{resume_id}/cover_letter")
+def save_cover_letter(resume_id: str, body: dict):
+    """Save user-edited cover letter for a tailored resume (ADR-0011).
+    Called on blur from the CL textarea in TailoringReview.
+    """
+    cover_letter = body.get("cover_letter", "")
+    update_cover_letter(resume_id, cover_letter)
+    return {"ok": True}
+
+
+
 @router.post("/export-gdoc/{job_id}")
 async def export_to_google_docs(job_id: str):
-    """Export the latest tailored resume for a job to a Google Doc."""
+    """Export the latest tailored resume for a job to a Google Doc.
+
+    Returns structured ExportResultResponse with per-field tracking:
+    - status: success | partial | failed | no_changes
+    - summary: total/applied/skipped counts
+    - skipped_fields: list of sections that couldn't be applied with reasons
+    """
     try:
         from services.google_docs import create_tailored_resume_doc
-        
-        # 1. Fetch latest tailored resume for this job
-        versions = get_tailored_resumes(job_id)
+
+        # 1. Fetch latest tailored resume for this job (exclude master)
+        versions = [v for v in get_tailored_resumes(job_id) if v.get("status") != "master"]
         if not versions:
             raise HTTPException(status_code=404, detail="No tailored resume found to export")
-            
+
         latest_version = versions[0]
-        resume_data = _to_frontend_format(latest_version.get("content", {}))
-        
+        content = latest_version.get("content") or {}
+        resume_data = _to_frontend_format(content)
+
         # 2. Get Job Details for the Doc Title
         eval_res = get_evaluation(job_id) or {}
         job_title = eval_res.get("title_role", "Unknown Role")
         company = eval_res.get("company_name", "Unknown Company")
-        
-        # 3. Get Drive Folder ID from settings
+
+        # 3. Get settings
         from backend.settings import settings
         folder_id = settings.GOOGLE_DRIVE_FOLDER_ID or None
-        
-        # 4. Generate Google Doc
-        doc_url = await run_in_threadpool(
+        raw = settings.GOOGLE_BASE_RESUME_DOC_ID or ""
+        # Accept either bare ID or full URL like https://docs.google.com/document/d/<ID>/edit
+        if "/document/d/" in raw:
+            raw = raw.split("/document/d/")[1].split("/")[0]
+        base_doc_id = raw.strip() or None
+
+        # 4. Fetch base resume data for GDoc-aware replacement matching
+        base_resume_data = None
+        if base_doc_id:
+            master_row = get_db_master_resume() or {}
+            base_content = master_row.get("content", master_row)
+            base_resume_data = _to_frontend_format(base_content)
+
+        # 5. Generate Google Doc (returns ExportResult with per-field tracking)
+        export_result = await run_in_threadpool(
             create_tailored_resume_doc,
             job_title=job_title,
             company=company,
             resume_data=resume_data,
-            folder_id=folder_id
+            folder_id=folder_id,
+            base_doc_id=base_doc_id,
+            base_resume_data=base_resume_data,
         )
-        
-        return {"status": "success", "url": doc_url}
-        
+
+        # 6. Persist GDoc URL on the resume record
+        from agents.database import update_gdoc_url
+        resume_id = latest_version.get("id")
+        if resume_id and export_result.doc_url:
+            update_gdoc_url(resume_id, export_result.doc_url)
+
+        # 7. Build structured response
+        response = {
+            "status": export_result.status,
+            "url": export_result.doc_url,
+            "path": export_result.path,
+        }
+        if export_result.fields:
+            response["summary"] = export_result.summary
+            response["skipped_fields"] = export_result.skipped_fields
+        return response
+
     except Exception as e:
-        logger.error(f"Failed to export Google Doc: {str(e)}")
+        logger.exception("Failed to export Google Doc")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")

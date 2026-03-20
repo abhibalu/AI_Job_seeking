@@ -1,3 +1,123 @@
+# TailorAI Architecture Map
+
+> Load this file when a task spans multiple domains and you need to understand import
+> directions, data flow, or cross-cutting rules before touching code.
+
+---
+
+## Dependency direction
+
+```
+agent_prompts/ → agents/ → services/ → api/ → glassresumatch-ai/
+```
+
+**Rules:**
+- Nothing imports rightward (no circular deps, no frontend importing backend modules).
+- `api/` does not import agents directly for request handling — agents are triggered
+  via `BackgroundTasks`, not inline route calls.
+- `glassresumatch-ai/` communicates with the backend only through `apiClient.ts`.
+  No direct Supabase access from the frontend.
+- `services/` imports from `agents/` (e.g. eval_worker calls pipeline_graph).
+  `agents/` does not import from `services/`.
+
+---
+
+## Within agents/
+
+```
+agents/base.py (BaseAgent)
+  └─ job_evaluator.py, jd_parser.py, change_planner.py,
+     resume_tailor.py, resume_critic.py, resume_parser.py
+       ↓
+agents/pipeline_graph.py  (main LangGraph graph)
+  └─ agents/tailoring_subgraph.py  (nested, compiled fresh per job inside node_tailor)
+       ↓
+agents/database.py  (Supabase read/write, no LLM calls)
+agents/supabase_checkpointer.py  (LangGraph state persistence)
+```
+
+---
+
+## Data flow (end to end)
+
+```
+Apify (LinkedIn scrape)
+  → services/scraper_worker.py → parse_raw_json() → map_job_record()
+  → Supabase: jobs table  (raw_json preserved for reprocessing)
+
+  → services/eval_worker.py: fetches unevaluated jobs in batches
+  → agents/pipeline_graph.py: per-job LangGraph execution
+      → JobEvaluatorAgent → [skip | apply | tailor]
+      → JDParserAgent  (if tailor path)
+      → tailoring_subgraph: ChangePlanner → ResumeTailor → Validate → ResumeCritic → Save
+  → Supabase: evaluations + tailored_resumes tables
+
+  → services/telegram_notifier.py: notify on high match or pipeline error
+
+  → api/ routes: read Supabase state for the frontend
+  → glassresumatch-ai/: renders job list, evaluation details, tailor review
+      → writes back only via POST endpoints (status updates, tailor trigger, GDoc export)
+```
+
+---
+
+## Cross-cutting: Langfuse tracing
+
+Every agent LLM call is traced via `@observe` decorators in `BaseAgent`.
+Langfuse env vars are set at the top of `agents/base.py` **before** the langfuse import.
+
+**Rule**: Do not add `@observe` outside `BaseAgent`. Creates duplicate traces and
+misattributed costs.
+
+---
+
+## Cross-cutting: Supabase checkpointing
+
+LangGraph state is persisted via `SupabaseSaver` in `agents/supabase_checkpointer.py`.
+The top-level pipeline graph uses the checkpointer. `tailoring_subgraph` inherits it —
+no nested checkpointing.
+
+**Rule**: Never bypass the checkpointer in graph nodes. Runs must survive restarts.
+
+---
+
+## Cross-cutting: structured logging and correlation IDs (ADR-0017)
+
+All log lines are emitted as JSON via `JSONFormatter` in `backend/logging.py`. Every line includes
+a `correlation_id` field injected by `CorrelationFilter` (from `backend/log_context.py`).
+
+Set at:
+- **HTTP requests** — `RequestLoggingMiddleware` sets `X-Request-ID` (from header or generated),
+  echoes it back in the response, clears in `finally`.
+- **APScheduler workers** — `run_eval_worker` / `run_scrape_worker` set `run:{run_id[:8]}` /
+  `scrape:{run_id[:8]}` at entry, clear in `finally`. APScheduler threads do **not** inherit
+  `contextvars` automatically — must be set explicitly.
+- **FastAPI background tasks** and `run_in_threadpool` inherit context automatically.
+
+`backend/log_context.py` is the single source of truth for correlation ID state.
+
+**Rule**: Never use `print()` in any background task or service. Always `logger.exception()` or
+`logger.warning(..., exc_info=True)` inside `except` blocks — bare `logger.error(f"... {e}")`
+silently drops the stack trace.
+
+---
+
+## Cross-cutting: background task status tracking
+
+User-triggered long-running operations (batch eval, tailoring) follow:
+`save_task_status()` in `agents/database.py` → frontend streams via SSE `GET /api/events/stream?task_id=...`
+(ADR-0009). `GET /api/tasks/{task_id}` remains for non-SSE callers.
+See `api/CLAUDE.md` for the full sequence and SSE event schema.
+
+---
+
+## Key shared resource: approved_skills.md
+
+`agent_prompts/approved_skills.md` constrains what skills `ChangePlannerAgent` can add to
+a resume. Edits take effect immediately on the next tailoring run — no deploy needed.
+
+---
+
 # TailorAI Architecture & Features Overview
 
 ## 1. System Components

@@ -15,16 +15,18 @@ SET status = 'master'
 WHERE is_master = TRUE;
 
 -- Migrate data from tailored_resumes to resumes
+-- ON CONFLICT DO NOTHING makes this idempotent — safe to re-run if migration was partially applied.
 INSERT INTO resumes (id, job_id, version, content, status, created_at, name)
-SELECT 
-    id::uuid, 
+SELECT
+    id::uuid,
     job_id, -- No cast to UUID needed, keep as TEXT
     version,
     content,
     status,
     created_at,
     'Tailored Resume V' || version
-FROM tailored_resumes;
+FROM tailored_resumes
+ON CONFLICT (id) DO NOTHING;
 
 -- Drop foreign key constraint if it exists (check name or use generic drop)
 -- ALTER TABLE tailored_resumes DROP CONSTRAINT IF EXISTS tailored_resumes_job_id_fkey;

@@ -35,7 +35,7 @@ def _send(text: str, parse_mode: str = "HTML") -> bool:
             return False
         return True
     except Exception as e:
-        logger.warning(f"[Telegram] Send error: {e}")
+        logger.warning("[Telegram] Send error: %s", e, exc_info=True)
         return False
 
 

@@ -96,8 +96,11 @@ class BaseAgent(ABC):
                     )
                     if response_format:
                         create_kwargs["response_format"] = response_format
+                    import time as _time
+                    _t0 = _time.perf_counter()
                     completion = self.client.chat.completions.create(**create_kwargs)
-                    
+                    duration_ms = round((_time.perf_counter() - _t0) * 1000, 1)
+
                     content = completion.choices[0].message.content
                     
                     # Manual usage/cost tracking for OpenRouter via Langfuse
@@ -149,13 +152,17 @@ class BaseAgent(ABC):
                                 logger.info(f"OpenRouter Cost captured: ${cost}")
                                 
                     except Exception as e:
-                        logger.warning(f"Failed to extract/update Langfuse usage: {e}")
+                        logger.warning("Failed to extract/update Langfuse usage: %s", e, exc_info=True)
 
-                    # Log with output preview
+                    # Log with output preview and timing
                     output_preview = content[:500] + "..." if len(content) > 500 else content
-                    logger.info(f"LLM call completed via SDK", extra={
+                    _usage = getattr(completion, "usage", None)
+                    logger.info("LLM call completed via SDK", extra={
                         "model": current_model,
+                        "duration_ms": duration_ms,
                         "output_preview": output_preview,
+                        "prompt_tokens": getattr(_usage, "prompt_tokens", None),
+                        "completion_tokens": getattr(_usage, "completion_tokens", None),
                     })
                     
                     return content
@@ -173,7 +180,7 @@ class BaseAgent(ABC):
                          continue
                     
                     # If not rate limit, or exhausted retries
-                    logger.error(f"Model {current_model} failed attempt {attempt+1}: {e}")
+                    logger.exception("Model %s failed attempt %d", current_model, attempt + 1)
                     last_exception = e
                     if not is_rate_limit:
                         break # Break retry loop for non-transient errors (usually)

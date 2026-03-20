@@ -237,6 +237,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
   const [changesError, setChangesError] = useState<string | null>(null);
   const [actionInFlight, setActionInFlight] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
+  const [evalVersion, setEvalVersion] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success'; onUndo?: () => void } | null>(null);
 
   const llmDisabled = serviceToggles !== null && !serviceToggles?.openrouter;
@@ -248,6 +249,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
     try {
       await onReEvaluate(job.id);
       seenVerdicts.delete(job.id);
+      setEvalVersion(v => v + 1);
     } catch {
       // error handling at parent level
     } finally {
@@ -271,7 +273,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
     });
   }, [job.id, job.tailoring_status]);
 
-  // Fetch parsed JD and changes
+  // Fetch parsed JD and changes — re-runs on job change, tailoring status update, or after re-eval
   useEffect(() => {
     setParsedJd(null);
     setChanges([]);
@@ -281,7 +283,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
     apiClient.getParsedJD(job.id).then(setParsedJd).catch(() => {});
     fetchChanges();
-  }, [job.id, job.tailoring_status, fetchChanges]);
+  }, [job.id, job.tailoring_status, evalVersion, fetchChanges]);
 
   if (!eval_) {
     return (

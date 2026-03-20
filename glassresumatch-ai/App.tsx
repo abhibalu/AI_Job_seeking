@@ -117,8 +117,13 @@ const App: React.FC = () => {
 
   const handleReEvaluate = useCallback(async (jobId: string) => {
     await apiClient.evaluateJob(jobId, true);
-    const freshEval = await apiClient.getEvaluation(jobId);
-    updateJobEvaluation(jobId, freshEval);
+    const [freshEval, freshJob] = await Promise.all([
+      apiClient.getEvaluation(jobId),
+      apiClient.getJob(jobId),
+    ]);
+    updateJobEvaluation(jobId, freshEval, {
+      tailoring_status: freshJob.tailoring_status,
+    });
   }, [updateJobEvaluation]);
 
   const handleTailorStart = useCallback(async (jobId: string) => {

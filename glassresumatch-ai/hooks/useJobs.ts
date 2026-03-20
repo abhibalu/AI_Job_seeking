@@ -20,7 +20,7 @@ interface UseJobsResult {
     /** Undo markActioned — call on API failure to roll back optimistic update */
     unmarkActioned: (id: string) => void;
     /** Patch a single job's evaluation in-place (no list clear/reload) */
-    updateJobEvaluation: (jobId: string, evaluation: Evaluation) => void;
+    updateJobEvaluation: (jobId: string, evaluation: Evaluation, jobPatch?: Partial<JobWithEvaluation>) => void;
     stats: EvaluationStats | null;
     totalJobs: number;
     loading: boolean;
@@ -157,9 +157,9 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         });
     }, []);
 
-    const updateJobEvaluation = useCallback((jobId: string, evaluation: Evaluation) => {
+    const updateJobEvaluation = useCallback((jobId: string, evaluation: Evaluation, jobPatch?: Partial<JobWithEvaluation>) => {
         setJobs(prev => prev.map(j =>
-            j.id === jobId ? { ...j, evaluation, isEvaluated: true } : j
+            j.id === jobId ? { ...j, ...jobPatch, evaluation, isEvaluated: true } : j
         ));
     }, []);
 

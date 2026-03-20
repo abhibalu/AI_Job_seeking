@@ -6,9 +6,11 @@ interface ToastProps {
     onDismiss: () => void;
     /** When provided, renders a "Retry" button alongside dismiss. Used for rollback pattern. */
     onRetry?: () => void;
+    /** When provided, renders an "Undo" button alongside dismiss. */
+    onUndo?: () => void;
 }
 
-export const Toast: React.FC<ToastProps> = ({ message, type, onDismiss, onRetry }) => (
+export const Toast: React.FC<ToastProps> = ({ message, type, onDismiss, onRetry, onUndo }) => (
     <div
         className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl text-[13px] font-medium ${
             type === 'error'
@@ -23,6 +25,14 @@ export const Toast: React.FC<ToastProps> = ({ message, type, onDismiss, onRetry 
                 className="underline underline-offset-2 opacity-80 hover:opacity-100 ml-1"
             >
                 Retry
+            </button>
+        )}
+        {onUndo && (
+            <button
+                onClick={onUndo}
+                className="underline underline-offset-2 opacity-80 hover:opacity-100 ml-1"
+            >
+                Undo
             </button>
         )}
         <button onClick={onDismiss} className="text-current opacity-50 hover:opacity-100 ml-1">✕</button>

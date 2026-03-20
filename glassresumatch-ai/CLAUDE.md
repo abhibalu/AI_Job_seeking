@@ -227,9 +227,9 @@ catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 
 ## Toast rollback pattern
 
-`Toast` accepts optional `onRetry?: () => void`. When set, renders an underlined "Retry" button
-beside the dismiss `✕`. Use for any optimistic-update failure where the user should be able to
-retry the action in-place.
+`Toast` accepts optional `onRetry?: () => void` and `onUndo?: () => void`. When set, renders
+underlined "Retry" / "Undo" buttons beside the dismiss `✕`. Use `onRetry` for optimistic-update
+failures, `onUndo` for reversible destructive actions (e.g., Skip).
 
 **Error detail in toasts**: Never show generic "X failed" — always extract `err.message` (or
 `err.detail`) and include it so the user knows *why*. See agent-lessons #20.
@@ -401,11 +401,16 @@ Horizontal metadata row between tags and verdict block displays:
 
 Uses `job.posted_at` (via `formatTimeAgo()`), `job.applicants_count`, `job.salary_info`, `eval_.recruiter_email`.
 All fields null-safe with gap-3 separators. Metadata row only renders if at least one field is truthy.
+Salary uses `text-gray-300 font-semibold` for elevated scanning weight. Recruiter email is a `mailto:` link
+with accent color + hover underline for explicit link affordance.
 
 ### MatchBrief Progressive Disclosure (Theme C)
 
 - Default: shows first 3 strengths + 3 gaps (was 5+5 = 10 items)
-- If more items exist: shows "+N more" toggle to expand to full list (up to 5 each)
+- If more items exist: shows "+2 strengths, +1 gap" toggle (split counts, not aggregated)
+- Keyword matches (`req met`) use `border-semantic-green/35`, narrative strengths (`evidence`/`signal`) use `border-teal-400/35`
+- Notable gaps use `border-l-[3px] border-orange-400/50`, minor gaps use `border-l-2 border-semantic-amber/25`
+- Gap strategy text elevated to `text-[10px] text-gray-400` (matches description weight)
 - Removed signal dots section from MatchBrief (hero verdict block is the canonical signal; ADR-0007 already settled this)
 - Saves ~200px on average detail view, recovery button visible if expansion needed
 
@@ -424,14 +429,14 @@ Gains ~400px of high-IU content; matches TAILOR layout schema.
 Collapsible component (inline in JobDetail.tsx) provides progressive disclosure for lower-priority details.
 Shows only for non-SKIP verdicts. Sections:
 
-1. **Interview Prep** — `high_priority_topics` (topic + why + prep) and `questions_to_ask` from `eval_.interview_tips`
-   - Topics rendered in bordered boxes; questions as bullet list
-2. **ATS Keywords** — `ats_keywords` from parsed JD as inline pill badges
+1. **Interview Prep (N topics, M questions)** — `high_priority_topics` and `questions_to_ask` from `eval_.interview_tips`
+   - Topics rendered in bordered boxes; questions as bullet list; count shown in label
+2. **ATS Keywords (N)** — `ats_keywords` from parsed JD as inline pill badges; count in label
    - Tailor only (Apply Direct skips ATS signal)
-3. **Company** — Shows `applicants_count` when > 0
-   - Future: company_employees_count, company_description (needs JobDetail fetch per ADR-0015)
+3. **Competition (N applicants)** — Shows `applicants_count` when > 0; renamed from "Company" to match actual content
 
-Each collapsible is a lightweight header line (no rounded bg, no border, just a divider line) with ChevronDown icon for rotation animation.
+Each collapsible accepts optional `count` prop for information scent in closed state.
+Lightweight header line (no rounded bg, no border, just a divider line) with ChevronDown icon for rotation animation.
 
 ### Tag Redundancy Cleanup (Theme F)
 
@@ -445,9 +450,9 @@ All CTAs show loading text ("Tailoring…", "Applying…") and disable when in-f
 For `handleTailor` (async): set before call, clear in finally.
 For `handleApplyDirect`: set, call handler (opens tab), clear after ~1.5s timeout (parent is fire-and-forget).
 
-**CVDiff loading/error**: CVDiff component accepts optional `loading` and `error` props. Shows
-"Loading changes…" with animate-pulse when loading. Shows "Couldn't load changes" in red if error.
-Prevents silent failures from swallowed `.catch(() => {})` error handlers.
+**CVDiff loading/error**: CVDiff component accepts optional `loading`, `error`, and `onRetry` props. Shows
+"Loading changes…" with animate-pulse when loading. Shows "Couldn't load changes" in red with Retry button if error.
+Retry wired to `fetchChanges` callback extracted from the data-fetching effect.
 
 **Section headings**: "How to strengthen your CV" (formerly "What you'd actually do") aligns with actual
 data source: `resume_edits` from evaluation, not job requirements. See agent-lessons #1.
@@ -458,7 +463,15 @@ data source: `resume_edits` from evaluation, not job requirements. See agent-les
 **Removed CompanyIntel**: Deleted component and all usages. Company/location/posted-at data was
 duplicated from hero section. Added `eval_.summary` inline in verdict block (guarded against duplication with reason).
 
-**Skip button**: Always visible in footer for all verdicts.
+**Skip button**: Always visible in footer for all verdicts. Positioned left side of footer (separated from
+primary CTAs by flex-1 spacer). Shows success Toast with Undo action via `onUndoSkip` prop (calls
+`unmarkActioned` in App.tsx).
+
+**Verdict block "CV tailored ✓" badge**: When `job.tailoring_status === 'ready'`, a small accent badge
+appears in the verdict header to signal that tailoring is complete at L1 scanning level.
+
+**llmDisabled buttons**: When OpenRouter is disabled, Tailor CV / Re-evaluate / Override & Tailor buttons
+are truly `disabled` with a `title` tooltip explaining why — no opacity-40-but-clickable pattern.
 
 **Apply Direct button**: Removed flex-1 width. Added subtitle span: "Opens posting in new tab" in smaller text.
 

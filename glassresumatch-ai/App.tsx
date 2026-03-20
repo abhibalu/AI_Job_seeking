@@ -111,6 +111,10 @@ const App: React.FC = () => {
     markActioned(jobId);
   }, [markActioned]);
 
+  const handleUndoSkip = useCallback((jobId: string) => {
+    unmarkActioned(jobId);
+  }, [unmarkActioned]);
+
   const handleReEvaluate = useCallback(async (jobId: string) => {
     await apiClient.evaluateJob(jobId, true);
     const freshEval = await apiClient.getEvaluation(jobId);
@@ -229,6 +233,7 @@ const App: React.FC = () => {
                         onTailorStart={handleTailorStart}
                         onAction={handleAction}
                         onSkip={handleSkip}
+                        onUndoSkip={handleUndoSkip}
                         onReEvaluate={handleReEvaluate}
                         serviceToggles={serviceToggles}
                       />

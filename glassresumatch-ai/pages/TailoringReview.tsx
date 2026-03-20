@@ -125,6 +125,19 @@ export const TailoringReview: React.FC<{ serviceToggles?: ServiceToggles | null 
   const [gdocUrl, setGdocUrl] = useState<string | null>(null);
   const [reexporting, setReexporting] = useState(false);
   const approveRef = useRef<HTMLButtonElement>(null);
+  const [showGdocActions, setShowGdocActions] = useState(false);
+  const gdocMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showGdocActions) return;
+    const handler = (e: MouseEvent) => {
+      if (gdocMenuRef.current && !gdocMenuRef.current.contains(e.target as Node)) {
+        setShowGdocActions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showGdocActions]);
 
   useEffect(() => {
     if (!id) return;
@@ -336,68 +349,87 @@ export const TailoringReview: React.FC<{ serviceToggles?: ServiceToggles | null 
       </div>
 
       {/* Sticky approve footer */}
-      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base flex items-center gap-3 px-8 py-3">
-        <div className="flex-1 flex items-center gap-3 text-[10px] font-mono">
-          <span className="text-semantic-green">{accepted} accepted</span>
-          <span className="text-gray-500">·</span>
-          <span className="text-gray-500">{pending} pending</span>
-          <span className="text-gray-500">·</span>
-          <span className="text-semantic-red">{rejected} rejected</span>
-        </div>
+      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-8 py-3">
+        {/* Progress bar — replaces colored stat counters */}
+        {changes.length > 0 && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-accent/60 rounded-full transition-all duration-300"
+                style={{ width: `${((accepted + rejected) / changes.length) * 100}%` }}
+              />
+            </div>
+            <span className="text-[9px] font-mono text-gray-600">
+              {accepted + rejected}/{changes.length}
+            </span>
+          </div>
+        )}
 
-        {pending > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1" />
+
+          {pending > 0 && (
+            <button
+              onClick={handleBulkAccept}
+              className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer"
+            >
+              Accept all remaining →
+            </button>
+          )}
+
           <button
-            onClick={handleBulkAccept}
-            className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer"
+            onClick={() => navigate('/')}
+            className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer"
           >
-            Accept all remaining →
+            Skip
           </button>
-        )}
 
-        <button
-          onClick={() => navigate('/')}
-          className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer"
-        >
-          Skip
-        </button>
+          {gdocUrl && (
+            <div className="relative" ref={gdocMenuRef}>
+              <button
+                onClick={() => setShowGdocActions(v => !v)}
+                className="text-[9px] font-mono text-gray-500 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-300 transition-colors cursor-pointer"
+              >
+                GDoc ▾
+              </button>
+              {showGdocActions && (
+                <div className="absolute bottom-full right-0 mb-1 bg-surface border border-white/[0.1] rounded-[6px] py-1 min-w-[160px]">
+                  <a
+                    href={gdocUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-[9px] font-mono text-gray-400 px-3 py-1.5 hover:text-gray-200 hover:bg-white/[0.04] transition-colors"
+                  >
+                    Open in GDoc ↗
+                  </a>
+                  <button
+                    onClick={() => { setShowGdocActions(false); handleReexport(); }}
+                    disabled={reexporting || gdocsDisabled}
+                    title={gdocsDisabled ? 'Google Docs disabled · Enable in Settings' : undefined}
+                    className={cn(
+                      'w-full text-left text-[9px] font-mono text-gray-400 px-3 py-1.5 hover:text-gray-200 hover:bg-white/[0.04] transition-colors cursor-pointer',
+                      (reexporting || gdocsDisabled) && 'opacity-40 cursor-not-allowed',
+                    )}
+                  >
+                    {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
-        {gdocUrl && (
-          <a
-            href={gdocUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors"
-          >
-            Open in GDoc ↗
-          </a>
-        )}
-
-        {gdocUrl && (
           <button
-            onClick={handleReexport}
-            disabled={reexporting || gdocsDisabled}
-            title={gdocsDisabled ? 'Google Docs disabled · Enable in Settings' : undefined}
+            ref={approveRef}
+            onClick={handleApprove}
+            disabled={approving}
             className={cn(
-              'text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer',
-              reexporting && 'opacity-50 cursor-not-allowed',
-              gdocsDisabled && 'opacity-40 cursor-not-allowed',
+              'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer',
+              approving && 'opacity-50 cursor-not-allowed',
             )}
           >
-            {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
+            {approving ? 'Sending…' : gdocsDisabled ? 'Approve →' : 'Approve & Send →'}
           </button>
-        )}
-
-        <button
-          ref={approveRef}
-          onClick={handleApprove}
-          disabled={approving}
-          className={cn(
-            'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer',
-            approving && 'opacity-50 cursor-not-allowed',
-          )}
-        >
-          {approving ? 'Sending…' : gdocsDisabled ? 'Approve →' : 'Approve & Send →'}
-        </button>
+        </div>
       </div>
 
       {toast && (

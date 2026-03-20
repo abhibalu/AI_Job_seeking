@@ -5,6 +5,7 @@ import confetti from 'canvas-confetti';
 import { Check, X, RotateCcw } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { apiClient } from '../services/apiClient';
+import type { ServiceToggles } from '../services/apiClient';
 import type { ResumeChange, TailoredResume } from '../types';
 import { Toast } from '../components/Toast';
 
@@ -71,7 +72,7 @@ const ChangeCard: React.FC<ChangeCardProps> = ({ change, onAction }) => {
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-1 flex-shrink-0 mt-0.5">
+      <div className="flex gap-2 flex-shrink-0 mt-0.5">
         {change.review_action ? (
           <span className={cn(
             'text-[8px] font-mono px-2 py-1 rounded-[4px]',
@@ -112,7 +113,7 @@ const ChangeCard: React.FC<ChangeCardProps> = ({ change, onAction }) => {
   );
 };
 
-export const TailoringReview: React.FC = () => {
+export const TailoringReview: React.FC<{ serviceToggles?: ServiceToggles | null }> = ({ serviceToggles }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [resume, setResume] = useState<TailoredResume | null>(null);
@@ -121,7 +122,7 @@ export const TailoringReview: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
   const [approving, setApproving] = useState(false);
-  const [gdocExported, setGdocExported] = useState(false);
+  const [gdocUrl, setGdocUrl] = useState<string | null>(null);
   const [reexporting, setReexporting] = useState(false);
   const approveRef = useRef<HTMLButtonElement>(null);
 
@@ -137,6 +138,7 @@ export const TailoringReview: React.FC = () => {
       if (resumeData) {
         setResume(resumeData);
         setCoverLetter(resumeData.cover_letter || '');
+        setGdocUrl(resumeData.gdoc_url ?? null);
       }
       setChanges(ch.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1)));
       setLoading(false);
@@ -181,34 +183,35 @@ export const TailoringReview: React.FC = () => {
       await apiClient.updateTailoredStatus(id, 'approved');
 
       // Export to Google Docs
-      try {
-        const result = await apiClient.exportToGoogleDocs(resume.job_id);
-        if (result.status === 'success') {
-          if (result.url) window.open(result.url, '_blank');
-        } else if (result.status === 'partial') {
-          const skipped = result.summary?.skipped ?? 0;
-          const total = result.summary?.total ?? 0;
-          setToast({
-            message: `Exported with ${skipped} of ${total} changes skipped. Check the document.`,
-            type: 'error',
-          });
-          if (result.url) window.open(result.url, '_blank');
-        } else if (result.status === 'failed') {
-          const reasons = result.skipped_fields?.map(f => f.reason).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'unknown';
-          setToast({
-            message: `Export failed — no changes could be applied (${reasons}). Try re-exporting.`,
-            type: 'error',
-          });
-        } else if (result.status === 'no_changes') {
-          setToast({ message: 'No differences found between base and tailored resume.', type: 'error' });
-          if (result.url) window.open(result.url, '_blank');
+      if (!gdocsDisabled) {
+        try {
+          const result = await apiClient.exportToGoogleDocs(resume.job_id);
+          if (result.status === 'success') {
+            if (result.url) window.open(result.url, '_blank');
+          } else if (result.status === 'partial') {
+            const skipped = result.summary?.skipped ?? 0;
+            const total = result.summary?.total ?? 0;
+            setToast({
+              message: `Exported with ${skipped} of ${total} changes skipped. Check the document.`,
+              type: 'error',
+            });
+            if (result.url) window.open(result.url, '_blank');
+          } else if (result.status === 'failed') {
+            const reasons = result.skipped_fields?.map(f => f.reason).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'unknown';
+            setToast({
+              message: `Export failed — no changes could be applied (${reasons}). Try re-exporting.`,
+              type: 'error',
+            });
+          } else if (result.status === 'no_changes') {
+            setToast({ message: 'No differences found between base and tailored resume.', type: 'error' });
+            if (result.url) window.open(result.url, '_blank');
+          }
+          setGdocUrl(result.url ?? null);
+        } catch (err: any) {
+          // Non-fatal — approve succeeded, GDoc export is best-effort
+          const detail = err?.detail || err?.message || 'Unknown error';
+          setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
         }
-        setGdocExported(true);
-      } catch (err: any) {
-        // Non-fatal — approve succeeded, GDoc export is best-effort
-        const detail = err?.detail || err?.message || 'Unknown error';
-        setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
-        setGdocExported(true);
       }
 
       // Record application in tracker
@@ -259,7 +262,7 @@ export const TailoringReview: React.FC = () => {
       const result = await apiClient.exportToGoogleDocs(resume.job_id);
       if (result.status === 'success') {
         setToast({ message: 'Re-exported successfully.', type: 'success' });
-        if (result.url) window.open(result.url, '_blank');
+        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
       } else if (result.status === 'partial') {
         const skipped = result.summary?.skipped ?? 0;
         const total = result.summary?.total ?? 0;
@@ -267,12 +270,12 @@ export const TailoringReview: React.FC = () => {
           message: `Re-exported with ${skipped} of ${total} changes skipped.`,
           type: 'error',
         });
-        if (result.url) window.open(result.url, '_blank');
+        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
       } else if (result.status === 'failed') {
         setToast({ message: 'Re-export failed — no changes could be applied.', type: 'error' });
       } else {
         setToast({ message: 'No differences found.', type: 'error' });
-        if (result.url) window.open(result.url, '_blank');
+        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
       }
     } catch (err: any) {
       const detail = err?.detail || err?.message || 'Unknown error';
@@ -281,6 +284,8 @@ export const TailoringReview: React.FC = () => {
       setReexporting(false);
     }
   }, [resume, reexporting]);
+
+  const gdocsDisabled = serviceToggles !== null && !serviceToggles?.google_docs;
 
   const accepted = changes.filter(c => c.review_action === 'accept').length;
   const rejected = changes.filter(c => c.review_action === 'reject').length;
@@ -356,13 +361,26 @@ export const TailoringReview: React.FC = () => {
           Skip
         </button>
 
-        {gdocExported && (
+        {gdocUrl && (
+          <a
+            href={gdocUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors"
+          >
+            Open in GDoc ↗
+          </a>
+        )}
+
+        {gdocUrl && (
           <button
             onClick={handleReexport}
-            disabled={reexporting}
+            disabled={reexporting || gdocsDisabled}
+            title={gdocsDisabled ? 'Google Docs disabled · Enable in Settings' : undefined}
             className={cn(
               'text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer',
               reexporting && 'opacity-50 cursor-not-allowed',
+              gdocsDisabled && 'opacity-40 cursor-not-allowed',
             )}
           >
             {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
@@ -378,7 +396,7 @@ export const TailoringReview: React.FC = () => {
             approving && 'opacity-50 cursor-not-allowed',
           )}
         >
-          {approving ? 'Sending…' : 'Approve & Send →'}
+          {approving ? 'Sending…' : gdocsDisabled ? 'Approve →' : 'Approve & Send →'}
         </button>
       </div>
 

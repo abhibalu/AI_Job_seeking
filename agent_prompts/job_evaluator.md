@@ -209,8 +209,8 @@ The candidate has only 3-5 years of professional experience.
 
 **Verdict mapping**:
 - **Strong Match**: ≥ 80
-- **Moderate Match**: 50–70
-- **Weak Match**: ≤ 40
+- **Moderate Match**: 50–79
+- **Weak Match**: ≤ 49
 
 Hard requirements stated as "must have", "required", or missing certifications reduce the score.
 

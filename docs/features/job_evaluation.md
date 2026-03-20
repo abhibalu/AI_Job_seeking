@@ -45,7 +45,7 @@ The evaluation system is encapsulated within a dedicated "Actor" pattern, allowi
 
 #### 1. The Evaluation Schema (Output Contract)
 The Evaluator produces a strictly typed JSON object containing:
-- **Match Metrics:** `job_match_score` (10-100), `Verdict` (Strong/Moderate/Weak).
+- **Match Metrics:** `job_match_score` (10-100), `Verdict` (Strong ≥80 / Moderate 50–70 / Weak ≤49).
 - **Control Flags:** `recommended_action` (apply/tailor/skip).
 - **Semantic Feedback:** `gaps` (Technical/Domain/Soft), `improvement_suggestions` (Resume edits).
 - **Interview Intelligence:** `interview_tips` (Topics/Prep/Strengths).

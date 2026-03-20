@@ -93,7 +93,8 @@ class TailoringState(TypedDict):
 ```
 
 #### 2. The Edit Plan Contract
-The Planner produces a structured JSON object:
+The Planner produces a structured JSON object. Every edit requires a non-empty `approved_source`.
+Two actions: `rephrase` (modify existing text) and `add` (skills list only).
 ```json
 {
   "edits": [
@@ -103,13 +104,14 @@ The Planner produces a structured JSON object:
       "current_text": "Built Cloud Functions API...",
       "target_text": "Built serverless data ingestion pipelines...",
       "reason": "JD requires AWS Lambda; Cloud Functions is closest equivalent",
-      "approved_source": "Notable Projects: BNPL Launch"
+      "approved_source": "Notable Projects: BNPL Launch — built serverless ingestion pipelines"
     },
     {
       "location": "skills",
       "action": "add",
       "items": ["dbt", "Apache Airflow"],
-      "reason": "ATS keywords present in approved skills but missing"
+      "reason": "ATS keywords present in approved skills but missing",
+      "approved_source": "Data Engineering: dbt, Apache Airflow"
     }
   ],
   "preserve": ["work[0].highlights[0-3]", "education.*"],

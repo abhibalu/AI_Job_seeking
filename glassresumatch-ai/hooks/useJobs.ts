@@ -6,7 +6,7 @@ import {
     JobWithEvaluation
 } from '../services/jobService';
 import { EvaluationStats } from '../services/apiClient';
-import { ViewMode, FilterOptions } from '../types';
+import { ViewMode, FilterOptions, Evaluation } from '../types';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -19,6 +19,8 @@ interface UseJobsResult {
     markActioned: (id: string) => void;
     /** Undo markActioned — call on API failure to roll back optimistic update */
     unmarkActioned: (id: string) => void;
+    /** Patch a single job's evaluation in-place (no list clear/reload) */
+    updateJobEvaluation: (jobId: string, evaluation: Evaluation) => void;
     stats: EvaluationStats | null;
     totalJobs: number;
     loading: boolean;
@@ -155,6 +157,12 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         });
     }, []);
 
+    const updateJobEvaluation = useCallback((jobId: string, evaluation: Evaluation) => {
+        setJobs(prev => prev.map(j =>
+            j.id === jobId ? { ...j, evaluation, isEvaluated: true } : j
+        ));
+    }, []);
+
     // Partition: filter pills (server-side) apply to unactioned jobs only.
     // Actioned jobs are always surfaced separately for the dimmed-below section.
     const activeJobs = jobs.filter(j => !actionedIds.has(j.id));
@@ -166,6 +174,7 @@ export function useJobs(viewMode: ViewMode, filters: FilterOptions): UseJobsResu
         actionedJobs,
         markActioned,
         unmarkActioned,
+        updateJobEvaluation,
         stats,
         totalJobs,
         loading,

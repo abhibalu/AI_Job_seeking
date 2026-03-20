@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, Loader2, X, Link2 } from 'lucide-react';
+import type { ServiceToggles } from '../services/apiClient';
 import { cn } from '../lib/utils';
 import { apiClient } from '../services/apiClient';
 import { Toast } from '../components/Toast';
@@ -9,6 +10,7 @@ import { formatTimeAgo } from '../utils/format';
 interface SetupPageProps {
   isOnboarding: boolean;
   onComplete?: () => void;
+  onTogglesChanged?: () => void;
 }
 
 type ImportSource = 'file' | 'gdoc';
@@ -25,15 +27,18 @@ function extractDocId(url: string): string | null {
   return match ? match[1] : null;
 }
 
-export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }) => {
+export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete, onTogglesChanged }) => {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
   const [flow, setFlow] = useState<FlowPhase>({ phase: 'idle' });
   const [settingsToast, setSettingsToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [currentResume, setCurrentResume] = useState<{ fullName: string; updatedAt?: string; sourceGdocUrl?: string } | null>(null);
+  const [toggles, setToggles] = useState<ServiceToggles | null>(null);
+  const [togglingService, setTogglingService] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOnboarding) return;
+    apiClient.getServiceToggles().then(setToggles).catch(() => {});
     apiClient.getMasterResume()
       .then(r => setCurrentResume({ fullName: r.fullName, updatedAt: r.updatedAt, sourceGdocUrl: r.sourceGdocUrl }))
       .catch(() => {});
@@ -176,11 +181,14 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
 
                     <button
                       onClick={() => setFlow({ phase: 'gdoc_input', url: '', urlError: null })}
+                      disabled={toggles?.google_docs === false}
+                      title={toggles?.google_docs === false ? 'Google Docs disabled · Enable in Settings' : undefined}
                       className={cn(
                         'flex flex-col items-center justify-center gap-2 flex-1 px-4 py-6 rounded-xl border bg-surface hover:bg-surface-hover transition-colors duration-100 cursor-pointer min-h-[88px]',
                         flow.phase === 'gdoc_input'
                           ? 'border-accent/40'
-                          : 'border-white/[0.08] hover:border-white/15'
+                          : 'border-white/[0.08] hover:border-white/15',
+                        toggles?.google_docs === false && 'opacity-40 cursor-not-allowed',
                       )}
                     >
                       <Link2 className="w-5 h-5 text-gray-400" />
@@ -315,7 +323,12 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
                   </button>
                   <button
                     onClick={() => setFlow({ phase: 'gdoc_input', url: '', urlError: null })}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-surface-hover text-gray-300 hover:border-white/15 transition-colors cursor-pointer font-mono text-sm"
+                    disabled={toggles?.google_docs === false}
+                    title={toggles?.google_docs === false ? 'Google Docs disabled · Enable in Settings' : undefined}
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-surface-hover text-gray-300 hover:border-white/15 transition-colors cursor-pointer font-mono text-sm',
+                      toggles?.google_docs === false && 'opacity-40 cursor-not-allowed',
+                    )}
                   >
                     <Link2 className="w-4 h-4" /> Google Doc
                   </button>
@@ -374,11 +387,52 @@ export const SetupPage: React.FC<SetupPageProps> = ({ isOnboarding, onComplete }
             )}
           </div>
 
-          {/* Placeholder for future settings */}
-          <div className="p-5 rounded-xl border border-white/5 bg-surface">
-            <div className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-3">API Keys</div>
-            <p className="text-[11px] font-mono text-gray-600">Configuration coming soon.</p>
-          </div>
+          {/* External service kill switches */}
+          {!isOnboarding && toggles && (
+            <div className="p-5 rounded-xl border border-white/5 bg-surface">
+              <div className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-4">External Services</div>
+              <div className="divide-y divide-white/5">
+                {([
+                  { key: 'openrouter' as const, label: 'LLM (OpenRouter)', desc: 'Evaluations, parsing, tailoring', cost: '$ per use' },
+                  { key: 'apify' as const, label: 'Scraper (Apify)', desc: 'LinkedIn job scraping', cost: '$ per run' },
+                  { key: 'google_docs' as const, label: 'Google Docs', desc: 'Resume import & export', cost: 'free tier' },
+                ]).map(svc => (
+                  <div key={svc.key} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+                    <div>
+                      <div className="text-[12px] font-mono text-gray-200">{svc.label}</div>
+                      <div className="text-[10px] font-mono text-gray-500">{svc.desc} · {svc.cost}</div>
+                    </div>
+                    <button
+                      disabled={togglingService !== null}
+                      onClick={async () => {
+                        setTogglingService(svc.key);
+                        try {
+                          const updated = await apiClient.updateServiceToggle(svc.key, !toggles[svc.key]);
+                          setToggles(updated);
+                          onTogglesChanged?.();
+                          setSettingsToast({ message: `${svc.label} ${updated[svc.key] ? 'enabled' : 'disabled'}`, type: 'success' });
+                        } catch (err: any) {
+                          setSettingsToast({ message: err.message || 'Failed to update', type: 'error' });
+                        } finally {
+                          setTogglingService(null);
+                        }
+                      }}
+                      className={cn(
+                        'relative w-10 h-5 rounded-full transition-colors cursor-pointer',
+                        toggles[svc.key] ? 'bg-accent' : 'bg-white/10',
+                        togglingService !== null && 'opacity-50 cursor-not-allowed',
+                      )}
+                    >
+                      <span className={cn(
+                        'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform',
+                        toggles[svc.key] && 'translate-x-5',
+                      )} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

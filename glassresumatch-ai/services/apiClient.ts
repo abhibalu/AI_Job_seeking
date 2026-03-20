@@ -308,6 +308,18 @@ class ApiClient {
         });
     }
 
+    // Service kill switches
+    async getServiceToggles(): Promise<ServiceToggles> {
+        return this.request<ServiceToggles>('/api/settings/services');
+    }
+
+    async updateServiceToggle(service: string, enabled: boolean): Promise<ServiceToggles> {
+        return this.request<ServiceToggles>('/api/settings/services', {
+            method: 'PATCH',
+            body: JSON.stringify({ [service]: enabled }),
+        });
+    }
+
     // Scheduler status
     async getSchedulerStatus() {
         return this.request<SchedulerStatus>('/api/scheduler');
@@ -417,6 +429,7 @@ export interface TailoredResume {
     status: 'pending' | 'approved' | 'rejected' | 'needs_review';
     tailoring_status: 'not_started' | 'processing' | 'ready' | 'cancelled' | 'needs_review' | null;
     cover_letter: string | null;
+    gdoc_url: string | null;
     created_at: string;
 }
 
@@ -477,6 +490,12 @@ export interface PipelineRun {
     started_at: string | null;
     finished_at: string | null;
     error?: string | null;
+}
+
+export interface ServiceToggles {
+    openrouter: boolean;
+    apify: boolean;
+    google_docs: boolean;
 }
 
 export interface SchedulerStatus {

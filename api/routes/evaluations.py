@@ -230,6 +230,8 @@ def run_batch_evaluation(task_id: str, max_jobs: int, only_unevaluated: bool, co
 @router.post("/batch", response_model=MessageResponse)
 def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
     """Start batch evaluation (async)."""
+    from backend.service_guard import require_service
+    require_service("openrouter")
     import uuid
     from agents.database import save_task_status
     
@@ -257,6 +259,8 @@ def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
 @router.post("/{job_id}", response_model=MessageResponse)
 def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = False):
     """Evaluate a single job (synchronous)."""
+    from backend.service_guard import require_service
+    require_service("openrouter")
     # Check if already evaluated
     if is_job_evaluated(job_id) and not force:
         logger.debug(f"Job {job_id} already evaluated, skipping.")

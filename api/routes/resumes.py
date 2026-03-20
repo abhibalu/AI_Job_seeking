@@ -266,6 +266,8 @@ from api.schemas import GDocImportRequest
 @router.post("/import-gdoc")
 async def import_from_google_doc(request: GDocImportRequest, background_tasks: BackgroundTasks):
     """Import resume from a Google Doc, parse via LLM, save as master."""
+    from backend.service_guard import require_service
+    require_service("google_docs")
     from services.google_docs import read_google_doc
 
     try:
@@ -404,6 +406,8 @@ def run_tailoring_worker(task_id: str, job_id: str, initial_state: dict):
 @router.post("/tailor/{job_id}")
 async def tailor_resume(job_id: str, background_tasks: BackgroundTasks):
     """Trigger tailoring as a background task. Returns task_id for SSE tracking."""
+    from backend.service_guard import require_service
+    require_service("openrouter")
     from agents.database import save_task_status
 
     try:
@@ -551,6 +555,8 @@ async def export_to_google_docs(job_id: str):
     - summary: total/applied/skipped counts
     - skipped_fields: list of sections that couldn't be applied with reasons
     """
+    from backend.service_guard import require_service
+    require_service("google_docs")
     try:
         from services.google_docs import create_tailored_resume_doc
 

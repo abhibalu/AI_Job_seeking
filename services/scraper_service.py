@@ -18,7 +18,11 @@ class ScraperService:
         Scrape a single LinkedIn job URL (or search URL) using Apify.
         Maps and upserts all found jobs to Supabase.
         Returns a summary of the operation.
+
+        Raises HTTPException(503) if Apify service is disabled.
         """
+        from backend.service_guard import require_service
+        require_service("apify")
         logger.info(f"Scraping URL: {url}")
         
         # 1. Scrape via Apify

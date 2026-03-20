@@ -4,6 +4,7 @@ import { Terminal, ArrowRight, MoreHorizontal } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { JobWithEvaluation } from '../services/jobService';
 import { EvaluationStats } from '../services/apiClient';
+import type { ServiceToggles } from '../services/apiClient';
 import { formatTimeAgo } from '../utils/format';
 
 interface DashboardProps {
@@ -23,41 +24,34 @@ interface DashboardProps {
   verdictFilter: string[];
   onVerdictFilterChange: (verdicts: string[]) => void;
   isTailoring?: boolean;
+  serviceToggles?: ServiceToggles | null;
 }
 
-type VerdictType = 'tailor' | 'apply' | 'borderline' | 'skip';
+type VerdictType = 'tailor' | 'apply' | 'skip';
 
 function getVerdictType(job: JobWithEvaluation): VerdictType {
   const action = job.evaluation?.recommended_action;
   if (action === 'apply') return 'apply';
   if (action === 'skip') return 'skip';
-  if (action === 'tailor') {
-    const score = job.evaluation?.job_match_score ?? 0;
-    return score >= 50 ? 'tailor' : 'borderline';
-  }
-  return 'borderline';
+  return 'tailor';
 }
 
 function groupJobs(jobs: JobWithEvaluation[]) {
-  const tailor: JobWithEvaluation[] = [];
-  const apply: JobWithEvaluation[] = [];
-  const borderline: JobWithEvaluation[] = [];
+  const actionRequired: JobWithEvaluation[] = [];
   const skip: JobWithEvaluation[] = [];
 
   for (const job of jobs) {
     const v = getVerdictType(job);
-    if (v === 'tailor') tailor.push(job);
-    else if (v === 'apply') apply.push(job);
-    else if (v === 'borderline') borderline.push(job);
-    else skip.push(job);
+    if (v === 'skip') skip.push(job);
+    else actionRequired.push(job);
   }
 
-  // Interleave tailor + apply by score
-  const actionRequired = [...tailor, ...apply].sort(
+  // Sort by score descending
+  actionRequired.sort(
     (a, b) => (b.evaluation?.job_match_score ?? 0) - (a.evaluation?.job_match_score ?? 0)
   );
 
-  return { actionRequired, borderline, skip };
+  return { actionRequired, skip };
 }
 
 // --- Card Components ---
@@ -69,7 +63,8 @@ const TailorCard: React.FC<{
   onTailorStart: () => void;
   onSkip: () => void;
   isTailoring?: boolean;
-}> = ({ job, selected, onClick, onTailorStart, onSkip, isTailoring }) => {
+  serviceToggles?: ServiceToggles | null;
+}> = ({ job, selected, onClick, onTailorStart, onSkip, isTailoring, serviceToggles }) => {
   const eval_ = job.evaluation;
   const score = eval_?.job_match_score ?? 0;
   const filled = Math.round((score / 100) * 4);
@@ -151,7 +146,7 @@ const TailorCard: React.FC<{
       )}
 
       {/* Quick actions */}
-      <div className="absolute bottom-3 right-3 flex gap-1.5 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
+      <div className="absolute bottom-3 right-3 flex gap-3 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
         <button
           onClick={(e) => { e.stopPropagation(); onSkip(); }}
           className="text-[9px] font-mono text-gray-600 px-2 py-1 rounded-[5px] border border-white/[0.08] hover:text-gray-400 hover:border-white/15 transition-colors"
@@ -164,6 +159,7 @@ const TailorCard: React.FC<{
           className={cn(
             "text-[9px] font-bold px-2 py-1 rounded-[5px] bg-accent text-[#0d0d0d] hover:bg-accent-hover transition-colors",
             isTailoring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            (serviceToggles !== null && !serviceToggles?.openrouter) && 'opacity-40',
           )}
         >
           {job.tailoring_status === 'ready' ? 'Review & Send' : 'Tailor CV'}
@@ -271,6 +267,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   verdictFilter,
   onVerdictFilterChange,
   isTailoring,
+  serviceToggles,
 }) => {
   const [showSkips, setShowSkips] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -290,7 +287,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => obs.disconnect();
   }, [hasMore]);
 
-  const { actionRequired, borderline, skip } = groupJobs(activeJobs);
+  const { actionRequired, skip } = groupJobs(activeJobs);
 
   // Apply verdict filter
   const filteredActionRequired = verdictFilter.length === 0 ? actionRequired
@@ -298,13 +295,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         const v = getVerdictType(j);
         return verdictFilter.includes(v === 'tailor' ? 'TAILOR' : 'APPLY DIRECT');
       });
-  const filteredBorderline = verdictFilter.length === 0 || verdictFilter.includes('BORDERLINE') ? borderline : [];
   const filteredSkip = verdictFilter.length === 0 || verdictFilter.includes('SKIP') ? skip : [];
 
   const verdictPills: Array<{ label: string; key: string; count: number; color: string }> = [
     { label: 'TAILOR', key: 'TAILOR', count: stats?.by_action?.tailor ?? 0, color: 'text-semantic-green bg-semantic-green/10 border-semantic-green/20' },
     { label: 'APPLY DIRECT', key: 'APPLY DIRECT', count: stats?.by_action?.apply ?? 0, color: 'text-semantic-slate bg-semantic-slate/10 border-semantic-slate/20' },
-    { label: 'BORDERLINE', key: 'BORDERLINE', count: borderline.length, color: 'text-semantic-amber bg-semantic-amber/10 border-semantic-amber/20' },
     { label: 'SKIP', key: 'SKIP', count: stats?.by_action?.skip ?? 0, color: 'text-semantic-red bg-semantic-red/10 border-semantic-red/20' },
   ];
 
@@ -345,7 +340,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       );
     }
 
-    // tailor or borderline
+    // tailor
     return wrapper(
       <TailorCard
         job={job}
@@ -354,9 +349,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onTailorStart={() => onTailorStart(job.id)}
         onSkip={() => onSkip(job.id)}
         isTailoring={isTailoring}
+        serviceToggles={serviceToggles}
       />
     );
-  }, [selectedJobId, onJobClick, onTailorStart, onAction, onSkip, isTailoring]);
+  }, [selectedJobId, onJobClick, onTailorStart, onAction, onSkip, isTailoring, serviceToggles]);
 
   return (
     <div className="w-80 flex-shrink-0 border-r border-white/5 flex flex-col h-full bg-base">
@@ -408,16 +404,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <SectionHeader label="Action required" count={filteredActionRequired.length} />
                 <div className="space-y-0.5">
                   {filteredActionRequired.map(job => renderCard(job))}
-                </div>
-              </>
-            )}
-
-            {/* Borderline */}
-            {filteredBorderline.length > 0 && (
-              <>
-                <SectionHeader label="Your call" count={filteredBorderline.length} />
-                <div className="space-y-0.5">
-                  {filteredBorderline.map(job => renderCard(job))}
                 </div>
               </>
             )}

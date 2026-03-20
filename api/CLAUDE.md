@@ -101,6 +101,8 @@ by the main UI.
 | POST   | `/api/applications`                         | Record a new application (called on Apply)     |
 | PATCH  | `/api/applications/{id}/status`             | Update status, append to status_history        |
 | GET    | `/api/scheduler`                            | Scheduler job status                           |
+| GET    | `/api/settings/services`                    | List service toggle status (ADR-0019)          |
+| PATCH  | `/api/settings/services`                    | Update service toggles (ADR-0019)              |
 
 ## OotoCV schema additions (`api/schemas.py`)
 
@@ -109,6 +111,7 @@ New schemas added for OotoCV Phase 1:
 - `ResumeChangeActionRequest` — body for single-change PATCH (`action: accept | reject | keep_original`)
 - `ResumeChangeBulkActionRequest` — body for bulk PATCH (`action`, `scope: remaining | all`)
 - `SystemConfigItem` / `CronConfigRequest` — system config read/write
+- `ServiceTogglesResponse` / `ServiceTogglesUpdate` — read/patch body for service kill switch toggles (ADR-0019); fields: `openrouter`, `apify`, `google_docs` (all bool)
 
 New schemas added for hardened GDoc export (Lesson #18):
 - `ExportResultResponse` — structured export response with `status` (success/partial/failed/no_changes),
@@ -122,6 +125,40 @@ New schemas added for hardened GDoc export (Lesson #18):
 Both `tailoring_status` and `salary_info` are surfaced via `v_jobs_enriched` view (migration 014) — both `list_jobs` and
 `get_job` query this view, so these fields are present on list and detail responses. Use `salary_info` in the
 metadata row of the JobDetail hero section to display salary band when available.
+
+## Service kill switches (ADR-0019)
+
+Three services can be toggled at runtime via `system_config` table:
+- `service_openrouter_enabled` — LLM evaluation/tailoring (default: enabled)
+- `service_apify_enabled` — LinkedIn scraping (default: enabled)
+- `service_google_docs_enabled` — Resume exports (default: enabled)
+
+**Route pattern**: Guard with `require_service()` at the top of any route that depends on external APIs:
+
+```python
+from backend.service_guard import require_service
+
+@router.post("/api/resumes/tailor/{job_id}")
+async def tailor_resume(job_id: str):
+    require_service("openrouter")  # Raises 503 if disabled
+    # ... rest of handler
+```
+
+**Worker pattern**: Check with `is_service_enabled()` before attempting external calls:
+
+```python
+from backend.service_guard import is_service_enabled
+
+if is_service_enabled("apify"):
+    scrape_jobs()  # Skip gracefully if disabled
+```
+
+**Settings endpoint**: `PATCH /api/settings/services` toggles a service on/off. Body:
+```json
+{ "openrouter": true, "apify": false, "google_docs": true }
+```
+
+Returns current state of all toggles.
 
 ## Environment variables for API
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — required for all DB operations

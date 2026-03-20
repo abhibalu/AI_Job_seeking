@@ -48,6 +48,8 @@ def scheduler_status():
 @router.post("/trigger/scrape")
 def trigger_scrape_now():
     """Manually trigger the scrape worker immediately (outside the schedule)."""
+    from backend.service_guard import require_service
+    require_service("apify")
     import threading
     from services.scraper_worker import run_scrape_worker
     thread = threading.Thread(target=run_scrape_worker, daemon=True, name="manual_scrape")
@@ -58,6 +60,8 @@ def trigger_scrape_now():
 @router.post("/trigger/evaluate")
 def trigger_eval_now():
     """Manually trigger the evaluation worker immediately."""
+    from backend.service_guard import require_service
+    require_service("openrouter")
     import threading
     from services.eval_worker import run_eval_worker
     thread = threading.Thread(target=run_eval_worker, daemon=True, name="manual_eval")

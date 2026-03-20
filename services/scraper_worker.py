@@ -60,6 +60,11 @@ def run_scrape_worker() -> None:
     Main entry point called by APScheduler every N hours.
     Runs all configured search URLs sequentially.
     """
+    from backend.service_guard import is_service_enabled
+    if not is_service_enabled("apify"):
+        logger.warning("[ScrapeWorker] Apify service is disabled in settings — skipping run")
+        return
+
     urls = _get_search_urls()
     logger.info(f"[ScrapeWorker] Starting scrape job for {len(urls)} URL(s)")
 

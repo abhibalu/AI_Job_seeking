@@ -249,6 +249,18 @@ class SystemConfigItem(BaseModel):
     value: str
 
 
+class ServiceTogglesResponse(BaseModel):
+    openrouter: bool
+    apify: bool
+    google_docs: bool
+
+
+class ServiceTogglesUpdate(BaseModel):
+    openrouter: bool | None = None
+    apify: bool | None = None
+    google_docs: bool | None = None
+
+
 class CronConfigRequest(BaseModel):
     cron_time: str          # HH:MM
     cron_tz: str            # IANA timezone (e.g. "Europe/Dublin")

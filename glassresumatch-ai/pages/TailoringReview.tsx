@@ -5,6 +5,7 @@ import confetti from 'canvas-confetti';
 import { Check, X, RotateCcw } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { apiClient } from '../services/apiClient';
+import type { ServiceToggles } from '../services/apiClient';
 import type { ResumeChange, TailoredResume } from '../types';
 import { Toast } from '../components/Toast';
 
@@ -71,7 +72,7 @@ const ChangeCard: React.FC<ChangeCardProps> = ({ change, onAction }) => {
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-1 flex-shrink-0 mt-0.5">
+      <div className="flex gap-2 flex-shrink-0 mt-0.5">
         {change.review_action ? (
           <span className={cn(
             'text-[8px] font-mono px-2 py-1 rounded-[4px]',
@@ -112,7 +113,7 @@ const ChangeCard: React.FC<ChangeCardProps> = ({ change, onAction }) => {
   );
 };
 
-export const TailoringReview: React.FC = () => {
+export const TailoringReview: React.FC<{ serviceToggles?: ServiceToggles | null }> = ({ serviceToggles }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [resume, setResume] = useState<TailoredResume | null>(null);
@@ -121,9 +122,22 @@ export const TailoringReview: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
   const [approving, setApproving] = useState(false);
-  const [gdocExported, setGdocExported] = useState(false);
+  const [gdocUrl, setGdocUrl] = useState<string | null>(null);
   const [reexporting, setReexporting] = useState(false);
   const approveRef = useRef<HTMLButtonElement>(null);
+  const [showGdocActions, setShowGdocActions] = useState(false);
+  const gdocMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showGdocActions) return;
+    const handler = (e: MouseEvent) => {
+      if (gdocMenuRef.current && !gdocMenuRef.current.contains(e.target as Node)) {
+        setShowGdocActions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showGdocActions]);
 
   useEffect(() => {
     if (!id) return;
@@ -137,6 +151,7 @@ export const TailoringReview: React.FC = () => {
       if (resumeData) {
         setResume(resumeData);
         setCoverLetter(resumeData.cover_letter || '');
+        setGdocUrl(resumeData.gdoc_url ?? null);
       }
       setChanges(ch.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1)));
       setLoading(false);
@@ -181,34 +196,35 @@ export const TailoringReview: React.FC = () => {
       await apiClient.updateTailoredStatus(id, 'approved');
 
       // Export to Google Docs
-      try {
-        const result = await apiClient.exportToGoogleDocs(resume.job_id);
-        if (result.status === 'success') {
-          if (result.url) window.open(result.url, '_blank');
-        } else if (result.status === 'partial') {
-          const skipped = result.summary?.skipped ?? 0;
-          const total = result.summary?.total ?? 0;
-          setToast({
-            message: `Exported with ${skipped} of ${total} changes skipped. Check the document.`,
-            type: 'error',
-          });
-          if (result.url) window.open(result.url, '_blank');
-        } else if (result.status === 'failed') {
-          const reasons = result.skipped_fields?.map(f => f.reason).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'unknown';
-          setToast({
-            message: `Export failed — no changes could be applied (${reasons}). Try re-exporting.`,
-            type: 'error',
-          });
-        } else if (result.status === 'no_changes') {
-          setToast({ message: 'No differences found between base and tailored resume.', type: 'error' });
-          if (result.url) window.open(result.url, '_blank');
+      if (!gdocsDisabled) {
+        try {
+          const result = await apiClient.exportToGoogleDocs(resume.job_id);
+          if (result.status === 'success') {
+            if (result.url) window.open(result.url, '_blank');
+          } else if (result.status === 'partial') {
+            const skipped = result.summary?.skipped ?? 0;
+            const total = result.summary?.total ?? 0;
+            setToast({
+              message: `Exported with ${skipped} of ${total} changes skipped. Check the document.`,
+              type: 'error',
+            });
+            if (result.url) window.open(result.url, '_blank');
+          } else if (result.status === 'failed') {
+            const reasons = result.skipped_fields?.map(f => f.reason).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'unknown';
+            setToast({
+              message: `Export failed — no changes could be applied (${reasons}). Try re-exporting.`,
+              type: 'error',
+            });
+          } else if (result.status === 'no_changes') {
+            setToast({ message: 'No differences found between base and tailored resume.', type: 'error' });
+            if (result.url) window.open(result.url, '_blank');
+          }
+          setGdocUrl(result.url ?? null);
+        } catch (err: any) {
+          // Non-fatal — approve succeeded, GDoc export is best-effort
+          const detail = err?.detail || err?.message || 'Unknown error';
+          setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
         }
-        setGdocExported(true);
-      } catch (err: any) {
-        // Non-fatal — approve succeeded, GDoc export is best-effort
-        const detail = err?.detail || err?.message || 'Unknown error';
-        setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
-        setGdocExported(true);
       }
 
       // Record application in tracker
@@ -259,7 +275,7 @@ export const TailoringReview: React.FC = () => {
       const result = await apiClient.exportToGoogleDocs(resume.job_id);
       if (result.status === 'success') {
         setToast({ message: 'Re-exported successfully.', type: 'success' });
-        if (result.url) window.open(result.url, '_blank');
+        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
       } else if (result.status === 'partial') {
         const skipped = result.summary?.skipped ?? 0;
         const total = result.summary?.total ?? 0;
@@ -267,12 +283,12 @@ export const TailoringReview: React.FC = () => {
           message: `Re-exported with ${skipped} of ${total} changes skipped.`,
           type: 'error',
         });
-        if (result.url) window.open(result.url, '_blank');
+        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
       } else if (result.status === 'failed') {
         setToast({ message: 'Re-export failed — no changes could be applied.', type: 'error' });
       } else {
         setToast({ message: 'No differences found.', type: 'error' });
-        if (result.url) window.open(result.url, '_blank');
+        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
       }
     } catch (err: any) {
       const detail = err?.detail || err?.message || 'Unknown error';
@@ -281,6 +297,8 @@ export const TailoringReview: React.FC = () => {
       setReexporting(false);
     }
   }, [resume, reexporting]);
+
+  const gdocsDisabled = serviceToggles !== null && !serviceToggles?.google_docs;
 
   const accepted = changes.filter(c => c.review_action === 'accept').length;
   const rejected = changes.filter(c => c.review_action === 'reject').length;
@@ -331,55 +349,87 @@ export const TailoringReview: React.FC = () => {
       </div>
 
       {/* Sticky approve footer */}
-      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base flex items-center gap-3 px-8 py-3">
-        <div className="flex-1 flex items-center gap-3 text-[10px] font-mono">
-          <span className="text-semantic-green">{accepted} accepted</span>
-          <span className="text-gray-500">·</span>
-          <span className="text-gray-500">{pending} pending</span>
-          <span className="text-gray-500">·</span>
-          <span className="text-semantic-red">{rejected} rejected</span>
-        </div>
-
-        {pending > 0 && (
-          <button
-            onClick={handleBulkAccept}
-            className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer"
-          >
-            Accept all remaining →
-          </button>
+      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-8 py-3">
+        {/* Progress bar — replaces colored stat counters */}
+        {changes.length > 0 && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-accent/60 rounded-full transition-all duration-300"
+                style={{ width: `${((accepted + rejected) / changes.length) * 100}%` }}
+              />
+            </div>
+            <span className="text-[9px] font-mono text-gray-600">
+              {accepted + rejected}/{changes.length}
+            </span>
+          </div>
         )}
 
-        <button
-          onClick={() => navigate('/')}
-          className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer"
-        >
-          Skip
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex-1" />
 
-        {gdocExported && (
+          {pending > 0 && (
+            <button
+              onClick={handleBulkAccept}
+              className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer"
+            >
+              Accept all remaining →
+            </button>
+          )}
+
           <button
-            onClick={handleReexport}
-            disabled={reexporting}
+            onClick={() => navigate('/')}
+            className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer"
+          >
+            Skip
+          </button>
+
+          {gdocUrl && (
+            <div className="relative" ref={gdocMenuRef}>
+              <button
+                onClick={() => setShowGdocActions(v => !v)}
+                className="text-[9px] font-mono text-gray-500 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-300 transition-colors cursor-pointer"
+              >
+                GDoc ▾
+              </button>
+              {showGdocActions && (
+                <div className="absolute bottom-full right-0 mb-1 bg-surface border border-white/[0.1] rounded-[6px] py-1 min-w-[160px]">
+                  <a
+                    href={gdocUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-[9px] font-mono text-gray-400 px-3 py-1.5 hover:text-gray-200 hover:bg-white/[0.04] transition-colors"
+                  >
+                    Open in GDoc ↗
+                  </a>
+                  <button
+                    onClick={() => { setShowGdocActions(false); handleReexport(); }}
+                    disabled={reexporting || gdocsDisabled}
+                    title={gdocsDisabled ? 'Google Docs disabled · Enable in Settings' : undefined}
+                    className={cn(
+                      'w-full text-left text-[9px] font-mono text-gray-400 px-3 py-1.5 hover:text-gray-200 hover:bg-white/[0.04] transition-colors cursor-pointer',
+                      (reexporting || gdocsDisabled) && 'opacity-40 cursor-not-allowed',
+                    )}
+                  >
+                    {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            ref={approveRef}
+            onClick={handleApprove}
+            disabled={approving}
             className={cn(
-              'text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer',
-              reexporting && 'opacity-50 cursor-not-allowed',
+              'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer',
+              approving && 'opacity-50 cursor-not-allowed',
             )}
           >
-            {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
+            {approving ? 'Sending…' : gdocsDisabled ? 'Approve →' : 'Approve & Send →'}
           </button>
-        )}
-
-        <button
-          ref={approveRef}
-          onClick={handleApprove}
-          disabled={approving}
-          className={cn(
-            'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer',
-            approving && 'opacity-50 cursor-not-allowed',
-          )}
-        >
-          {approving ? 'Sending…' : 'Approve & Send →'}
-        </button>
+        </div>
       </div>
 
       {toast && (

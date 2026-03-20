@@ -43,6 +43,8 @@ def get_parsed_jd_route(job_id: str):
 @router.post("/{job_id}", response_model=MessageResponse)
 def parse_jd(job_id: str, force: bool = False):
     """Parse JD for a job (must be evaluated first)."""
+    from backend.service_guard import require_service
+    require_service("openrouter")
     # Check if evaluated
     if not is_job_evaluated(job_id):
         raise HTTPException(status_code=400, detail=f"Job {job_id} not evaluated yet")

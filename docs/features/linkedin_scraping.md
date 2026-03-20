@@ -71,6 +71,8 @@ The final output stored in the database follows this contract:
 ### 1. External Service Integration (`services/scraper_service.py`)
 The implementation uses **Apify** as the external scraping engine. Due to the long-running nature of browser automation, the service implements an asynchronous polling pattern.
 
+`scraper_service.py` calls `require_service("apify")` at the top of `scrape_and_import()` — raises HTTP 503 if Apify is disabled in Settings. `scraper_worker.py` calls `is_service_enabled("apify")` at startup — gracefully skips the run if disabled (ADR-0019).
+
 **Implementation Details:**
 - **Actor ID:** `hKByXkMQaC5Qt9UMN` (Specific LinkedIn Scraper).
 - **Polling Loop:** Retries up to 60 times with a 5-second interval (5-minute timeout).

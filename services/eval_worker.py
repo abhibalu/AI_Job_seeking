@@ -104,6 +104,11 @@ def run_eval_worker() -> None:
     Main entry point called by APScheduler after each scrape cycle.
     Processes up to MAX_JOBS_PER_RUN unevaluated jobs through LangGraph.
     """
+    from backend.service_guard import is_service_enabled
+    if not is_service_enabled("openrouter"):
+        logger.warning("[GraphWorker] OpenRouter service is disabled in settings — skipping run")
+        return
+
     logger.info(f"[GraphWorker] Starting LangGraph batch (max={MAX_JOBS_PER_RUN})")
 
     run_id = start_run("evaluate", metadata={"max_jobs": MAX_JOBS_PER_RUN, "orchestration": "langgraph"})

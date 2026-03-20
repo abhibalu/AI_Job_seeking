@@ -1,44 +1,42 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Building2, Clock, Users, DollarSign, Mail, ChevronDown } from 'lucide-react';
+import { ExternalLink, Building2, Clock, Users, DollarSign, Mail, ChevronDown, RotateCcw } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { MatchBrief } from '../components/MatchBrief';
 import { JobWithEvaluation } from '../services/jobService';
 import { apiClient } from '../services/apiClient';
 import type { Evaluation, ResumeChange, ParseResult } from '../types';
+import type { ServiceToggles } from '../services/apiClient';
 import { formatTimeAgo } from '../utils/format';
+import { Toast } from '../components/Toast';
 
 interface JobDetailProps {
   job: JobWithEvaluation;
   onTailorStart: (jobId: string) => void;
   onAction: (jobId: string, cvVersion: 'base' | 'tailored') => void;
   onSkip: (jobId: string) => void;
+  onReEvaluate: (jobId: string) => Promise<void>;
+  serviceToggles?: ServiceToggles | null;
 }
 
-type VerdictType = 'tailor' | 'apply' | 'borderline' | 'skip';
+type VerdictType = 'tailor' | 'apply' | 'skip';
 
 function getVerdictType(job: JobWithEvaluation): VerdictType {
   const action = job.evaluation?.recommended_action;
   if (action === 'apply') return 'apply';
   if (action === 'skip') return 'skip';
-  if (action === 'tailor') {
-    const score = job.evaluation?.job_match_score ?? 0;
-    return score >= 50 ? 'tailor' : 'borderline';
-  }
-  return 'borderline';
+  return 'tailor';
 }
 
 const verdictColors: Record<VerdictType, string> = {
   tailor: 'border-l-semantic-green',
-  borderline: 'border-l-semantic-amber',
   apply: 'border-l-semantic-slate',
   skip: 'border-l-semantic-red',
 };
 
 const verdictBadge: Record<VerdictType, { label: string; color: string }> = {
   tailor: { label: 'TAILOR', color: 'bg-semantic-green/10 text-semantic-green' },
-  borderline: { label: 'BORDERLINE', color: 'bg-semantic-amber/10 text-semantic-amber' },
   apply: { label: 'APPLY DIRECT', color: 'bg-semantic-slate/10 text-semantic-slate' },
   skip: { label: 'SKIP', color: 'bg-semantic-red/10 text-semantic-red' },
 };
@@ -221,7 +219,7 @@ const Collapsible: React.FC<{ label: string; children: React.ReactNode }> = ({ l
 };
 
 // --- Main JobDetail ---
-export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onAction, onSkip }) => {
+export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onAction, onSkip, onReEvaluate, serviceToggles }) => {
   const navigate = useNavigate();
   const eval_ = job.evaluation;
   const verdict = getVerdictType(job);
@@ -230,6 +228,29 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
   const [changesLoading, setChangesLoading] = useState(false);
   const [changesError, setChangesError] = useState<string | null>(null);
   const [actionInFlight, setActionInFlight] = useState<string | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+
+  const llmDisabled = serviceToggles !== null && !serviceToggles?.openrouter;
+
+  const handleReEvaluate = async () => {
+    if (llmDisabled) {
+      setToast({ message: 'LLM (OpenRouter) is disabled — enable it in Settings', type: 'error' });
+      return;
+    }
+    if (evaluating) return;
+    setEvaluating(true);
+    setActionInFlight('evaluate');
+    try {
+      await onReEvaluate(job.id);
+      seenVerdicts.delete(job.id);
+    } catch {
+      // error handling at parent level
+    } finally {
+      setEvaluating(false);
+      setActionInFlight(null);
+    }
+  };
 
   // Fetch parsed JD and changes
   useEffect(() => {
@@ -257,8 +278,18 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
   if (!eval_) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex flex-col items-center justify-center gap-3">
         <p className="text-[11px] font-mono text-gray-600">Not yet evaluated</p>
+        <button
+          onClick={handleReEvaluate}
+          disabled={evaluating}
+          className={cn(
+            'bg-accent text-[#0d0d0d] text-[10px] font-bold px-5 py-2 rounded-[7px] hover:bg-accent-hover transition-colors cursor-pointer',
+            evaluating && 'opacity-50 cursor-not-allowed',
+          )}
+        >
+          {evaluating ? 'Evaluating…' : 'Evaluate'}
+        </button>
       </div>
     );
   }
@@ -275,6 +306,10 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
   if (parsedJd?.seniority) tags.push(parsedJd.seniority);
 
   const handleTailor = () => {
+    if (llmDisabled) {
+      setToast({ message: 'LLM (OpenRouter) is disabled — enable it in Settings', type: 'error' });
+      return;
+    }
     if (job.tailoring_status === 'ready') {
       apiClient.getTailoredVersions(job.id).then(versions => {
         if (versions.length > 0) navigate(`/tailoring/${versions[0].id}`);
@@ -335,8 +370,8 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             const freshness = formatTimeAgo(job.posted_at);
             if (freshness) metaItems.push(<span key="posted" className="flex items-center gap-1"><Clock className="w-3 h-3" />{freshness}</span>);
             if (job.applicants_count && job.applicants_count > 0) metaItems.push(<span key="applicants" className="flex items-center gap-1"><Users className="w-3 h-3" />{job.applicants_count} applicants</span>);
-            if (job.salary_info) metaItems.push(<span key="salary" className="flex items-center gap-1"><DollarSign className="w-3 h-3" />{job.salary_info}</span>);
-            if (eval_.recruiter_email) metaItems.push(<a key="recruiter" href={`mailto:${eval_.recruiter_email}`} className="flex items-center gap-1 hover:text-gray-400"><Mail className="w-3 h-3" />{eval_.recruiter_email}</a>);
+            if (job.salary_info) metaItems.push(<span key="salary" className="flex items-center gap-1 text-gray-400"><DollarSign className="w-3 h-3" />{job.salary_info}</span>);
+            if (eval_.recruiter_email) metaItems.push(<a key="recruiter" href={`mailto:${eval_.recruiter_email}`} className="flex items-center gap-1 text-gray-400 hover:text-gray-300"><Mail className="w-3 h-3" />{eval_.recruiter_email}</a>);
             return metaItems.length > 0 ? (
               <div className="flex items-center gap-3 text-[10px] font-mono text-gray-500 mb-3">
                 {metaItems.map((item, i) => (
@@ -351,25 +386,41 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
           {/* Verdict block */}
           <div className={cn(
-            'bg-base/80 rounded-[8px] border border-white/[0.08] border-l-[3px] p-[12px_14px]',
+            'bg-base/80 rounded-[8px] border border-white/[0.08] border-l-[3px] p-[12px_14px] relative',
             verdictColors[verdict]
           )}>
             <div className="flex items-center gap-2 mb-1.5">
               <span className={cn('text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5', badge.color)}>
                 {badge.label}
               </span>
-              {(verdict === 'tailor' || verdict === 'borderline') && (
+              {verdict === 'tailor' && (
                 <div className="flex gap-0.5 ml-1">
                   {[0, 1, 2, 3].map(i => (
                     <div key={i} className={cn('w-1.5 h-1.5 rounded-full', i < filled ? 'bg-semantic-green' : 'bg-white/[0.08]')} />
                   ))}
                 </div>
               )}
+              <button
+                onClick={handleReEvaluate}
+                disabled={evaluating}
+                title="Re-evaluate this job"
+                className={cn(
+                  'ml-auto text-gray-600 hover:text-gray-400 transition-colors cursor-pointer disabled:opacity-50',
+                  llmDisabled && 'opacity-40',
+                )}
+              >
+                <RotateCcw className={cn('w-3 h-3', evaluating && 'animate-spin')} />
+              </button>
             </div>
             {reason && <VerdictTypewriter text={reason} jobId={job.id} />}
             {eval_.summary && eval_.summary !== reason && (
               <div className="text-[9px] font-mono text-gray-500 mt-1.5">
                 <span className="text-accent">→</span> {eval_.summary}
+              </div>
+            )}
+            {evaluating && (
+              <div className="absolute inset-0 bg-base/60 rounded-[8px] flex items-center justify-center">
+                <span className="text-[10px] font-mono text-accent animate-pulse">Re-evaluating…</span>
               </div>
             )}
           </div>
@@ -381,20 +432,6 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             <MatchBrief evaluation={eval_} />
             <JobSection evaluation={eval_} parsedJd={parsedJd} />
             <CVDiff changes={changes} loading={changesLoading} error={changesError} />
-          </>
-        )}
-
-        {verdict === 'borderline' && (
-          <>
-            {/* Deciding Factor - prominent */}
-            <div className="p-6 rounded-xl border border-semantic-amber/20 bg-semantic-amber/[0.03]">
-              <div className="text-[8px] font-mono text-semantic-amber uppercase tracking-[0.08em] mb-2">Deciding factor</div>
-              <div className="text-[12px] font-sans text-gray-300">
-                {eval_.gaps?.technical?.[0] || eval_.gaps?.domain?.[0] || 'This one could go either way.'}
-              </div>
-            </div>
-            <MatchBrief evaluation={eval_} />
-            <JobSection evaluation={eval_} parsedJd={parsedJd} />
           </>
         )}
 
@@ -456,7 +493,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             )}
 
             {/* ATS Keywords */}
-            {parsedJd?.ats_keywords && parsedJd.ats_keywords.length > 0 && (verdict === 'tailor' || verdict === 'borderline') && (
+            {parsedJd?.ats_keywords && parsedJd.ats_keywords.length > 0 && verdict === 'tailor' && (
               <Collapsible label="ATS Keywords">
                 <div className="flex flex-wrap gap-1.5">
                   {parsedJd.ats_keywords.map((kw, i) => (
@@ -485,19 +522,16 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
       <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-6 py-3 flex items-center gap-2">
         <div className="flex-1" />
 
-        {/* Skip button — hidden for borderline (has its own contextual skip) */}
-        {verdict !== 'borderline' && (
-          <button
-            onClick={() => onSkip(job.id)}
-            disabled={!!actionInFlight}
-            className={cn(
-              'text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer',
-              actionInFlight && 'opacity-50 cursor-not-allowed',
-            )}
-          >
-            Skip
-          </button>
-        )}
+        <button
+          onClick={() => onSkip(job.id)}
+          disabled={!!actionInFlight}
+          className={cn(
+            'text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer',
+            actionInFlight && 'opacity-50 cursor-not-allowed',
+          )}
+        >
+          Skip
+        </button>
 
         {/* Original JD */}
         {job.job_url && (
@@ -519,35 +553,11 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             className={cn(
               'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-colors cursor-pointer',
               actionInFlight && 'opacity-50 cursor-not-allowed',
+              llmDisabled && 'opacity-40',
             )}
           >
             {actionInFlight === 'tailor' ? 'Tailoring…' : job.tailoring_status === 'ready' ? 'Review & Send →' : 'Tailor CV →'}
           </button>
-        )}
-
-        {verdict === 'borderline' && (
-          <div className="flex gap-2">
-            <button
-              onClick={handleTailor}
-              disabled={!!actionInFlight}
-              className={cn(
-                'bg-accent text-[#0d0d0d] text-[10px] font-bold px-4 py-2.5 rounded-[7px] hover:bg-accent-hover transition-colors cursor-pointer',
-                actionInFlight && 'opacity-50 cursor-not-allowed',
-              )}
-            >
-              {actionInFlight === 'tailor' ? 'Tailoring…' : 'Tailor CV →'}
-            </button>
-            <button
-              onClick={() => onSkip(job.id)}
-              disabled={!!actionInFlight}
-              className={cn(
-                'text-[10px] font-bold text-gray-400 px-4 py-2.5 border border-white/[0.08] rounded-[7px] hover:text-gray-300 transition-colors cursor-pointer',
-                actionInFlight && 'opacity-50 cursor-not-allowed',
-              )}
-            >
-              Skip This One
-            </button>
-          </div>
         )}
 
         {verdict === 'apply' && (
@@ -571,12 +581,17 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             className={cn(
               'text-[10px] font-mono text-gray-600 px-4 py-2.5 border border-white/[0.08] rounded-[7px] hover:text-gray-400 transition-colors cursor-pointer',
               actionInFlight && 'opacity-50 cursor-not-allowed',
+              llmDisabled && 'opacity-40',
             )}
           >
             {actionInFlight === 'tailor' ? 'Tailoring…' : 'Override & Tailor'}
           </button>
         )}
       </div>
+
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />
+      )}
     </div>
   );
 };

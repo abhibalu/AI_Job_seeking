@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { JobWithEvaluation } from './services/jobService';
 import { apiClient } from './services/apiClient';
+import type { ServiceToggles } from './services/apiClient';
 import { useJobs } from './hooks/useJobs';
 import { Sidebar } from './components/Sidebar';
 import { TailoringStrip } from './components/TailoringStrip';
@@ -42,6 +43,15 @@ const App: React.FC = () => {
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const [serviceToggles, setServiceToggles] = useState<ServiceToggles | null>(null);
+
+  useEffect(() => {
+    apiClient.getServiceToggles().then(setServiceToggles).catch(() => {});
+  }, []);
+
+  const refreshToggles = useCallback(() => {
+    apiClient.getServiceToggles().then(setServiceToggles).catch(() => {});
+  }, []);
 
   // Jobs hook
   const {
@@ -55,6 +65,7 @@ const App: React.FC = () => {
     refresh,
     markActioned,
     unmarkActioned,
+    updateJobEvaluation,
   } = useJobs('all', filters);
 
   // All jobs for lookup
@@ -99,6 +110,12 @@ const App: React.FC = () => {
   const handleSkip = useCallback((jobId: string) => {
     markActioned(jobId);
   }, [markActioned]);
+
+  const handleReEvaluate = useCallback(async (jobId: string) => {
+    await apiClient.evaluateJob(jobId, true);
+    const freshEval = await apiClient.getEvaluation(jobId);
+    updateJobEvaluation(jobId, freshEval);
+  }, [updateJobEvaluation]);
 
   const handleTailorStart = useCallback(async (jobId: string) => {
     const job = allJobs.find(j => j.id === jobId);
@@ -201,6 +218,7 @@ const App: React.FC = () => {
                     verdictFilter={verdictFilter}
                     onVerdictFilterChange={setVerdictFilter}
                     isTailoring={!!tailoringJob}
+                    serviceToggles={serviceToggles}
                   />
 
                   {/* Detail pane */}
@@ -211,6 +229,8 @@ const App: React.FC = () => {
                         onTailorStart={handleTailorStart}
                         onAction={handleAction}
                         onSkip={handleSkip}
+                        onReEvaluate={handleReEvaluate}
+                        serviceToggles={serviceToggles}
                       />
                     ) : (
                       <div className="h-full flex items-center justify-center">
@@ -221,9 +241,9 @@ const App: React.FC = () => {
                 </>
               }
             />
-            <Route path="/tailoring/:id" element={<TailoringReview />} />
+            <Route path="/tailoring/:id" element={<TailoringReview serviceToggles={serviceToggles} />} />
             <Route path="/tracker" element={<ApplicationTracker />} />
-            <Route path="/settings" element={<SetupPage isOnboarding={false} />} />
+            <Route path="/settings" element={<SetupPage isOnboarding={false} onTogglesChanged={refreshToggles} />} />
             <Route
               path="/onboarding"
               element={<SetupPage isOnboarding={true} onComplete={() => navigate('/')} />}

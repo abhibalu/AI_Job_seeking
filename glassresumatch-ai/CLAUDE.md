@@ -13,11 +13,11 @@ glassresumatch-ai/
   index.css           — @tailwindcss import + @theme tokens + base styles
   types.ts            — ALL shared TypeScript types
   pages/              — full-page route components
-    Dashboard.tsx     — feed pane (4 card formats: TailorCard, ApplyDirectCard, SkipCard + Borderline)
+    Dashboard.tsx     — feed pane (3 card formats: TailorCard, ApplyDirectCard, SkipCard)
     JobDetail.tsx     — detail pane (verdict-conditional layout, typewriter, MatchBrief, CVDiff)
-    TailoringReview.tsx — change-level review (Accept/Reject, cover letter, approve footer)
+    TailoringReview.tsx — change-level review (Accept/Reject, cover letter, approve footer). Sticky footer: progress bar (reviewed/total fraction, replaces colored stat counters) + "Accept all remaining →" + "Skip" + "GDoc ▾" dropdown (groups Open + Re-export) + "Approve & Send →" primary CTA. GDoc dropdown has click-outside-to-close via mousedown listener.
     ApplicationTracker.tsx — tracker cards with status chips and timeline dots
-    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import. Settings mode fetches `getMasterResume()` on mount to show a "current resume" indicator (✓ name · updated timestamp · open doc ↗). `sourceGdocUrl` link only appears when resume was imported from Google Docs.
+    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import. Settings mode fetches `getMasterResume()` on mount to show a "current resume" indicator (✓ name · updated timestamp · open doc ↗). `sourceGdocUrl` link only appears when resume was imported from Google Docs. Settings also renders the External Services kill-switch panel (openrouter/apify/google_docs toggles) when `toggles` are loaded. `onTogglesChanged?: () => void` prop triggers `refreshToggles` in App.tsx so service guards re-apply app-wide after a toggle change. GDoc import tile and button are disabled (opacity-40) when `google_docs` toggle is off.
   components/         — shared/reusable components only
     Sidebar.tsx       — nav + logo + cron status indicator
     TailoringStrip.tsx — floating process card during active tailoring (6-stage pipeline track + typewriter + stop)
@@ -106,6 +106,13 @@ and display real cron/scraper status (active/sleeping/error).
 `summary` (total/applied/skipped), and `skipped_fields` list with failure reasons. Frontend
 shows toast variants per status (green/amber/red/info) and opens doc on success/partial/no_changes.
 
+`getServiceToggles()` — `GET /api/settings/services`, returns `ServiceToggles` (openrouter/apify/google_docs booleans).
+`updateServiceToggle(service, enabled)` — `PATCH /api/settings/services`, returns updated `ServiceToggles`.
+Both used by App.tsx (fetches on mount, exposes `refreshToggles`) and SetupPage (renders kill-switch UI).
+`ServiceToggles` interface exported from `apiClient.ts`; passed as prop to Dashboard, JobDetail, TailoringReview.
+
+`TailoredResume` type now includes `gdoc_url: string | null` — the GDoc URL set after first export.
+
 ## Sidebar brand & scheduler status (OotoCV phase 5 polish)
 
 **Brand**: Sidebar logo text is "OotoCV" (not "TailorAI").
@@ -121,7 +128,7 @@ Uses `formatTimeAgo(last_run.finished_at)` to display "Last run" time. Gracefull
 
 `useJobs('all', filters)` passes `is_evaluated: true` to the jobs API. Unevaluated jobs are
 excluded from the Dashboard feed — they have no verdict, score, or summary data, so rendering
-them produces empty verdict blocks and misleading "borderline" grouping.
+them produces empty verdict blocks and misleading grouping.
 
 ## Feed sort rule (OotoCV)
 
@@ -133,7 +140,7 @@ Implemented in `utils/sort.ts` smart sort tier. Less friction = more urgent.
 `Dashboard.tsx` renders four card formats. `TailorCard` and `ApplyDirectCard` both have hover-reveal
 quick action buttons.
 
-**TailorCard** (verdict: tailor or borderline) — two distinct props:
+**TailorCard** (verdict: tailor) — two distinct props:
 - `onTailorStart()` — primary button ("Tailor CV" / "Review & Send"). Wired
   to `handleTailorStart` in App.tsx, which checks `tailoring_status` first:
   - `'ready'` → `getTailoredVersions(jobId)` then `navigate('/tailoring/:id')` (existing review)
@@ -144,7 +151,7 @@ quick action buttons.
 
 Button label is conditional on `job.tailoring_status`:
 - `'ready'` → `"Review & Send"` (don't re-run pipeline)
-- otherwise → `"Tailor CV"` (for both tailor and borderline verdicts)
+- otherwise → `"Tailor CV"`
 
 **Concurrency guard**: `handleTailorStart` checks `tailoringJob` state — only one tailoring run
 at a time. Dashboard cards are disabled via `isTailoring` prop during active runs.
@@ -173,6 +180,11 @@ markActioned(id);                    // optimistic
 try { await patchJobAction(id, cv); }
 catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 ```
+
+**In-place evaluation updates:**
+- `updateJobEvaluation(jobId, evaluation)` — patches a single job's evaluation in the `jobs` array without clearing/reloading the list
+- Use when the backend evaluates a single job (e.g., on-demand re-evaluation) and the UI needs to reflect the new verdict immediately
+- Sets `job.evaluation` and `isEvaluated = true` atomically
 
 ## SSE hook (`hooks/useSSE.ts`)
 
@@ -405,7 +417,7 @@ Apply verdict layout changed from `JobSection` only to full layout:
 ```
 
 APPLY jobs now show decision-supporting data (strengths/gaps from eval + job requirements + CV changes if ready).
-Gains ~400px of high-IU content; matches TAILOR/BORDERLINE layout schema.
+Gains ~400px of high-IU content; matches TAILOR layout schema.
 
 ### Layer 3 — Collapsible Deep-Dive Sections (Theme D)
 
@@ -415,7 +427,7 @@ Shows only for non-SKIP verdicts. Sections:
 1. **Interview Prep** — `high_priority_topics` (topic + why + prep) and `questions_to_ask` from `eval_.interview_tips`
    - Topics rendered in bordered boxes; questions as bullet list
 2. **ATS Keywords** — `ats_keywords` from parsed JD as inline pill badges
-   - Tailor + Borderline only (Apply Direct skips ATS signal)
+   - Tailor only (Apply Direct skips ATS signal)
 3. **Company** — Shows `applicants_count` when > 0
    - Future: company_employees_count, company_description (needs JobDetail fetch per ADR-0015)
 
@@ -446,7 +458,7 @@ data source: `resume_edits` from evaluation, not job requirements. See agent-les
 **Removed CompanyIntel**: Deleted component and all usages. Company/location/posted-at data was
 duplicated from hero section. Added `eval_.summary` inline in verdict block (guarded against duplication with reason).
 
-**Skip button dedup**: Hidden when verdict !== 'borderline' to prevent two skip buttons (borderline has its own contextual "Skip This One").
+**Skip button**: Always visible in footer for all verdicts.
 
 **Apply Direct button**: Removed flex-1 width. Added subtitle span: "Opens posting in new tab" in smaller text.
 

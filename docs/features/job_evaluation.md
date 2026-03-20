@@ -88,10 +88,12 @@ The `node_evaluate` function wraps the agent call within the LangGraph orchestra
 > **Production Status:** **Active**. This node is the entry point for all asynchronous job processing tasks.
 
 ### 3. Async Background Worker (`services/eval_worker.py`)
-(Planned/Legacy) This worker handles the batch execution of evaluations.
+This worker handles the batch execution of evaluations.
+
+Checks `is_service_enabled("openrouter")` at startup — if the OpenRouter service is disabled in Settings, the worker logs a warning and returns immediately without processing any jobs (ADR-0019).
 
 > [!NOTE]
-> **Production Status:** **Active (Experimental)**. Used for processing jobs in the background outside of immediate user-facing request/response cycles.
+> **Production Status:** **Active**. Used for processing jobs in the background outside of immediate user-facing request/response cycles.
 
 ### System State Transition
 - **Before:** The system invokes `agent.run()` with the raw Job and Resume data.

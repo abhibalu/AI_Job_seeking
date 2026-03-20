@@ -20,7 +20,19 @@ Cron format: 5-field `'minute hour day month day_of_week'` (standard cron, not e
 
 ## Worker pattern
 
-All workers follow this run-tracking wrapper:
+All workers check the relevant service kill switch before starting work:
+
+```python
+from backend.service_guard import is_service_enabled
+
+if not is_service_enabled("openrouter"):  # or "apify"
+    logger.warning("[Worker] Service disabled — skipping run")
+    return
+```
+
+This check is the first thing in the worker function body, before acquiring run IDs or threads.
+
+All workers then follow this run-tracking wrapper:
 
 ```python
 from services.pipeline_runs import start_run, finish_run

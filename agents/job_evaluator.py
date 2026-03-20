@@ -9,7 +9,6 @@ from pathlib import Path
 
 from .base import BaseAgent
 from agents.database import get_master_resume
-from backend.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -108,17 +107,15 @@ class JobEvaluatorAgent(BaseAgent):
             self.approved_skills = ""
     
     def get_system_prompt(self) -> str:
-        prompt_intro = f"""You are an AI Job Match Evaluator Agent.
+        prompt_intro = """You are a rigorous technical hiring consultant specialising in data engineering roles across EU and US markets. You have evaluated thousands of applications and understand that an inflated match score has a direct human cost — a candidate submits to a role they will be screened out of in round one, wasting their application and signalling poor self-awareness to the recruiter.
 
-Your task: Compare the candidate's resume with a given job description and return **exactly one valid JSON object**.
+Your professional standard is precision over encouragement. When fit is borderline, score conservatively. A well-calibrated skip is more valuable to the candidate than a false tailor.
 
-## CANDIDATE EXPERIENCE
-- The candidate has **{settings.CANDIDATE_EXPERIENCE_YEARS}** of total experience.
-- Assume this experience is relevant unless the job is in a completely different domain requiring zero overlap with the candidate's skills.
+Your task: Compare the candidate's resume with a given job description and return exactly one valid JSON object.
 
 ## EXPERIENCE FIT RULE
-- Compare **{settings.CANDIDATE_EXPERIENCE_YEARS}** to the JD's requirement.
-- If **{settings.CANDIDATE_EXPERIENCE_YEARS} < JD Required Years**, set recommended_action: "skip" and penalize the score significantly."""
+- Derive the candidate's total experience from the resume work history.
+- If candidate experience < JD required years, set recommended_action: "skip" and penalize the score significantly."""
 
         prompt_schema = """
 
@@ -177,17 +174,14 @@ Return one JSON object with exactly these keys:
   "job_url": "string or Unknown"
 }
 
-## SCORING RULES
+## SCORING
 
-1. Start from 50 points
-2. Add +10 for each strong overlap (title match, tech stack overlap, etc.)
-3. Subtract -10 for each major gap (missing must-have, experience mismatch)
-4. Clamp score between 10 and 100
+Score on a scale of 10–100 (multiples of 10). Calibrate against the reference examples in the user message — those anchors define what a 30, a 60, and an 85 look like. Do not calculate mechanically; assess holistically relative to those reference points.
 
 Verdict mapping:
-- Strong Match: >= 80
-- Moderate Match: 50-70
-- Weak Match: <= 40
+- Strong Match: ≥ 80
+- Moderate Match: 50–70
+- Weak Match: ≤ 40
 
 ## recommended_action LOGIC
 
@@ -215,6 +209,39 @@ Verdict mapping:
             "skills": self.resume.get("skills", []),
         }, indent=2)
         
+        anchors = """
+## SCORING REFERENCE EXAMPLES
+
+Use these anchors to calibrate your score. They define the scale — do not deviate from these reference points.
+
+### Anchor 1 — Strong Match (score: 85, recommended_action: "apply")
+Role: Data Engineer, 3–5yr required, GCP stack (BigQuery, dbt, Airflow, Python, Cloud Composer), FinTech SaaS domain.
+Candidate: 4yr experience, all core stack present, FinTech domain overlap, right seniority.
+```json
+{"job_id":"anchor-1","company_name":"FinTech Co","title_role":"Data Engineer","recruiter_email":"Unknown","JD":"Data Engineer role at FinTech SaaS company requiring 3–5yr experience with GCP stack: BigQuery, dbt, Airflow, Python, Cloud Composer. Build and maintain data pipelines for financial reporting.","Verdict":"Strong Match","job_match_score":80,"summary":"Candidate meets the experience threshold and matches the full GCP stack. FinTech domain overlap strengthens fit. No significant gaps.","required_exp":"3–5 years","gaps":{"technical":[],"domain":[],"soft_skills":[]},"improvement_suggestions":{"resume_edits":[],"interview_prep":["Brush up on Cloud Composer orchestration patterns","Review BigQuery cost optimisation"]},"interview_tips":{"high_priority_topics":[{"topic":"dbt modelling","why":"Core to role","prep":"Review incremental models and testing strategies"}],"your_strengths_to_highlight":["Full GCP stack coverage","FinTech domain experience"],"questions_to_ask":["What does the data team structure look like?","How mature is the dbt project?"]},"recommended_action":"apply","wit_line":"Exactly your stack","jd_keywords":["BigQuery","dbt","Airflow","Python","Cloud Composer"],"matched_keywords":["BigQuery","dbt","Airflow","Python","Cloud Composer"],"missing_keywords":[],"posted_date":"Unknown","application_deadline":"Unknown","job_url":"Unknown"}
+```
+
+### Anchor 2 — Moderate Match (score: 60, recommended_action: "tailor")
+Role: Data Engineer, 4yr required, AWS-heavy (Redshift, Glue, Step Functions, dbt, Python), E-commerce domain.
+Candidate: 5yr experience, strong dbt + Python + Airflow — but no AWS-native services.
+```json
+{"job_id":"anchor-2","company_name":"E-Commerce Ltd","title_role":"Data Engineer","recruiter_email":"Unknown","JD":"Data Engineer at E-commerce company requiring 4yr experience with AWS stack: Redshift, Glue, Step Functions, dbt, Python. Design and maintain ELT pipelines for retail analytics.","Verdict":"Moderate Match","job_match_score":60,"summary":"Candidate exceeds the experience threshold and has strong transferable skills in dbt and Python. However, they lack AWS-native services (Redshift, Glue, Step Functions) which are core to this role.","required_exp":"4 years","gaps":{"technical":["Redshift","AWS Glue","Step Functions"],"domain":["E-commerce retail analytics"],"soft_skills":[]},"improvement_suggestions":{"resume_edits":[{"area":"work highlights","suggestion":"Frame Airflow experience as transferable to Step Functions orchestration","approved_reference":""}],"interview_prep":["Study Redshift vs Snowflake differences","Review AWS Glue ETL patterns"]},"interview_tips":{"high_priority_topics":[{"topic":"AWS data stack","why":"Core platform gap","prep":"Complete AWS Data Analytics specialty overview"}],"your_strengths_to_highlight":["dbt expertise","Python data pipeline experience"],"questions_to_ask":["Is there an expectation to ramp up on AWS quickly?","How much greenfield vs maintenance work?"]},"recommended_action":"tailor","wit_line":"Worth the stretch","jd_keywords":["Redshift","Glue","Step Functions","dbt","Python"],"matched_keywords":["dbt","Python"],"missing_keywords":["Redshift","Glue","Step Functions"],"posted_date":"Unknown","application_deadline":"Unknown","job_url":"Unknown"}
+```
+
+### Anchor 3 — Experience Skip (score: 30, recommended_action: "skip")
+Role: Senior Data Engineer, 7yr required, GCP stack (BigQuery, dbt, Airflow). Candidate has the full stack but only 3yr experience — experience threshold failure in isolation.
+```json
+{"job_id":"anchor-3","company_name":"Scale-Up Corp","title_role":"Senior Data Engineer","recruiter_email":"Unknown","JD":"Senior Data Engineer requiring 7+ years of experience with GCP stack: BigQuery, dbt, Airflow. Lead data infrastructure design and mentor junior engineers.","Verdict":"Weak Match","job_match_score":30,"summary":"Candidate matches the technical stack but has only 3 years of experience against a 7-year requirement. The seniority gap is too large to bridge with tailoring.","required_exp":"7+ years","gaps":{"technical":[],"domain":[],"soft_skills":["Senior leadership","Mentoring experience"]},"improvement_suggestions":{"resume_edits":[],"interview_prep":[]},"interview_tips":{"high_priority_topics":[],"your_strengths_to_highlight":["GCP stack coverage"],"questions_to_ask":[]},"recommended_action":"skip","wit_line":"Not yet","jd_keywords":["BigQuery","dbt","Airflow","senior","7 years"],"matched_keywords":["BigQuery","dbt","Airflow"],"missing_keywords":["7 years experience","senior leadership"],"posted_date":"Unknown","application_deadline":"Unknown","job_url":"Unknown"}
+```
+
+### Anchor 4 — Stack Skip (score: 30, recommended_action: "skip")
+Role: ML Platform Engineer, 5yr required, Kafka + Spark + Flink + Kubernetes + MLflow, real-time ML inference domain. Candidate meets experience years but stack is completely wrong.
+```json
+{"job_id":"anchor-4","company_name":"ML Infra Inc","title_role":"ML Platform Engineer","recruiter_email":"Unknown","JD":"ML Platform Engineer requiring 5yr experience with Kafka, Spark, Flink, Kubernetes, and MLflow. Build and operate real-time ML inference infrastructure.","Verdict":"Weak Match","job_match_score":30,"summary":"Candidate has sufficient years of experience but the entire technical stack is mismatched. No overlap with streaming systems, Kubernetes, or MLflow required for this role.","required_exp":"5 years","gaps":{"technical":["Kafka","Spark","Flink","Kubernetes","MLflow"],"domain":["Real-time ML inference","ML platform engineering"],"soft_skills":[]},"improvement_suggestions":{"resume_edits":[],"interview_prep":[]},"interview_tips":{"high_priority_topics":[],"your_strengths_to_highlight":[],"questions_to_ask":[]},"recommended_action":"skip","wit_line":"Pass on this one","jd_keywords":["Kafka","Spark","Flink","Kubernetes","MLflow"],"matched_keywords":[],"missing_keywords":["Kafka","Spark","Flink","Kubernetes","MLflow"],"posted_date":"Unknown","application_deadline":"Unknown","job_url":"Unknown"}
+```
+
+Return the evaluation JSON now."""
+
         return f"""## INPUTS
 
 **Resume**:
@@ -234,5 +261,4 @@ Verdict mapping:
 
 **Job Description**:
 {description_text}
-
-Return the evaluation JSON now."""
+""" + anchors

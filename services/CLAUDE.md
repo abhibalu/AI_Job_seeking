@@ -63,8 +63,29 @@ finally:
 
 Files:
 - `services/eval_worker.py` — evaluates pending jobs via LangGraph
+- `services/reeval_worker.py` — async single-job re-evaluation with per-stage SSE progress (ADR-0020)
 - `services/scraper_worker.py` — triggers Apify LinkedIn scrape
 - `services/pipeline_runs.py` — `start_run()` / `finish_run()` DB wrappers
+
+## Re-evaluation worker (`services/reeval_worker.py`)
+
+`run_reeval_worker(task_id, job_id, job_details)` — background worker that steps through
+pipeline nodes manually, emitting `save_task_status()` at each boundary for SSE progress.
+
+**Stage map**: evaluating → routing → parsing → planning → drafting → critiquing → saving.
+Skip/apply paths complete after routing (total=2). Tailor path runs all 7 stages (total=7).
+
+**Progress payload** includes `stage`, `path`, and `evaluation_snapshot` (from stage 1 onward)
+so the frontend can crossfade the verdict block without waiting for full pipeline completion.
+
+**Cancellation**: `check_cancelled(progress)` writes terminal `"cancelled"` status before returning
+to avoid a race where the next stage's `save_task_status("running")` could overwrite the cancel.
+
+**Correlation ID**: Sets `set_correlation_id(f"reeval:{task_id[:8]}")` at entry, clears in `finally`.
+
+**Not a scheduled worker** — triggered on-demand via `POST /api/evaluations/{job_id}/async`
+using FastAPI's `background_tasks.add_task()`. Does not use `start_run()`/`finish_run()` or
+pipeline_runs tracking (those are for scheduled batch workers only).
 
 ## Telegram notifications
 

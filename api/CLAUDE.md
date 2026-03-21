@@ -101,6 +101,7 @@ by the main UI.
 | POST   | `/api/applications`                         | Record a new application (called on Apply)     |
 | PATCH  | `/api/applications/{id}/status`             | Update status, append to status_history        |
 | GET    | `/api/scheduler`                            | Scheduler job status                           |
+| POST   | `/api/evaluations/{job_id}/async`            | Async re-eval with SSE progress (ADR-0020)     |
 | GET    | `/api/settings/services`                    | List service toggle status (ADR-0019)          |
 | PATCH  | `/api/settings/services`                    | Update service toggles (ADR-0019)              |
 

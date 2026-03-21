@@ -94,7 +94,11 @@ to record which CV version the user applied with (called from JobCard quick acti
 `tailorResume(jobId)` — now returns `{ task_id: string; message: string }` (background task, not
 the full tailored resume). Frontend tracks progress via SSE using the returned `task_id`.
 
-`cancelTask(taskId)` — `POST /api/tasks/{taskId}/cancel`. Stops a running tailoring pipeline at
+`evaluateJobAsync(jobId, force?)` — `POST /api/evaluations/{jobId}/async`. Starts async re-evaluation
+with per-stage SSE progress. Returns `{ task_id, message, job_id }`. Use `evaluateJob()` only for
+sync/batch contexts; prefer `evaluateJobAsync()` for user-initiated re-evaluation (ADR-0020).
+
+`cancelTask(taskId)` — `POST /api/tasks/{taskId}/cancel`. Stops a running tailoring or re-eval pipeline at
 the next node boundary.
 
 `getSchedulerStatus()` — `GET /api/scheduler`, returns `SchedulerStatus` with `scheduler_running: bool`,
@@ -197,33 +201,38 @@ catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 - Handler refs are stable (`useRef`) — changing handlers never restarts the `EventSource`.
 - `useEffect` depends only on `taskId`; cleans up (`es.close()`) on unmount or `taskId` change.
 
+**Typed progress payload** (`SSEProgress`): `completed`, `total`, `failed?`, `stage?`, `path?`,
+`evaluation_snapshot?`, `resume_id?`. Exported from `useSSE.ts`. Also exports `EvaluationSnapshot`
+type (recommended_action, job_match_score, wit_line, verdict). Use these types — do not cast via `as any`.
+
 ## TailoringStrip (floating process card + SSE tracking)
 
 `TailoringStrip.tsx` is a floating process card that displays real pipeline progress via SSE and allows cancellation.
+
+**Props**: `job`, `taskId`, `onComplete`, `onCancel`, `mode?: 'tailor' | 'reeval'` (default: `'tailor'`).
 
 **Layout**: Fixed positioned `bottom-6 left-1/2 -translate-x-1/2 z-50 w-[420px]` — floats centered above all content, no layout disruption.
 
 **Visual design**:
 - Top accent border: `border-t-2 border-accent` — draws the eye immediately.
 - Container: `bg-surface border border-white/10` — matches surface styling, no shadows/blur.
-- Job context line (top): `job.title · job.company_name` in `text-xs gray-500`, with "Stop Tailoring" button in top-right.
-- Pipeline stage track (middle): 6 dots (`queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`):
-  - Past stages: small filled accent dot
-  - Current stage: larger pulsing accent dot (`animate-pulse`)
-  - Future stages: dim `bg-white/15` dot
-- Stage message (bottom): Uses `TypewriterWaitState` with `key={stage}` to reset animation on each stage advance.
-  After animation completes within a stage, displays static text until next stage transition.
-  Maps `progress.stage` to user-facing messages:
-  `queued` → "Starting up…", `planning` → "Analyzing job requirements…",
-  `drafting` → "Tailoring your CV…", `critiquing` → "Reviewing changes…",
-  `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
+- Job context line (top): `job.title · job.company_name` in `text-xs gray-500`, with stop button in top-right.
+- Pipeline stage track (middle): dots vary by mode:
+  - `tailor` mode: `queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`
+  - `reeval` mode: `evaluating` → `parsing` → `planning` → `drafting` → `critiquing` → `saving`
+  - Past stages: small filled accent dot, current: larger pulsing, future: dim `bg-white/15`
+- Stage message (bottom): TypewriterWaitState with `key={stage}` for animation reset.
+  Shared message map: `evaluating` → "Evaluating fit…", `parsing` → "Analyzing requirements…",
+  `planning` → "Planning changes…", `drafting` → "Tailoring your CV…",
+  `critiquing` → "Reviewing changes…", `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
 
 **Behavior**:
 - Reads `progress.stage` from SSE `onProgress` events; updates dot track and resets typewriter.
 - On `run_complete` with `status !== 'cancelled'`: extracts `progress.resume_id` and calls
   `onComplete(jobId, resumeId)` for direct navigation to review page.
-- "Stop Tailoring" button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
+- Stop button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
   Shows "Stopping…" while cancel is in-flight.
+- Stop button label: "Stop Tailoring" in tailor mode, "Stop" in reeval mode.
 
 ## Toast rollback pattern
 

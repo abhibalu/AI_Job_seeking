@@ -14,7 +14,7 @@ import { Toast } from '../components/Toast';
 
 interface JobDetailProps {
   job: JobWithEvaluation;
-  onTailorStart: (jobId: string) => void;
+  onTailorStart: (jobId: string, opts?: { force?: boolean }) => void;
   onAction: (jobId: string, cvVersion: 'base' | 'tailored') => void;
   onSkip: (jobId: string) => void;
   onUndoSkip?: (jobId: string) => void;
@@ -43,6 +43,12 @@ const verdictBadge: Record<VerdictType, { label: string; color: string }> = {
   tailor: { label: 'TAILOR', color: 'bg-semantic-green/10 text-semantic-green' },
   apply: { label: 'APPLY DIRECT', color: 'bg-semantic-slate/10 text-semantic-slate' },
   skip: { label: 'SKIP', color: 'bg-semantic-red/10 text-semantic-red' },
+};
+
+const reEvalStageMessage: Record<string, string> = {
+  evaluating: 'Analyzing job fit…',
+  routing: 'Determining path…',
+  parsing: 'Re-parsing requirements…',
 };
 
 // --- Verdict Typewriter ---
@@ -247,56 +253,43 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
   // Derive re-eval state from props
   const isReEvaling = !!reEvalTaskId;
-  const reEvalStage = reEvalProgress?.stage || null;
-  const reEvalPath = reEvalProgress?.path || null;
   const evalSnapshot = reEvalProgress?.evaluation_snapshot || null;
-  const isTailorPath = reEvalPath === 'tailor';
-  const tailorStages = ['parsing', 'planning', 'drafting', 'critiquing', 'saving'] as const;
-  const tailorStageMessages: Record<string, string> = {
-    parsing: 'Analyzing requirements…',
-    planning: 'Planning changes…',
-    drafting: 'Drafting your CV…',
-    critiquing: 'Reviewing changes…',
-    saving: 'Saving…',
-  };
 
-  // Brief "done" state: shows "CV tailored ✓" badge for tailor path before data refetch
+  // Brief "done" state: pulse verdict block for ~2s after re-eval completes before data refetch
   const [reEvalDone, setReEvalDone] = useState(false);
-  const [reEvalDonePath, setReEvalDonePath] = useState<string | null>(null);
+  // Persists beyond pulse — marks "existing tailoring is stale" until user navigates away
+  const [reEvalFresh, setReEvalFresh] = useState(false);
+  // Tracks whether user dismissed the post-re-eval CTA
+  const [reEvalCtaDismissed, setReEvalCtaDismissed] = useState(false);
 
-  // When re-eval completes (taskId disappears), refresh local data
-  // For tailor path: show "CV tailored ✓" badge briefly, then refresh
+  // When re-eval completes (taskId disappears), show pulse then refresh
   const prevReEvalTaskId = React.useRef(reEvalTaskId);
-  const prevReEvalPath = React.useRef(reEvalPath);
   useEffect(() => {
     if (prevReEvalTaskId.current && !reEvalTaskId) {
-      const wasPath = prevReEvalPath.current;
-
       const doRefresh = () => {
         seenVerdicts.delete(job.id);
         setEvalVersion(v => v + 1);
         setEvaluating(false);
         setActionInFlight(null);
         setReEvalDone(false);
-        setReEvalDonePath(null);
+        setReEvalCtaDismissed(false);
+        // reEvalFresh stays true — existing tailoring is stale
       };
 
-      if (wasPath === 'tailor') {
-        // Show "CV tailored ✓" badge for 2s before refreshing
-        setReEvalDone(true);
-        setReEvalDonePath(wasPath);
-        const timer = setTimeout(doRefresh, 2000);
-        prevReEvalTaskId.current = reEvalTaskId;
-        prevReEvalPath.current = reEvalPath;
-        return () => clearTimeout(timer);
-      }
-
-      // Skip/apply path — refresh immediately
-      doRefresh();
+      setReEvalDone(true);
+      setReEvalFresh(true);
+      const timer = setTimeout(doRefresh, 2000);
+      prevReEvalTaskId.current = reEvalTaskId;
+      return () => clearTimeout(timer);
     }
     prevReEvalTaskId.current = reEvalTaskId;
-    prevReEvalPath.current = reEvalPath;
-  }, [reEvalTaskId, reEvalPath, job.id]);
+  }, [reEvalTaskId, job.id]);
+
+  // Clear reEvalFresh and CTA dismissed state when user selects a different job
+  useEffect(() => {
+    setReEvalFresh(false);
+    setReEvalCtaDismissed(false);
+  }, [job.id]);
 
   const handleReEvaluate = async () => {
     if (llmDisabled || evaluating || isReEvaling) return;
@@ -380,6 +373,53 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
     // Don't clear actionInFlight — navigation will unmount this component
   };
 
+  // Verdict block click logic
+  const verdictClickable = !isReEvaling && !reEvalDone && (
+    (verdict === 'tailor' && (!llmDisabled || job.tailoring_status === 'ready'))
+    || (verdict === 'apply' && !!job.job_url)
+  );
+
+  const verdictHint = (() => {
+    if (!verdictClickable) return null;
+    if (verdict === 'tailor') {
+      if (job.tailoring_status === 'ready') {
+        return reEvalFresh ? '→ Re-tailor CV' : '→ Review changes';
+      }
+      if (job.tailoring_status === 'processing') return null;
+      return '→ Tailor CV';
+    }
+    if (verdict === 'apply') return '→ Open posting';
+    return null;
+  })();
+
+  const handleVerdictClick = () => {
+    if (!verdictClickable) return;
+    if (verdict === 'tailor') {
+      if (job.tailoring_status === 'processing') {
+        setToast({ message: 'Already tailoring', type: 'error' });
+        return;
+      }
+      if (reEvalFresh && job.tailoring_status === 'ready') {
+        // Stale tailoring — force a new run
+        setActionInFlight('tailor');
+        onTailorStart(job.id, { force: true });
+        return;
+      }
+      handleTailor();
+      return;
+    }
+    if (verdict === 'apply') {
+      handleApplyDirect();
+    }
+  };
+
+  const handleVerdictKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleVerdictClick();
+    }
+  };
+
   const handleApplyDirect = () => {
     setActionInFlight('apply');
     onAction(job.id, job.tailoring_status === 'ready' ? 'tailored' : 'base');
@@ -443,12 +483,26 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
             ) : null;
           })()}
 
-          {/* Verdict block */}
-          <div className={cn(
-            'bg-base/80 rounded-[8px] border border-white/[0.08] border-l-[3px] p-[12px_14px] relative overflow-hidden transition-colors duration-300',
-            // Use snapshot verdict color during re-eval crossfade, else normal
-            evalSnapshot ? verdictColors[evalSnapshot.recommended_action as VerdictType] || verdictColors[verdict] : verdictColors[verdict]
-          )}>
+          {/* Verdict block — clickable CTA */}
+          <div
+            className={cn(
+              'group bg-base/80 rounded-[8px] border border-white/[0.08] border-l-[3px] p-[12px_14px] relative overflow-hidden transition-all duration-300',
+              evalSnapshot ? verdictColors[evalSnapshot.recommended_action as VerdictType] || verdictColors[verdict] : verdictColors[verdict],
+              verdictClickable && 'cursor-pointer hover:bg-base/90',
+              reEvalDone && 'animate-verdict-pulse',
+            )}
+            onClick={handleVerdictClick}
+            onKeyDown={handleVerdictKeyDown}
+            role={verdictClickable ? 'button' : undefined}
+            tabIndex={verdictClickable ? 0 : undefined}
+            aria-label={
+              verdict === 'tailor'
+                ? job.tailoring_status === 'ready'
+                  ? reEvalFresh ? 'Re-tailor CV with updated evaluation' : 'Review tailored CV changes'
+                  : 'Tailor CV for this job'
+                : verdict === 'apply' ? 'Open job posting' : undefined
+            }
+          >
             {/* Old verdict content — dimmed when evaluating (before snapshot arrives) */}
             <div className={cn(
               'transition-opacity duration-300',
@@ -469,16 +523,16 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
                     </span>
                   );
                 })()}
-                {job.tailoring_status === 'ready' && !isReEvaling && !reEvalDone && (
-                  <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-accent/10 text-accent">
-                    CV tailored ✓
-                  </span>
-                )}
-                {/* "CV tailored ✓" badge after re-eval tailor path completes */}
-                {reEvalDone && reEvalDonePath === 'tailor' && (
-                  <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-accent/10 text-accent animate-pulse">
-                    CV tailored ✓
-                  </span>
+                {job.tailoring_status === 'ready' && verdict !== 'skip' && !isReEvaling && !reEvalDone && (
+                  reEvalFresh ? (
+                    <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-semantic-amber/10 text-semantic-amber" title="Your tailored CV was based on the previous assessment">
+                      Retouch?
+                    </span>
+                  ) : (
+                    <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-accent/10 text-accent">
+                      CV tailored ✓
+                    </span>
+                  )
                 )}
                 {/* Score dots: show snapshot score during re-eval, otherwise normal */}
                 {(() => {
@@ -500,7 +554,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
                   ) : null;
                 })()}
                 <button
-                  onClick={handleReEvaluate}
+                  onClick={(e) => { e.stopPropagation(); handleReEvaluate(); }}
                   disabled={evaluating || isReEvaling || llmDisabled}
                   title={llmDisabled ? 'OpenRouter is disabled — enable in Settings' : 'Re-evaluate this job'}
                   className="ml-auto p-2 -m-2 text-gray-600 hover:text-gray-400 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -526,42 +580,52 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
               })()}
             </div>
 
-            {/* Evaluating overlay: pulsing dot + typewriter on top of dimmed old verdict */}
-            {isReEvaling && !evalSnapshot && (
-              <div className="absolute inset-0 rounded-[8px] flex items-center justify-center pointer-events-none">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                  <span className="text-[10px] font-mono text-accent animate-pulse">Evaluating fit…</span>
-                </div>
+            {/* Re-eval overlay: stage progression → brief completion confirmation */}
+            {(isReEvaling || reEvalDone) && (
+              <div className="absolute inset-0 rounded-[8px] flex items-center justify-center pointer-events-none z-10">
+                {isReEvaling ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                    <span className="text-[10px] font-mono text-accent animate-pulse">
+                      {reEvalStageMessage[reEvalProgress?.stage || 'evaluating'] || 'Evaluating…'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-accent">Assessment updated ✓</span>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Inline progress track for tailor path */}
-            {isReEvaling && isTailorPath && reEvalStage && (tailorStages as readonly string[]).includes(reEvalStage) && (
-              <div className="mt-3 pt-2.5 border-t border-white/[0.06]">
-                <div className="flex items-center gap-2 mb-1.5">
-                  {tailorStages.map((s, i) => {
-                    const currentIdx = (tailorStages as readonly string[]).indexOf(reEvalStage);
-                    const isPast = i < currentIdx;
-                    const isCurrent = i === currentIdx;
-                    return (
-                      <div
-                        key={s}
-                        className={cn(
-                          'rounded-full transition-all duration-300',
-                          isCurrent
-                            ? 'w-2 h-2 bg-accent animate-pulse'
-                            : isPast
-                              ? 'w-1.5 h-1.5 bg-accent'
-                              : 'w-1.5 h-1.5 bg-white/10',
-                        )}
-                      />
-                    );
-                  })}
-                </div>
-                <span className="text-[9px] font-mono text-gray-500">
-                  {tailorStageMessages[reEvalStage] || 'Processing…'}
-                </span>
+            {/* Inline CTA strip — post re-eval, when tailoring is stale and CTA not dismissed */}
+            {reEvalFresh && job.tailoring_status === 'ready' && !reEvalCtaDismissed && !isReEvaling && !reEvalDone && (
+              <div className="flex items-center gap-3 mt-2">
+                <span className="text-[9px] font-mono text-gray-500">Assessment updated</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleVerdictClick(); }}
+                  className="text-[9px] font-mono text-accent hover:underline cursor-pointer"
+                >
+                  Re-tailor →
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setReEvalCtaDismissed(true); }}
+                  className="text-[9px] font-mono text-gray-600 hover:text-gray-400 cursor-pointer"
+                >
+                  Later
+                </button>
+              </div>
+            )}
+
+            {/* Hover hint text */}
+            {verdictHint && (
+              <div className={cn(
+                'text-[9px] font-mono text-accent/60 mt-2 transition-opacity duration-200',
+                reEvalFresh && job.tailoring_status === 'ready'
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100',
+              )}>
+                {verdictHint}
               </div>
             )}
           </div>
@@ -571,7 +635,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
              to signal "this data is from the previous run and may change" */}
         <div className={cn(
           'transition-opacity duration-500 space-y-4',
-          (isReEvaling || reEvalDone) && 'opacity-30 pointer-events-none select-none',
+          isReEvaling && 'opacity-30 pointer-events-none select-none',
         )}>
           {/* Verdict-conditional sections */}
           {verdict === 'tailor' && (
@@ -662,7 +726,7 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
       {/* Sticky CTA footer — dimmed during re-eval since verdict/path may change */}
       <div className={cn(
         'flex-shrink-0 border-t border-white/[0.08] bg-base px-6 py-3 flex items-center gap-2 transition-opacity duration-500',
-        (isReEvaling || reEvalDone) && 'opacity-30 pointer-events-none',
+        isReEvaling && 'opacity-30 pointer-events-none',
       )}>
         <button
           onClick={() => {

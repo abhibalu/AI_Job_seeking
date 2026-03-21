@@ -1,46 +1,30 @@
 """
-Re-evaluation Worker — runs the full pipeline as a background task with per-stage SSE progress.
+Re-evaluation Worker — runs evaluate + route as a background task with per-stage SSE progress.
 
-Approach A: manually steps through pipeline nodes, emitting save_task_status() at each boundary.
-Supports cancellation via is_cancelled() check before each stage.
+Read-only re-evaluation: no tailoring is performed. The frontend uses the verdict to offer
+the user a CTA (tailor, apply, skip) without silently running the full pipeline.
 
 Stage map:
   0: evaluating  — node_evaluate(state)           [all paths]
   1: routing     — route_after_evaluation(state)   [all paths; sets total + evaluation_snapshot]
-  2: parsing     — node_parse(state)               [tailor only]
-  3: planning    — subgraph node_plan(state)        [tailor only]
-  4: drafting    — subgraph node_draft(state)       [tailor only]
-  5: critiquing  — subgraph node_critique(state)    [tailor only]
-  6: saving      — subgraph node_save(state) + node_notify_tailored(state)  [tailor only]
+  2: parsing     — node_parse(state)               [tailor only — provides ATS keywords]
 
 Skip path:  stages 0-1, then run_complete (total=2)
 Apply path: stages 0-1 + node_notify_apply, then run_complete (total=2)
-Tailor path: all 7 stages (total=7)
+Tailor path: stages 0-2 (total=3)
 """
 import logging
-from pathlib import Path
 
 from agents.database import (
     save_task_status,
     get_task_status,
     save_evaluation,
-    get_master_resume,
 )
 from agents.pipeline_graph import (
     node_evaluate,
     node_parse,
     node_notify_apply,
-    node_notify_tailored,
     route_after_evaluation,
-)
-from agents.tailoring_subgraph import (
-    node_plan,
-    node_draft,
-    node_validate,
-    node_critique,
-    node_save,
-    route_validate,
-    route_critique,
 )
 from backend.log_context import set_correlation_id
 
@@ -58,7 +42,7 @@ def _build_evaluation_snapshot(evaluation: dict) -> dict:
 
 
 def run_reeval_worker(task_id: str, job_id: str, job_details: dict):
-    """Background worker that re-evaluates a job through the full pipeline with per-stage progress."""
+    """Background worker that re-evaluates a job (read-only, no tailoring)."""
     set_correlation_id(f"reeval:{task_id[:8]}")
 
     def is_cancelled():
@@ -78,7 +62,6 @@ def run_reeval_worker(task_id: str, job_id: str, job_details: dict):
         "job_details": job_details,
         "evaluation": {},
         "parsed_jd": {},
-        "tailored_resume_id": "",
         "status": "queued",
         "errors": [],
     }
@@ -136,9 +119,9 @@ def run_reeval_worker(task_id: str, job_id: str, job_details: dict):
             })
             return
 
-        # --- Tailor path: update total to 7 ---
+        # --- Tailor path: evaluate → route → parse JD → DONE (total=3) ---
         progress = {
-            "completed": 1, "total": 7, "stage": "routing",
+            "completed": 1, "total": 3, "stage": "routing",
             "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
         }
         save_task_status(task_id, "running", progress)
@@ -148,7 +131,7 @@ def run_reeval_worker(task_id: str, job_id: str, job_details: dict):
 
         # --- Stage 2: Parsing ---
         progress = {
-            "completed": 2, "total": 7, "stage": "parsing",
+            "completed": 2, "total": 3, "stage": "parsing",
             "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
         }
         save_task_status(task_id, "running", progress)
@@ -161,161 +144,9 @@ def run_reeval_worker(task_id: str, job_id: str, job_details: dict):
             save_task_status(task_id, "failed", progress, error="; ".join(state["errors"]))
             return
 
-        # --- Build tailoring subgraph state ---
-        parsed_jd = state.get("parsed_jd", {})
-        jd_context = {
-            "role": job_details.get("title", "Unknown"),
-            "company": job_details.get("company_name", "Unknown"),
-            "summary": state["evaluation"].get("summary", ""),
-            "must_haves": parsed_jd.get("must_haves", []),
-            "ats_keywords": parsed_jd.get("ats_keywords", []),
-            "strategic_gaps": state["evaluation"].get("gaps", {}),
-            "improvement_suggestions": state["evaluation"].get("improvement_suggestions", []),
-        }
-
-        base_resume = get_master_resume()
-        if not base_resume:
-            save_task_status(task_id, "failed", progress, error="No master resume found in DB")
-            return
-
-        approved_skills = ""
-        skills_path = Path("agent_prompts/approved_skills.md")
-        if skills_path.exists():
-            with open(skills_path) as f:
-                approved_skills = f.read()
-
-        sub_state: dict = {
-            "job_id": job_id,
-            "base_resume": base_resume,
-            "jd_context": jd_context,
-            "approved_skills": approved_skills,
-            "edit_plan": {},
-            "draft_resume": {},
-            "critique": [],
-            "revision_count": 0,
-            "final_resume_id": "",
-            "status": "queued",
-            "errors": [],
-        }
-
-        # --- Stage 3: Planning ---
-        progress = {
-            "completed": 3, "total": 7, "stage": "planning",
-            "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
-        }
-        save_task_status(task_id, "running", progress)
-        if check_cancelled(progress):
-            return
-
-        result = node_plan(sub_state)
-        sub_state.update(result)
-        if sub_state.get("errors"):
-            save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-            return
-
-        # --- Stage 4: Drafting + Validation (may loop) ---
-        progress = {
-            "completed": 4, "total": 7, "stage": "drafting",
-            "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
-        }
-        save_task_status(task_id, "running", progress)
-        if check_cancelled(progress):
-            return
-
-        result = node_draft(sub_state)
-        sub_state.update(result)
-        if sub_state.get("errors"):
-            save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-            return
-
-        result = node_validate(sub_state)
-        sub_state.update(result)
-
-        route_v = route_validate(sub_state)
-        while route_v == "revise":
-            if check_cancelled(progress):
-                return
-            result = node_draft(sub_state)
-            sub_state.update(result)
-            if sub_state.get("errors"):
-                save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-                return
-            result = node_validate(sub_state)
-            sub_state.update(result)
-            route_v = route_validate(sub_state)
-
-        if route_v == "error":
-            save_task_status(
-                task_id, "failed", progress,
-                error="; ".join(sub_state.get("errors", ["Validation error"])),
-            )
-            return
-
-        # --- Stage 5: Critiquing (may loop back to draft) ---
-        progress = {
-            "completed": 5, "total": 7, "stage": "critiquing",
-            "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
-        }
-        save_task_status(task_id, "running", progress)
-        if check_cancelled(progress):
-            return
-
-        result = node_critique(sub_state)
-        sub_state.update(result)
-        if sub_state.get("errors"):
-            save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-            return
-
-        route_c = route_critique(sub_state)
-        while route_c == "revise":
-            if check_cancelled(progress):
-                return
-            result = node_draft(sub_state)
-            sub_state.update(result)
-            if sub_state.get("errors"):
-                save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-                return
-            result = node_validate(sub_state)
-            sub_state.update(result)
-            result = node_critique(sub_state)
-            sub_state.update(result)
-            if sub_state.get("errors"):
-                save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-                return
-            route_c = route_critique(sub_state)
-
-        if route_c == "error":
-            save_task_status(
-                task_id, "failed", progress,
-                error="; ".join(sub_state.get("errors", ["Critique error"])),
-            )
-            return
-
-        # --- Stage 6: Saving + Notify ---
-        progress = {
-            "completed": 6, "total": 7, "stage": "saving",
-            "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
-        }
-        save_task_status(task_id, "running", progress)
-        if check_cancelled(progress):
-            return
-
-        result = node_save(sub_state)
-        sub_state.update(result)
-        if sub_state.get("errors"):
-            save_task_status(task_id, "failed", progress, error="; ".join(sub_state["errors"]))
-            return
-
-        record_id = sub_state.get("final_resume_id", "")
-
-        # Update parent pipeline state for notification
-        state["tailored_resume_id"] = record_id
-        node_notify_tailored(state)
-
         save_task_status(task_id, "completed", {
-            "completed": 7, "total": 7, "stage": "done",
+            "completed": 3, "total": 3, "stage": "done",
             "path": "tailor", "evaluation_snapshot": evaluation_snapshot,
-            "resume_id": record_id,
         })
 
     except Exception as e:

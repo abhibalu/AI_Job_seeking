@@ -45,7 +45,6 @@ const App: React.FC = () => {
   // Re-evaluation state
   const [reEvalTaskId, setReEvalTaskId] = useState<string | null>(null);
   const [reEvalJobId, setReEvalJobId] = useState<string | null>(null);
-  const [reEvalPath, setReEvalPath] = useState<'skip' | 'apply' | 'tailor' | null>(null);
   const [reEvalProgress, setReEvalProgress] = useState<SSEProgress | null>(null);
 
   // Toast
@@ -102,8 +101,7 @@ const App: React.FC = () => {
     }
 
     try {
-      await apiClient.patchJobAction(jobId, cvVersion);
-      // Create application record
+      // Create application record (cv_version is tracked here)
       await apiClient.createApplication(jobId, cvVersion, {
         jobTitle: job?.title || undefined,
         companyName: job?.company_name || undefined,
@@ -137,7 +135,6 @@ const App: React.FC = () => {
       const result = await apiClient.evaluateJobAsync(jobId);
       setReEvalTaskId(result.task_id);
       setReEvalJobId(jobId);
-      setReEvalPath(null);
       setReEvalProgress(null);
     } catch (err: any) {
       setToast({ message: `Re-evaluation failed: ${err.message}`, type: 'error' });
@@ -150,9 +147,6 @@ const App: React.FC = () => {
     const progress = event.progress;
     if (!progress) return;
     setReEvalProgress(progress);
-    if (progress.path) {
-      setReEvalPath(progress.path);
-    }
   }, []);
 
   const handleReEvalComplete = useCallback((event: { status: string; error?: string | null; progress?: SSEProgress | null }) => {
@@ -162,7 +156,6 @@ const App: React.FC = () => {
     if (event.status === 'cancelled') {
       setReEvalTaskId(null);
       setReEvalJobId(null);
-      setReEvalPath(null);
       setReEvalProgress(null);
       setToast({ message: 'Re-evaluation stopped', type: 'success' });
       return;
@@ -171,7 +164,6 @@ const App: React.FC = () => {
     if (event.status === 'failed') {
       setReEvalTaskId(null);
       setReEvalJobId(null);
-      setReEvalPath(null);
       setReEvalProgress(null);
       setToast({ message: `Re-evaluation failed: ${event.error || 'Unknown error'}`, type: 'error' });
       return;
@@ -189,7 +181,6 @@ const App: React.FC = () => {
 
     setReEvalTaskId(null);
     setReEvalJobId(null);
-    setReEvalPath(null);
     setReEvalProgress(null);
   }, [reEvalJobId, updateJobEvaluation]);
 
@@ -211,17 +202,16 @@ const App: React.FC = () => {
     }
     setReEvalTaskId(null);
     setReEvalJobId(null);
-    setReEvalPath(null);
     setReEvalProgress(null);
     setToast({ message: 'Re-evaluation stopped', type: 'success' });
   }, [reEvalTaskId]);
 
-  const handleTailorStart = useCallback(async (jobId: string) => {
+  const handleTailorStart = useCallback(async (jobId: string, opts?: { force?: boolean }) => {
     const job = allJobs.find(j => j.id === jobId);
     if (!job) return;
 
-    // Already tailored — navigate to existing review
-    if (job.tailoring_status === 'ready') {
+    // Already tailored — navigate to existing review (unless forced re-tailor)
+    if (job.tailoring_status === 'ready' && !opts?.force) {
       apiClient.getTailoredVersions(jobId).then(versions => {
         if (versions.length > 0) navigate(`/tailoring/${versions[0].id}`);
       }).catch(() => {});
@@ -369,33 +359,6 @@ const App: React.FC = () => {
           />
         )}
 
-        {/* Re-eval TailoringStrip fallback: show when user navigated away from the job AND path is tailor */}
-        {reEvalTaskId && reEvalJobId && reEvalPath === 'tailor' && selectedJobId !== reEvalJobId && (() => {
-          const reEvalJob = allJobs.find(j => j.id === reEvalJobId);
-          return reEvalJob ? (
-            <TailoringStrip
-              job={reEvalJob}
-              taskId={reEvalTaskId}
-              onComplete={(jobId, resumeId) => {
-                // Re-eval complete from strip — just refetch
-                Promise.all([
-                  apiClient.getEvaluation(jobId),
-                  apiClient.getJob(jobId),
-                ]).then(([freshEval, freshJob]) => {
-                  updateJobEvaluation(jobId, freshEval, {
-                    tailoring_status: freshJob.tailoring_status,
-                  });
-                }).catch(() => {});
-                setReEvalTaskId(null);
-                setReEvalJobId(null);
-                setReEvalPath(null);
-                setReEvalProgress(null);
-              }}
-              onCancel={handleReEvalCancel}
-              mode="reeval"
-            />
-          ) : null;
-        })()}
       </div>
 
       {toast && (

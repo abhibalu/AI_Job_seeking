@@ -130,6 +130,12 @@ class ApiClient {
         });
     }
 
+    async evaluateJobAsync(jobId: string, force: boolean = true): Promise<{ task_id: string; message: string; job_id: string }> {
+        return this.request<{ task_id: string; message: string; job_id: string }>(`/api/evaluations/${jobId}/async?force=${force}`, {
+            method: 'POST',
+        });
+    }
+
     async getEvaluationStats() {
         return this.request<EvaluationStats>(`/api/evaluations/stats`);
     }

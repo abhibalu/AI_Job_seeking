@@ -8,6 +8,7 @@ import { JobWithEvaluation } from '../services/jobService';
 import { apiClient } from '../services/apiClient';
 import type { Evaluation, ResumeChange, ParseResult } from '../types';
 import type { ServiceToggles } from '../services/apiClient';
+import type { SSEProgress } from '../hooks/useSSE';
 import { formatTimeAgo } from '../utils/format';
 import { Toast } from '../components/Toast';
 
@@ -19,6 +20,8 @@ interface JobDetailProps {
   onUndoSkip?: (jobId: string) => void;
   onReEvaluate: (jobId: string) => Promise<void>;
   serviceToggles?: ServiceToggles | null;
+  reEvalTaskId?: string | null;
+  reEvalProgress?: SSEProgress | null;
 }
 
 type VerdictType = 'tailor' | 'apply' | 'skip';
@@ -227,7 +230,7 @@ const Collapsible: React.FC<{ label: string; count?: string; children: React.Rea
 };
 
 // --- Main JobDetail ---
-export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onAction, onSkip, onUndoSkip, onReEvaluate, serviceToggles }) => {
+export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onAction, onSkip, onUndoSkip, onReEvaluate, serviceToggles, reEvalTaskId, reEvalProgress }) => {
   const navigate = useNavigate();
   const eval_ = job.evaluation;
   const verdict = getVerdictType(job);
@@ -242,17 +245,67 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
   const llmDisabled = serviceToggles !== null && !serviceToggles?.openrouter;
 
+  // Derive re-eval state from props
+  const isReEvaling = !!reEvalTaskId;
+  const reEvalStage = reEvalProgress?.stage || null;
+  const reEvalPath = reEvalProgress?.path || null;
+  const evalSnapshot = reEvalProgress?.evaluation_snapshot || null;
+  const isTailorPath = reEvalPath === 'tailor';
+  const tailorStages = ['parsing', 'planning', 'drafting', 'critiquing', 'saving'] as const;
+  const tailorStageMessages: Record<string, string> = {
+    parsing: 'Analyzing requirements…',
+    planning: 'Planning changes…',
+    drafting: 'Drafting your CV…',
+    critiquing: 'Reviewing changes…',
+    saving: 'Saving…',
+  };
+
+  // Brief "done" state: shows "CV tailored ✓" badge for tailor path before data refetch
+  const [reEvalDone, setReEvalDone] = useState(false);
+  const [reEvalDonePath, setReEvalDonePath] = useState<string | null>(null);
+
+  // When re-eval completes (taskId disappears), refresh local data
+  // For tailor path: show "CV tailored ✓" badge briefly, then refresh
+  const prevReEvalTaskId = React.useRef(reEvalTaskId);
+  const prevReEvalPath = React.useRef(reEvalPath);
+  useEffect(() => {
+    if (prevReEvalTaskId.current && !reEvalTaskId) {
+      const wasPath = prevReEvalPath.current;
+
+      const doRefresh = () => {
+        seenVerdicts.delete(job.id);
+        setEvalVersion(v => v + 1);
+        setEvaluating(false);
+        setActionInFlight(null);
+        setReEvalDone(false);
+        setReEvalDonePath(null);
+      };
+
+      if (wasPath === 'tailor') {
+        // Show "CV tailored ✓" badge for 2s before refreshing
+        setReEvalDone(true);
+        setReEvalDonePath(wasPath);
+        const timer = setTimeout(doRefresh, 2000);
+        prevReEvalTaskId.current = reEvalTaskId;
+        prevReEvalPath.current = reEvalPath;
+        return () => clearTimeout(timer);
+      }
+
+      // Skip/apply path — refresh immediately
+      doRefresh();
+    }
+    prevReEvalTaskId.current = reEvalTaskId;
+    prevReEvalPath.current = reEvalPath;
+  }, [reEvalTaskId, reEvalPath, job.id]);
+
   const handleReEvaluate = async () => {
-    if (llmDisabled || evaluating) return;
+    if (llmDisabled || evaluating || isReEvaling) return;
     setEvaluating(true);
     setActionInFlight('evaluate');
     try {
       await onReEvaluate(job.id);
-      seenVerdicts.delete(job.id);
-      setEvalVersion(v => v + 1);
+      // State is now managed by App.tsx SSE — evaluating clears when reEvalTaskId goes null
     } catch {
-      // error handling at parent level
-    } finally {
       setEvaluating(false);
       setActionInFlight(null);
     }
@@ -392,135 +445,225 @@ export const JobDetail: React.FC<JobDetailProps> = ({ job, onTailorStart, onActi
 
           {/* Verdict block */}
           <div className={cn(
-            'bg-base/80 rounded-[8px] border border-white/[0.08] border-l-[3px] p-[12px_14px] relative',
-            verdictColors[verdict]
+            'bg-base/80 rounded-[8px] border border-white/[0.08] border-l-[3px] p-[12px_14px] relative overflow-hidden transition-colors duration-300',
+            // Use snapshot verdict color during re-eval crossfade, else normal
+            evalSnapshot ? verdictColors[evalSnapshot.recommended_action as VerdictType] || verdictColors[verdict] : verdictColors[verdict]
           )}>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className={cn('text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5', badge.color)}>
-                {badge.label}
-              </span>
-              {job.tailoring_status === 'ready' && (
-                <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-accent/10 text-accent">
-                  CV tailored ✓
-                </span>
-              )}
-              {verdict === 'tailor' && (
-                <div className="flex gap-0.5 ml-1">
-                  {[0, 1, 2, 3].map(i => (
-                    <div key={i} className={cn('w-1.5 h-1.5 rounded-full', i < filled ? 'bg-semantic-green' : 'bg-white/[0.08]')} />
-                  ))}
-                </div>
-              )}
-              <button
-                onClick={handleReEvaluate}
-                disabled={evaluating || llmDisabled}
-                title={llmDisabled ? 'OpenRouter is disabled — enable in Settings' : 'Re-evaluate this job'}
-                className="ml-auto p-2 -m-2 text-gray-600 hover:text-gray-400 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <RotateCcw className={cn('w-3 h-3', evaluating && 'animate-spin')} />
-              </button>
+            {/* Old verdict content — dimmed when evaluating (before snapshot arrives) */}
+            <div className={cn(
+              'transition-opacity duration-300',
+              isReEvaling && !evalSnapshot && 'opacity-40',
+            )}>
+              <div className="flex items-center gap-2 mb-1.5">
+                {/* Badge: show snapshot during re-eval if available, else old */}
+                {(() => {
+                  const displayBadge = evalSnapshot
+                    ? verdictBadge[evalSnapshot.recommended_action as VerdictType] || badge
+                    : badge;
+                  return (
+                    <span className={cn(
+                      'text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 transition-all duration-300',
+                      displayBadge.color,
+                    )}>
+                      {displayBadge.label}
+                    </span>
+                  );
+                })()}
+                {job.tailoring_status === 'ready' && !isReEvaling && !reEvalDone && (
+                  <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-accent/10 text-accent">
+                    CV tailored ✓
+                  </span>
+                )}
+                {/* "CV tailored ✓" badge after re-eval tailor path completes */}
+                {reEvalDone && reEvalDonePath === 'tailor' && (
+                  <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-accent/10 text-accent animate-pulse">
+                    CV tailored ✓
+                  </span>
+                )}
+                {/* Score dots: show snapshot score during re-eval, otherwise normal */}
+                {(() => {
+                  const showDots = evalSnapshot
+                    ? evalSnapshot.recommended_action === 'tailor'
+                    : verdict === 'tailor';
+                  const dotFilled = evalSnapshot
+                    ? Math.round((evalSnapshot.job_match_score / 100) * 4)
+                    : filled;
+                  return showDots ? (
+                    <div className="flex gap-0.5 ml-1">
+                      {[0, 1, 2, 3].map(i => (
+                        <div key={i} className={cn(
+                          'w-1.5 h-1.5 rounded-full transition-colors duration-300',
+                          i < dotFilled ? 'bg-semantic-green' : 'bg-white/[0.08]',
+                        )} />
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
+                <button
+                  onClick={handleReEvaluate}
+                  disabled={evaluating || isReEvaling || llmDisabled}
+                  title={llmDisabled ? 'OpenRouter is disabled — enable in Settings' : 'Re-evaluate this job'}
+                  className="ml-auto p-2 -m-2 text-gray-600 hover:text-gray-400 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <RotateCcw className={cn('w-3 h-3', (evaluating || isReEvaling) && 'animate-spin')} />
+                </button>
+              </div>
+
+              {/* Wit line / reason: show snapshot during re-eval, otherwise normal */}
+              {(() => {
+                const displayReason = evalSnapshot ? evalSnapshot.wit_line : reason;
+                const displaySummary = evalSnapshot ? null : (eval_.summary && eval_.summary !== reason ? eval_.summary : null);
+                return (
+                  <>
+                    {displayReason && <VerdictTypewriter text={displayReason} jobId={evalSnapshot ? `${job.id}-reeval` : job.id} />}
+                    {displaySummary && (
+                      <div className="text-[9px] font-mono text-gray-500 mt-1.5">
+                        <span className="text-accent">→</span> {displaySummary}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
-            {reason && <VerdictTypewriter text={reason} jobId={job.id} />}
-            {eval_.summary && eval_.summary !== reason && (
-              <div className="text-[9px] font-mono text-gray-500 mt-1.5">
-                <span className="text-accent">→</span> {eval_.summary}
+
+            {/* Evaluating overlay: pulsing dot + typewriter on top of dimmed old verdict */}
+            {isReEvaling && !evalSnapshot && (
+              <div className="absolute inset-0 rounded-[8px] flex items-center justify-center pointer-events-none">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  <span className="text-[10px] font-mono text-accent animate-pulse">Evaluating fit…</span>
+                </div>
               </div>
             )}
-            {evaluating && (
-              <div className="absolute inset-0 bg-base/60 rounded-[8px] flex items-center justify-center">
-                <span className="text-[10px] font-mono text-accent animate-pulse">Re-evaluating…</span>
+
+            {/* Inline progress track for tailor path */}
+            {isReEvaling && isTailorPath && reEvalStage && (tailorStages as readonly string[]).includes(reEvalStage) && (
+              <div className="mt-3 pt-2.5 border-t border-white/[0.06]">
+                <div className="flex items-center gap-2 mb-1.5">
+                  {tailorStages.map((s, i) => {
+                    const currentIdx = (tailorStages as readonly string[]).indexOf(reEvalStage);
+                    const isPast = i < currentIdx;
+                    const isCurrent = i === currentIdx;
+                    return (
+                      <div
+                        key={s}
+                        className={cn(
+                          'rounded-full transition-all duration-300',
+                          isCurrent
+                            ? 'w-2 h-2 bg-accent animate-pulse'
+                            : isPast
+                              ? 'w-1.5 h-1.5 bg-accent'
+                              : 'w-1.5 h-1.5 bg-white/10',
+                        )}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="text-[9px] font-mono text-gray-500">
+                  {tailorStageMessages[reEvalStage] || 'Processing…'}
+                </span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Verdict-conditional sections */}
-        {verdict === 'tailor' && (
-          <>
-            <MatchBrief evaluation={eval_} />
-            <JobSection evaluation={eval_} parsedJd={parsedJd} />
-            <CVDiff changes={changes} loading={changesLoading} error={changesError} onRetry={fetchChanges} />
-          </>
-        )}
+        {/* Stale-data wrapper: dims all sections below the verdict block during re-eval
+             to signal "this data is from the previous run and may change" */}
+        <div className={cn(
+          'transition-opacity duration-500 space-y-4',
+          (isReEvaling || reEvalDone) && 'opacity-30 pointer-events-none select-none',
+        )}>
+          {/* Verdict-conditional sections */}
+          {verdict === 'tailor' && (
+            <>
+              <MatchBrief evaluation={eval_} />
+              <JobSection evaluation={eval_} parsedJd={parsedJd} />
+              <CVDiff changes={changes} loading={changesLoading} error={changesError} onRetry={fetchChanges} />
+            </>
+          )}
 
-        {verdict === 'apply' && (
-          <>
-            <MatchBrief evaluation={eval_} />
-            <JobSection evaluation={eval_} parsedJd={parsedJd} />
-            <CVDiff changes={changes} loading={changesLoading} error={changesError} onRetry={fetchChanges} />
-          </>
-        )}
+          {verdict === 'apply' && (
+            <>
+              <MatchBrief evaluation={eval_} />
+              <JobSection evaluation={eval_} parsedJd={parsedJd} />
+              <CVDiff changes={changes} loading={changesLoading} error={changesError} onRetry={fetchChanges} />
+            </>
+          )}
 
-        {verdict === 'skip' && (
-          <JobSection evaluation={eval_} parsedJd={parsedJd} muted />
-        )}
+          {verdict === 'skip' && (
+            <JobSection evaluation={eval_} parsedJd={parsedJd} muted />
+          )}
 
-        {/* Layer 3 — Collapsible deep-dive sections */}
-        {verdict !== 'skip' && (
-          <div className="mt-2">
-            {/* Interview Prep */}
-            {(eval_.interview_tips?.high_priority_topics?.length || eval_.interview_tips?.questions_to_ask?.length) && (
-              <Collapsible label="Interview Prep" count={[
-                eval_.interview_tips?.high_priority_topics?.length ? `${eval_.interview_tips.high_priority_topics.length} topics` : '',
-                eval_.interview_tips?.questions_to_ask?.length ? `${eval_.interview_tips.questions_to_ask.length} questions` : '',
-              ].filter(Boolean).join(', ')}>
-                {eval_.interview_tips?.high_priority_topics && eval_.interview_tips.high_priority_topics.length > 0 && (
-                  <div className="mb-3">
-                    <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2">High priority topics</div>
-                    <div className="space-y-2">
-                      {eval_.interview_tips.high_priority_topics.map((t, i) => (
-                        <div key={i} className="p-[8px_10px] border border-white/[0.07] rounded-[6px]">
-                          <div className="text-[11px] font-sans text-gray-300 font-medium">{t.topic}</div>
-                          <div className="text-[10px] font-sans text-gray-500 mt-0.5">Why: {t.why}</div>
-                          <div className="text-[10px] font-sans text-gray-500 mt-0.5">Prep: {t.prep}</div>
-                        </div>
-                      ))}
+          {/* Layer 3 — Collapsible deep-dive sections */}
+          {verdict !== 'skip' && (
+            <div className="mt-2">
+              {/* Interview Prep */}
+              {(eval_.interview_tips?.high_priority_topics?.length || eval_.interview_tips?.questions_to_ask?.length) && (
+                <Collapsible label="Interview Prep" count={[
+                  eval_.interview_tips?.high_priority_topics?.length ? `${eval_.interview_tips.high_priority_topics.length} topics` : '',
+                  eval_.interview_tips?.questions_to_ask?.length ? `${eval_.interview_tips.questions_to_ask.length} questions` : '',
+                ].filter(Boolean).join(', ')}>
+                  {eval_.interview_tips?.high_priority_topics && eval_.interview_tips.high_priority_topics.length > 0 && (
+                    <div className="mb-3">
+                      <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2">High priority topics</div>
+                      <div className="space-y-2">
+                        {eval_.interview_tips.high_priority_topics.map((t, i) => (
+                          <div key={i} className="p-[8px_10px] border border-white/[0.07] rounded-[6px]">
+                            <div className="text-[11px] font-sans text-gray-300 font-medium">{t.topic}</div>
+                            <div className="text-[10px] font-sans text-gray-500 mt-0.5">Why: {t.why}</div>
+                            <div className="text-[10px] font-sans text-gray-500 mt-0.5">Prep: {t.prep}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-                {eval_.interview_tips?.questions_to_ask && eval_.interview_tips.questions_to_ask.length > 0 && (
-                  <div>
-                    <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2">Questions to ask</div>
-                    <div className="space-y-1">
-                      {eval_.interview_tips.questions_to_ask.map((q, i) => (
-                        <div key={i} className="flex gap-1.5">
-                          <div className="w-[3px] h-[3px] rounded-full bg-gray-600 mt-[5px] flex-shrink-0" />
-                          <span className="text-[11px] font-sans text-gray-400 leading-relaxed">{q}</span>
-                        </div>
-                      ))}
+                  )}
+                  {eval_.interview_tips?.questions_to_ask && eval_.interview_tips.questions_to_ask.length > 0 && (
+                    <div>
+                      <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-2">Questions to ask</div>
+                      <div className="space-y-1">
+                        {eval_.interview_tips.questions_to_ask.map((q, i) => (
+                          <div key={i} className="flex gap-1.5">
+                            <div className="w-[3px] h-[3px] rounded-full bg-gray-600 mt-[5px] flex-shrink-0" />
+                            <span className="text-[11px] font-sans text-gray-400 leading-relaxed">{q}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  )}
+                </Collapsible>
+              )}
+
+              {/* ATS Keywords */}
+              {parsedJd?.ats_keywords && parsedJd.ats_keywords.length > 0 && verdict === 'tailor' && (
+                <Collapsible label="ATS Keywords" count={`${parsedJd.ats_keywords.length}`}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {parsedJd.ats_keywords.map((kw, i) => (
+                      <span key={i} className="text-[9px] font-mono text-gray-500 bg-surface/60 border border-white/[0.07] rounded-[3px] px-1.5 py-0.5">
+                        {kw}
+                      </span>
+                    ))}
                   </div>
-                )}
-              </Collapsible>
-            )}
+                </Collapsible>
+              )}
 
-            {/* ATS Keywords */}
-            {parsedJd?.ats_keywords && parsedJd.ats_keywords.length > 0 && verdict === 'tailor' && (
-              <Collapsible label="ATS Keywords" count={`${parsedJd.ats_keywords.length}`}>
-                <div className="flex flex-wrap gap-1.5">
-                  {parsedJd.ats_keywords.map((kw, i) => (
-                    <span key={i} className="text-[9px] font-mono text-gray-500 bg-surface/60 border border-white/[0.07] rounded-[3px] px-1.5 py-0.5">
-                      {kw}
-                    </span>
-                  ))}
-                </div>
-              </Collapsible>
-            )}
-
-            {/* Competition */}
-            {job.applicants_count != null && job.applicants_count > 0 && (
-              <Collapsible label="Competition" count={`${job.applicants_count} applicants`}>
-                <div className="text-[11px] font-sans text-gray-400">
-                  {job.applicants_count} people have applied
-                </div>
-              </Collapsible>
-            )}
-          </div>
-        )}
+              {/* Competition */}
+              {job.applicants_count != null && job.applicants_count > 0 && (
+                <Collapsible label="Competition" count={`${job.applicants_count} applicants`}>
+                  <div className="text-[11px] font-sans text-gray-400">
+                    {job.applicants_count} people have applied
+                  </div>
+                </Collapsible>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Sticky CTA footer */}
-      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-6 py-3 flex items-center gap-2">
+      {/* Sticky CTA footer — dimmed during re-eval since verdict/path may change */}
+      <div className={cn(
+        'flex-shrink-0 border-t border-white/[0.08] bg-base px-6 py-3 flex items-center gap-2 transition-opacity duration-500',
+        (isReEvaling || reEvalDone) && 'opacity-30 pointer-events-none',
+      )}>
         <button
           onClick={() => {
             onSkip(job.id);

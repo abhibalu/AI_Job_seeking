@@ -9,13 +9,17 @@ interface TailoringStripProps {
   taskId: string | null;
   onComplete: (jobId: string, resumeId?: string) => void;
   onCancel: () => void;
+  mode?: 'tailor' | 'reeval';
 }
 
-const STAGES = ['queued', 'planning', 'drafting', 'critiquing', 'revising', 'saving'] as const;
+const TAILOR_STAGES = ['queued', 'planning', 'drafting', 'critiquing', 'revising', 'saving'] as const;
+const REEVAL_STAGES = ['evaluating', 'parsing', 'planning', 'drafting', 'critiquing', 'saving'] as const;
 
 const stageMessages: Record<string, string> = {
   queued: 'Starting up…',
-  planning: 'Analyzing job requirements…',
+  evaluating: 'Evaluating fit…',
+  parsing: 'Analyzing requirements…',
+  planning: 'Planning changes…',
   drafting: 'Tailoring your CV…',
   critiquing: 'Reviewing changes…',
   revising: 'Refining edits…',
@@ -23,9 +27,10 @@ const stageMessages: Record<string, string> = {
 };
 
 export const TailoringStrip: React.FC<TailoringStripProps> = ({
-  job, taskId, onComplete, onCancel,
+  job, taskId, onComplete, onCancel, mode = 'tailor',
 }) => {
-  const [stage, setStage] = useState('queued');
+  const STAGES = mode === 'reeval' ? REEVAL_STAGES : TAILOR_STAGES;
+  const [stage, setStage] = useState(mode === 'reeval' ? 'evaluating' : 'queued');
   const [stopping, setStopping] = useState(false);
   const [typewriterDone, setTypewriterDone] = useState(false);
 
@@ -36,23 +41,25 @@ export const TailoringStrip: React.FC<TailoringStripProps> = ({
 
   useSSE(taskId, {
     onProgress: useCallback((event) => {
-      const s = (event as any).progress?.stage;
+      const s = event.progress?.stage;
       if (s) setStage(s);
     }, []),
     onRunComplete: useCallback((event) => {
       if (event.status === 'cancelled') return;
-      const resumeId = (event as any).progress?.resume_id;
+      const resumeId = event.progress?.resume_id;
       onComplete(job.id, resumeId);
     }, [job.id, onComplete]),
   });
 
-  const currentStageIndex = STAGES.indexOf(stage as typeof STAGES[number]);
+  const currentStageIndex = (STAGES as readonly string[]).indexOf(stage);
   const message = stageMessages[stage] || 'Processing…';
 
   const handleStop = () => {
     setStopping(true);
     onCancel();
   };
+
+  const stopLabel = mode === 'reeval' ? 'Stop' : 'Stop Tailoring';
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[420px] border-t-2 border-accent bg-surface border border-white/10 rounded-sm px-5 py-4">
@@ -72,7 +79,7 @@ export const TailoringStrip: React.FC<TailoringStripProps> = ({
             stopping && 'opacity-50 cursor-not-allowed',
           )}
         >
-          {stopping ? 'Stopping…' : 'Stop Tailoring'}
+          {stopping ? 'Stopping…' : stopLabel}
         </button>
       </div>
 

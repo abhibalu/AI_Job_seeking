@@ -2,16 +2,33 @@ import { useEffect, useRef } from 'react';
 
 const API_BASE_URL = 'http://localhost:8000';
 
+export interface EvaluationSnapshot {
+    recommended_action: string;
+    job_match_score: number;
+    wit_line: string;
+    verdict: string;
+}
+
+export interface SSEProgress {
+    completed: number;
+    total: number;
+    failed?: number;
+    stage?: string;
+    path?: 'skip' | 'apply' | 'tailor';
+    evaluation_snapshot?: EvaluationSnapshot;
+    resume_id?: string;
+}
+
 export interface SSEProgressEvent {
     task_id: string;
     status: 'queued' | 'running';
-    progress: { completed: number; total: number; failed?: number } | null;
+    progress: SSEProgress | null;
 }
 
 export interface SSERunCompleteEvent {
     task_id: string;
     status: 'completed' | 'failed' | 'cancelled';
-    progress?: { completed: number; total: number; failed?: number } | null;
+    progress?: SSEProgress | null;
     error?: string | null;
 }
 

@@ -256,6 +256,35 @@ def batch_evaluate(request: BatchRequest, background_tasks: BackgroundTasks):
     }
 
 
+@router.post("/{job_id}/async", response_model=MessageResponse)
+def evaluate_job_async(job_id: str, background_tasks: BackgroundTasks, force: bool = True):
+    """Re-evaluate a job asynchronously with per-stage SSE progress."""
+    from backend.service_guard import require_service
+    require_service("openrouter")
+    import uuid
+    from agents.database import save_task_status
+
+    # Check if already evaluated and not forcing
+    if is_job_evaluated(job_id) and not force:
+        return {"message": "Job already evaluated", "job_id": job_id}
+
+    job = get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    task_id = str(uuid.uuid4())
+    # Pass full job row — node_evaluate only uses title/company_name/description_text/job_url
+    # but downstream nodes (notify, etc.) may use additional fields
+    job_details = dict(job)
+
+    save_task_status(task_id, "queued", {"completed": 0, "total": 2, "stage": "queued"})
+
+    from services.reeval_worker import run_reeval_worker
+    background_tasks.add_task(run_reeval_worker, task_id, job_id, job_details)
+
+    return {"message": "Re-evaluation started", "task_id": task_id, "job_id": job_id}
+
+
 @router.post("/{job_id}", response_model=MessageResponse)
 def evaluate_job(job_id: str, background_tasks: BackgroundTasks, force: bool = False):
     """Evaluate a single job (synchronous)."""

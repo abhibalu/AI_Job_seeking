@@ -4,6 +4,7 @@ import { JobWithEvaluation } from './services/jobService';
 import { apiClient } from './services/apiClient';
 import type { ServiceToggles } from './services/apiClient';
 import { useJobs } from './hooks/useJobs';
+import { useSSE, type SSEProgress } from './hooks/useSSE';
 import { Sidebar } from './components/Sidebar';
 import { TailoringStrip } from './components/TailoringStrip';
 import { Dashboard } from './pages/Dashboard';
@@ -40,6 +41,12 @@ const App: React.FC = () => {
   // Tailoring state
   const [tailoringJob, setTailoringJob] = useState<Job | null>(null);
   const [tailoringTaskId, setTailoringTaskId] = useState<string | null>(null);
+
+  // Re-evaluation state
+  const [reEvalTaskId, setReEvalTaskId] = useState<string | null>(null);
+  const [reEvalJobId, setReEvalJobId] = useState<string | null>(null);
+  const [reEvalPath, setReEvalPath] = useState<'skip' | 'apply' | 'tailor' | null>(null);
+  const [reEvalProgress, setReEvalProgress] = useState<SSEProgress | null>(null);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
@@ -116,15 +123,98 @@ const App: React.FC = () => {
   }, [unmarkActioned]);
 
   const handleReEvaluate = useCallback(async (jobId: string) => {
-    await apiClient.evaluateJob(jobId, true);
-    const [freshEval, freshJob] = await Promise.all([
+    // Block if another re-eval or tailoring is in progress for this job
+    if (reEvalTaskId) {
+      setToast({ message: 'Re-evaluation already in progress', type: 'error' });
+      return;
+    }
+    if (tailoringJob?.id === jobId) {
+      setToast({ message: 'Tailoring in progress for this job', type: 'error' });
+      return;
+    }
+
+    try {
+      const result = await apiClient.evaluateJobAsync(jobId);
+      setReEvalTaskId(result.task_id);
+      setReEvalJobId(jobId);
+      setReEvalPath(null);
+      setReEvalProgress(null);
+    } catch (err: any) {
+      setToast({ message: `Re-evaluation failed: ${err.message}`, type: 'error' });
+      throw err; // re-throw so JobDetail's catch block also clears its local state
+    }
+  }, [reEvalTaskId, tailoringJob]);
+
+  // SSE subscription for re-evaluation
+  const handleReEvalProgress = useCallback((event: { progress: SSEProgress | null }) => {
+    const progress = event.progress;
+    if (!progress) return;
+    setReEvalProgress(progress);
+    if (progress.path) {
+      setReEvalPath(progress.path);
+    }
+  }, []);
+
+  const handleReEvalComplete = useCallback((event: { status: string; error?: string | null; progress?: SSEProgress | null }) => {
+    const jobId = reEvalJobId;
+    if (!jobId) return;
+
+    if (event.status === 'cancelled') {
+      setReEvalTaskId(null);
+      setReEvalJobId(null);
+      setReEvalPath(null);
+      setReEvalProgress(null);
+      setToast({ message: 'Re-evaluation stopped', type: 'success' });
+      return;
+    }
+
+    if (event.status === 'failed') {
+      setReEvalTaskId(null);
+      setReEvalJobId(null);
+      setReEvalPath(null);
+      setReEvalProgress(null);
+      setToast({ message: `Re-evaluation failed: ${event.error || 'Unknown error'}`, type: 'error' });
+      return;
+    }
+
+    // Completed — refetch job data
+    Promise.all([
       apiClient.getEvaluation(jobId),
       apiClient.getJob(jobId),
-    ]);
-    updateJobEvaluation(jobId, freshEval, {
-      tailoring_status: freshJob.tailoring_status,
-    });
-  }, [updateJobEvaluation]);
+    ]).then(([freshEval, freshJob]) => {
+      updateJobEvaluation(jobId, freshEval, {
+        tailoring_status: freshJob.tailoring_status,
+      });
+    }).catch(() => {});
+
+    setReEvalTaskId(null);
+    setReEvalJobId(null);
+    setReEvalPath(null);
+    setReEvalProgress(null);
+  }, [reEvalJobId, updateJobEvaluation]);
+
+  const handleReEvalError = useCallback(() => {
+    // EventSource auto-reconnects — no action needed
+  }, []);
+
+  useSSE(reEvalTaskId, {
+    onProgress: handleReEvalProgress,
+    onRunComplete: handleReEvalComplete,
+    onError: handleReEvalError,
+  });
+
+  const handleReEvalCancel = useCallback(async () => {
+    if (reEvalTaskId) {
+      try {
+        await apiClient.cancelTask(reEvalTaskId);
+      } catch {}
+    }
+    setReEvalTaskId(null);
+    setReEvalJobId(null);
+    setReEvalPath(null);
+    setReEvalProgress(null);
+    setToast({ message: 'Re-evaluation stopped', type: 'success' });
+  }, [reEvalTaskId]);
 
   const handleTailorStart = useCallback(async (jobId: string) => {
     const job = allJobs.find(j => j.id === jobId);
@@ -144,6 +234,12 @@ const App: React.FC = () => {
       return;
     }
 
+    // Block if re-eval is running for this job (may be in tailor phase)
+    if (reEvalJobId === jobId) {
+      setToast({ message: 'Re-evaluation in progress for this job', type: 'error' });
+      return;
+    }
+
     // Concurrency guard — one tailoring at a time
     if (tailoringJob) {
       setToast({ message: `Already tailoring ${tailoringJob.title}`, type: 'error' });
@@ -158,7 +254,7 @@ const App: React.FC = () => {
     } catch (err: any) {
       setToast({ message: `Tailoring failed: ${err.message}`, type: 'error' });
     }
-  }, [allJobs, navigate, tailoringJob]);
+  }, [allJobs, navigate, tailoringJob, reEvalJobId]);
 
   const handleTailorComplete = useCallback((jobId: string, resumeId?: string) => {
     setTailoringJob(null);
@@ -241,6 +337,8 @@ const App: React.FC = () => {
                         onUndoSkip={handleUndoSkip}
                         onReEvaluate={handleReEvaluate}
                         serviceToggles={serviceToggles}
+                        reEvalTaskId={reEvalJobId === selectedJob.id ? reEvalTaskId : null}
+                        reEvalProgress={reEvalJobId === selectedJob.id ? reEvalProgress : null}
                       />
                     ) : (
                       <div className="h-full flex items-center justify-center">
@@ -270,6 +368,34 @@ const App: React.FC = () => {
             onCancel={handleTailorCancel}
           />
         )}
+
+        {/* Re-eval TailoringStrip fallback: show when user navigated away from the job AND path is tailor */}
+        {reEvalTaskId && reEvalJobId && reEvalPath === 'tailor' && selectedJobId !== reEvalJobId && (() => {
+          const reEvalJob = allJobs.find(j => j.id === reEvalJobId);
+          return reEvalJob ? (
+            <TailoringStrip
+              job={reEvalJob}
+              taskId={reEvalTaskId}
+              onComplete={(jobId, resumeId) => {
+                // Re-eval complete from strip — just refetch
+                Promise.all([
+                  apiClient.getEvaluation(jobId),
+                  apiClient.getJob(jobId),
+                ]).then(([freshEval, freshJob]) => {
+                  updateJobEvaluation(jobId, freshEval, {
+                    tailoring_status: freshJob.tailoring_status,
+                  });
+                }).catch(() => {});
+                setReEvalTaskId(null);
+                setReEvalJobId(null);
+                setReEvalPath(null);
+                setReEvalProgress(null);
+              }}
+              onCancel={handleReEvalCancel}
+              mode="reeval"
+            />
+          ) : null;
+        })()}
       </div>
 
       {toast && (

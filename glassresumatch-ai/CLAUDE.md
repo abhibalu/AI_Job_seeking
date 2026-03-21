@@ -139,15 +139,21 @@ them produces empty verdict blocks and misleading grouping.
 Within equal `matchScore`, APPLY DIRECT (`recommended_action === 'apply'`) sorts before TAILOR.
 Implemented in `utils/sort.ts` smart sort tier. Less friction = more urgent.
 
+**Stable sort**: `Dashboard.tsx` uses a `sortedOrderRef` + `useMemo` to preserve sort order when a
+single job's evaluation updates in-place (e.g., after re-eval). Without this, an in-place evaluation
+update would reshuffle the entire feed and lose the user's scroll position. The sort only re-runs when
+the set of job IDs in `actionRequired` changes (jobs added/removed), not when their scores update.
+
 ## Dashboard card quick actions (OotoCV rebuild)
 
 `Dashboard.tsx` renders four card formats. `TailorCard` and `ApplyDirectCard` both have hover-reveal
 quick action buttons.
 
 **TailorCard** (verdict: tailor) — two distinct props:
-- `onTailorStart()` — primary button ("Tailor CV" / "Review & Send"). Wired
-  to `handleTailorStart` in App.tsx, which checks `tailoring_status` first:
-  - `'ready'` → `getTailoredVersions(jobId)` then `navigate('/tailoring/:id')` (existing review)
+- `onTailorStart(jobId, opts?)` — primary button ("Tailor CV" / "Review & Send"). Wired
+  to `handleTailorStart` in App.tsx, which accepts `opts?: { force?: boolean }`:
+  - `'ready'` and `!opts?.force` → `getTailoredVersions(jobId)` then `navigate('/tailoring/:id')` (existing review)
+  - `'ready'` and `opts?.force` → starts fresh tailoring run (bypasses "already ready" guard; used by post-reeval CTA)
   - `'processing'` → toast "Already tailoring this job" (no duplicate run)
   - otherwise → `tailorResume(jobId)` returns `task_id` → sets `tailoringJob` + `tailoringTaskId` → TailoringStrip appears with SSE tracking
 - `onSkip()` — ghost "Skip" button. Wired to `handleSkip` (marks actioned, no API call).
@@ -209,7 +215,8 @@ type (recommended_action, job_match_score, wit_line, verdict). Use these types �
 
 `TailoringStrip.tsx` is a floating process card that displays real pipeline progress via SSE and allows cancellation.
 
-**Props**: `job`, `taskId`, `onComplete`, `onCancel`, `mode?: 'tailor' | 'reeval'` (default: `'tailor'`).
+**Props**: `job`, `taskId`, `onComplete`, `onCancel`. The `mode` prop was removed — TailoringStrip
+is now tailoring-only (re-evaluation no longer uses TailoringStrip; ADR-0021).
 
 **Layout**: Fixed positioned `bottom-6 left-1/2 -translate-x-1/2 z-50 w-[420px]` — floats centered above all content, no layout disruption.
 
@@ -217,13 +224,10 @@ type (recommended_action, job_match_score, wit_line, verdict). Use these types �
 - Top accent border: `border-t-2 border-accent` — draws the eye immediately.
 - Container: `bg-surface border border-white/10` — matches surface styling, no shadows/blur.
 - Job context line (top): `job.title · job.company_name` in `text-xs gray-500`, with stop button in top-right.
-- Pipeline stage track (middle): dots vary by mode:
-  - `tailor` mode: `queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`
-  - `reeval` mode: `evaluating` → `parsing` → `planning` → `drafting` → `critiquing` → `saving`
+- Pipeline stage track (middle): `queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`
   - Past stages: small filled accent dot, current: larger pulsing, future: dim `bg-white/15`
 - Stage message (bottom): TypewriterWaitState with `key={stage}` for animation reset.
-  Shared message map: `evaluating` → "Evaluating fit…", `parsing` → "Analyzing requirements…",
-  `planning` → "Planning changes…", `drafting` → "Tailoring your CV…",
+  Message map: `planning` → "Planning changes…", `drafting` → "Tailoring your CV…",
   `critiquing` → "Reviewing changes…", `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
 
 **Behavior**:
@@ -231,8 +235,7 @@ type (recommended_action, job_match_score, wit_line, verdict). Use these types �
 - On `run_complete` with `status !== 'cancelled'`: extracts `progress.resume_id` and calls
   `onComplete(jobId, resumeId)` for direct navigation to review page.
 - Stop button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
-  Shows "Stopping…" while cancel is in-flight.
-- Stop button label: "Stop Tailoring" in tailor mode, "Stop" in reeval mode.
+  Shows "Stopping…" while cancel is in-flight. Stop button label: "Stop Tailoring".
 
 ## Toast rollback pattern
 
@@ -476,8 +479,18 @@ duplicated from hero section. Added `eval_.summary` inline in verdict block (gua
 primary CTAs by flex-1 spacer). Shows success Toast with Undo action via `onUndoSkip` prop (calls
 `unmarkActioned` in App.tsx).
 
-**Verdict block "CV tailored ✓" badge**: When `job.tailoring_status === 'ready'`, a small accent badge
-appears in the verdict header to signal that tailoring is complete at L1 scanning level.
+**Verdict block badges**: `job.tailoring_status === 'ready'` shows "CV tailored ✓" (accent) in the
+verdict header. After a re-eval completes, "Retouch?" (amber) replaces it to signal staleness, with
+`title="Your tailored CV was based on the previous assessment"` tooltip.
+
+**Re-eval verdict block lifecycle** (ADR-0021):
+- `isReEvaling` → stage-aware overlay ("Analyzing job fit…" / "Determining path…" / "Re-parsing requirements…") using `reEvalStageMessage` map keyed by `reEvalProgress.stage`
+- `reEvalDone` (2s) → overlay shows "Assessment updated ✓"
+- After pulse: `reEvalFresh = true` → inline CTA strip appears below wit_line:
+  - **"Re-tailor →"** calls `handleVerdictClick()` which triggers `onTailorStart(jobId, { force: true })`
+  - **"Later"** sets `reEvalCtaDismissed = true` — hides CTA but preserves `reEvalFresh` badge and force-tailor click behavior
+- `reEvalCtaDismissed` resets to `false` on re-eval completion and on job change
+- Verdict block is clickable (`verdictClickable`) and shows `verdictHint` on hover; when `reEvalFresh && tailoring_status === 'ready'`, hint is always visible (opacity-100)
 
 **llmDisabled buttons**: When OpenRouter is disabled, Tailor CV / Re-evaluate / Override & Tailor buttons
 are truly `disabled` with a `title` tooltip explaining why — no opacity-40-but-clickable pattern.

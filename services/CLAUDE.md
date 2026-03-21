@@ -69,11 +69,15 @@ Files:
 
 ## Re-evaluation worker (`services/reeval_worker.py`)
 
-`run_reeval_worker(task_id, job_id, job_details)` — background worker that steps through
-pipeline nodes manually, emitting `save_task_status()` at each boundary for SSE progress.
+`run_reeval_worker(task_id, job_id, job_details)` — read-only background worker: evaluates the
+job and optionally parses the JD, but **never runs the tailoring subgraph** (ADR-0021).
 
-**Stage map**: evaluating → routing → parsing → planning → drafting → critiquing → saving.
-Skip/apply paths complete after routing (total=2). Tailor path runs all 7 stages (total=7).
+**Stage map**:
+- Stage 0: `evaluating` — all paths
+- Stage 1: `routing` — all paths; sets `total` + `evaluation_snapshot`
+- Stage 2: `parsing` — tailor path only (provides fresh ATS keywords)
+
+Skip/apply paths: total=2. Tailor path: total=3.
 
 **Progress payload** includes `stage`, `path`, and `evaluation_snapshot` (from stage 1 onward)
 so the frontend can crossfade the verdict block without waiting for full pipeline completion.

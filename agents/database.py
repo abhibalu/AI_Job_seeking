@@ -5,7 +5,7 @@ Uses Supabase (PostgreSQL) as the backend.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.settings import settings
@@ -386,6 +386,61 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
         _save_resume_changes(record_id, job_id, edit_plan)
 
     return record_id
+
+
+def complete_tailored_resume(
+    resume_id: str,
+    version: int,
+    content: dict,
+    status: str = "pending",
+    edit_plan: dict | None = None,
+) -> bool:
+    """CAS UPDATE a placeholder resumes row to its final tailored content.
+
+    Predicate: WHERE id = resume_id AND tailoring_status = 'processing'.
+    On zero rows updated, returns False and does NOT insert resume_changes
+    (avoids orphans against a row already cancelled by the reaper or user).
+
+    Returns:
+        True if the UPDATE applied; False on CAS no-op.
+    """
+    tailoring_status_map = {
+        "pending": "ready",
+        "needs_review": "needs_review",
+        "approved": "ready",
+        "rejected": "ready",
+    }
+
+    update = {
+        "name": f"Tailored Resume V{version}",
+        "content": content,
+        "status": status,
+        "version": version,
+        "tailoring_status": tailoring_status_map.get(status, "ready"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if edit_plan is not None:
+        update["edit_plan"] = edit_plan
+
+    client = _get_supabase()
+    result = (
+        client.table("resumes")
+        .update(update)
+        .eq("id", resume_id)
+        .eq("tailoring_status", "processing")
+        .execute()
+    )
+    if not result.data:
+        logger.warning(
+            "complete_tailored_resume.no_op",
+            extra={"resume_id": resume_id, "reason": "row not in processing state"},
+        )
+        return False
+
+    if edit_plan:
+        job_id = result.data[0].get("job_id")
+        _save_resume_changes(resume_id, job_id, edit_plan)
+    return True
 
 
 def _save_resume_changes(resume_id: str, job_id: str, edit_plan: dict) -> None:

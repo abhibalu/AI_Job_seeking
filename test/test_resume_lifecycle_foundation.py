@@ -69,5 +69,34 @@ class TestCompleteTailoredResumeCAS(unittest.TestCase):
         mock_save_changes.assert_not_called()
 
 
+# ─────────────────────────────────────────────────────────────────
+# 2.  create_processing_placeholder — INSERT shape
+# ─────────────────────────────────────────────────────────────────
+class TestCreateProcessingPlaceholder(unittest.TestCase):
+
+    @patch("agents.database._get_supabase")
+    def test_worker_creates_placeholder(self, mock_get_supabase):
+        """T1: Placeholder row INSERT has the right shape:
+        status='pending', tailoring_status='processing',
+        non-NULL processing_started_at, job_id set, content={}.
+        """
+        from agents.database import create_processing_placeholder
+
+        chain = _mock_supabase_chain(return_data=[{"id": "x"}])
+        mock_get_supabase.return_value.table.return_value = chain
+
+        resume_id = create_processing_placeholder(job_id="job-42")
+
+        self.assertTrue(resume_id, "Expected non-empty resume_id")
+        chain.insert.assert_called_once()
+        inserted = chain.insert.call_args[0][0]
+        self.assertEqual(inserted["status"], "pending")
+        self.assertEqual(inserted["tailoring_status"], "processing")
+        self.assertEqual(inserted["job_id"], "job-42")
+        self.assertEqual(inserted["content"], {})
+        self.assertIn("processing_started_at", inserted)
+        self.assertIsNotNone(inserted["processing_started_at"])
+
+
 if __name__ == "__main__":
     unittest.main()

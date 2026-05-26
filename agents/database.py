@@ -388,6 +388,34 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
     return record_id
 
 
+def create_processing_placeholder(job_id: str) -> str:
+    """INSERT a placeholder resumes row at tailoring worker entry.
+
+    The row is created with tailoring_status='processing',
+    processing_started_at=now(), and an empty content={} which
+    complete_tailored_resume() fills in at end-of-pipeline.
+
+    Returns:
+        resume_id (UUID string) of the newly-created placeholder row.
+    """
+    import uuid
+    record_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    client = _get_supabase()
+    client.table("resumes").insert({
+        "id": record_id,
+        "name": "Tailored Resume (in progress)",
+        "content": {},
+        "status": "pending",
+        "job_id": job_id,
+        "tailoring_status": "processing",
+        "processing_started_at": now_iso,
+        "updated_at": now_iso,
+    }).execute()
+    return record_id
+
+
 def complete_tailored_resume(
     resume_id: str,
     version: int,

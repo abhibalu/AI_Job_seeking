@@ -139,5 +139,56 @@ class TestSaveTailoredResumeRemoved(unittest.TestCase):
             )
 
 
+# ─────────────────────────────────────────────────────────────────
+# 5.  node_save — UPDATE via complete_tailored_resume, not INSERT
+# ─────────────────────────────────────────────────────────────────
+class TestNodeSaveUsesUpdate(unittest.TestCase):
+
+    @patch("agents.tailoring_subgraph.complete_tailored_resume")
+    def test_node_save_calls_complete_tailored_resume(self, mock_complete):
+        """T2: node_save delegates to the CAS UPDATE helper, not the
+        removed save_tailored_resume INSERT path."""
+        from agents.tailoring_subgraph import node_save
+
+        mock_complete.return_value = True
+        state = {
+            "target_resume_id": "r-abc",
+            "draft_resume": {"basics": {"name": "Test"}},
+            "edit_plan": {"edits": []},
+            "revision_count": 1,
+            "job_id": "j-1",
+            # is_force_save uses state['critique'] + revision count;
+            # supply benign values so it returns False.
+            "critique": [],
+        }
+        out = node_save(state)
+
+        mock_complete.assert_called_once()
+        kwargs = mock_complete.call_args.kwargs
+        self.assertEqual(kwargs["resume_id"], "r-abc")
+        self.assertEqual(kwargs["status"], "pending")
+        self.assertEqual(out["final_resume_id"], "r-abc")
+        self.assertTrue(out["save_applied"])
+        self.assertEqual(out["status"], "saved")
+
+    @patch("agents.tailoring_subgraph.complete_tailored_resume")
+    def test_node_save_reflects_cas_no_op_in_status(self, mock_complete):
+        """When CAS no-ops, node_save returns status='cancelled' so the
+        worker can report task as cancelled, not completed."""
+        from agents.tailoring_subgraph import node_save
+
+        mock_complete.return_value = False
+        out = node_save({
+            "target_resume_id": "r-x",
+            "draft_resume": {},
+            "edit_plan": None,
+            "revision_count": 0,
+            "job_id": "j-2",
+            "critique": [],
+        })
+        self.assertFalse(out["save_applied"])
+        self.assertEqual(out["status"], "cancelled")
+
+
 if __name__ == "__main__":
     unittest.main()

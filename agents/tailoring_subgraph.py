@@ -8,6 +8,7 @@ from agents.change_planner import ChangePlannerAgent
 from agents.resume_tailor import ResumeTailorAgent
 from agents.resume_critic import ResumeCriticAgent
 from agents.resume_validator import validate_structure, validate_planned_edits
+from agents.database import complete_tailored_resume
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class TailoringState(TypedDict):
     final_resume_id: str      # Supabase ID of the finalized resume
     status: str
     errors: list[str]
+    target_resume_id: str   # placeholder resume row id; set by worker at entry
+    save_applied: bool      # True if node_save UPDATE was applied; False on CAS no-op
 
 
 # 2. Sub-Graph Nodes
@@ -160,42 +163,46 @@ def node_critique(state: TailoringState) -> dict:
             return {"errors": [f"Critiquing failed: {str(e)}"], "status": "error"}
 
 
+def is_force_save(state: TailoringState) -> bool:
+    """Return True when max revisions are exhausted but the critic is still unhappy."""
+    return bool(state.get("critique", []))
+
+
 def node_save(state: TailoringState) -> dict:
-    """Saves the final approved draft to the database."""
-    logger.info(f"[SubGraph] Saving final tailored resume to DB for job {state['job_id']}")
+    """Finalise the tailored resume by UPDATEing the placeholder row.
 
-    from agents.database import save_tailored_resume
+    Uses CAS (complete_tailored_resume) so that a reaper-cancelled or
+    user-cancelled row is left alone and the worker reports the run
+    as cancelled rather than completed (run_tailoring_worker checks
+    state['save_applied']).
+    """
+    target_id = state["target_resume_id"]
+    is_force = is_force_save(state)  # existing helper
+    status_value = "needs_review" if is_force else "pending"
 
-    with _timed_node("save", state["job_id"]):
-        try:
-            final_resume = state["draft_resume"]
-            # Strip backend metadata from the resume JSON
-            clean_resume = {k: v for k, v in final_resume.items() if not k.startswith('_')}
+    applied = complete_tailored_resume(
+        resume_id=target_id,
+        version=state.get("revision_count", 0),
+        content=state["draft_resume"],
+        status=status_value,
+        edit_plan=state.get("edit_plan"),
+    )
 
-            # Differentiate force-saved (unresolved flaws) from critic-approved
-            is_force_save = bool(state.get("critique", []))
-            save_status = "needs_review" if is_force_save else "pending"
-            if is_force_save:
-                logger.info(f"[SubGraph] Force-saving with status='needs_review' ({len(state['critique'])} unresolved flaws)")
+    logger.info(
+        "[SubGraph] node_save complete",
+        extra={
+            "job_id": state.get("job_id"),
+            "target_resume_id": target_id,
+            "save_applied": applied,
+            "save_status": status_value,
+        },
+    )
 
-            # Clean edit_plan metadata before saving
-            edit_plan = state.get("edit_plan", {})
-            clean_plan = {k: v for k, v in edit_plan.items() if not k.startswith('_')} if edit_plan else None
-
-            record_id = save_tailored_resume(
-                job_id=state["job_id"],
-                version=state.get("revision_count", 0),
-                content=clean_resume,
-                status=save_status,
-                edit_plan=clean_plan
-            )
-            return {
-                "final_resume_id": record_id,
-                "status": "saved"
-            }
-        except Exception as e:
-            logger.error(f"[SubGraph] Saving failed: {e}", exc_info=True)
-            return {"errors": [f"Saving failed: {str(e)}"], "status": "error"}
+    return {
+        "final_resume_id": target_id,
+        "save_applied": applied,
+        "status": "saved" if applied else "cancelled",
+    }
 
 
 # 3. Routing Logic

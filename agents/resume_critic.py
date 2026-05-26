@@ -23,22 +23,35 @@ class ResumeCriticAgent(BaseAgent):
 
     def build_user_prompt(self, draft_resume: dict, base_resume: dict, edit_plan: dict, approved_skills: str) -> str:
         return f"""
-        ### DRAFT RESUME TO REVIEW (JSON):
-        {json.dumps(draft_resume, indent=2)}
+### DRAFT RESUME TO REVIEW (JSON):
+{json.dumps(draft_resume, indent=2)}
 
-        ### BASE RESUME (Original, for comparison):
-        {json.dumps(base_resume, indent=2)}
+### BASE RESUME (Original, for comparison):
+{json.dumps(base_resume, indent=2)}
 
-        ### EDIT PLAN (What was supposed to change):
-        {json.dumps(edit_plan, indent=2)}
+### EDIT PLAN (What was supposed to change):
+{json.dumps(edit_plan, indent=2)}
 
-        ### CANDIDATE'S ACTUAL APPROVED SKILLS (Source of Truth):
-        {approved_skills}
+### CANDIDATE'S ACTUAL APPROVED SKILLS (Source of Truth):
+{approved_skills}
 
-        Review the draft for naturalness, authenticity, and AI patterns.
-        Structural validation has already passed — focus on content quality only.
-        Return a JSON array of strings containing your critique.
-        If the draft is perfect, return `[]`.
+Follow the Review Workflow:
+1. Use the Edit Plan above to identify which bullets were modified.
+2. Apply Naturalness/Voice and AI Pattern checks to those modified bullets only.
+3. Apply the Hallucination Check across the full draft — use the Base Resume and Approved Skills as the only valid sources of truth for claims.
+
+Structural validation has already passed — focus on content quality only.
+Return a JSON array of critique strings. If the draft is perfect, return `[]`.
+
+Example output (needs revision):
+[
+  "Bullet 4 in the Metro role uses 'Orchestrated' while bullet 2 also uses 'Orchestrated'. Change one to a more natural verb like 'Built' or 'Managed'.",
+  "The summary reads too generically — 'passionate about leveraging data-driven insights' sounds AI-generated. Keep the original summary tone.",
+  "The draft claims '40% performance increase' in the Data Pipeline bullet, but this metric is not in the Approved Skills. Remove it."
+]
+
+Example output (perfect draft):
+[]
         """
         
     def _parse_json_response(self, text: str) -> list:

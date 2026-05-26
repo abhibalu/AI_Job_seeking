@@ -348,44 +348,22 @@ def get_master_resume() -> dict | None:
 # TAILORED RESUME FUNCTIONS
 # ============================================
 
-def save_tailored_resume(job_id: str, version: int, content: dict, status: str = "pending", edit_plan: dict = None) -> str:
-    """Save a tailored resume (wrapper around save_resume), optionally with edit plan.
+def save_tailored_resume(*args, **kwargs):
+    """REMOVED in Phase 1 Cluster A (ADR-0022).
 
-    Also writes normalised resume_changes rows (ADR-0010) so the OotoCV review UI
-    can show per-change Accept / Reject / Keep original controls.
+    The old INSERT-at-end model has been replaced by:
+      create_processing_placeholder(job_id) -> resume_id      (at worker entry)
+      complete_tailored_resume(resume_id, ...)                (at node_save)
+      mark_resume_cancelled(resume_id)                        (cancel/reaper)
+
+    This shim raises NotImplementedError so any straggling call site is
+    caught at runtime instead of silently double-INSERTing a tailored row.
     """
-    # Map resume status to tailoring_status
-    tailoring_status_map = {
-        "pending": "ready",
-        "needs_review": "needs_review",
-        "approved": "ready",
-        "rejected": "ready",
-    }
-
-    record_id = save_resume(
-        content=content,
-        name=f"Tailored Resume V{version}",
-        is_master=False,
-        status=status,
-        job_id=job_id,
-        version=version
+    raise NotImplementedError(
+        "save_tailored_resume was split into create_processing_placeholder + "
+        "complete_tailored_resume in Phase 1 Cluster A (ADR-0022). "
+        "Call sites must thread target_resume_id through TailoringState."
     )
-
-    # Store edit plan + derived tailoring_status
-    if edit_plan:
-        try:
-            client = _get_supabase()
-            client.table("resumes").update({
-                "edit_plan": edit_plan,
-                "tailoring_status": tailoring_status_map.get(status, "ready"),
-            }).eq("id", record_id).execute()
-        except Exception as e:
-            logger.warning("Failed to save edit_plan for resume %s: %s", record_id, e, exc_info=True)
-
-        # Write normalised resume_changes rows (ADR-0010)
-        _save_resume_changes(record_id, job_id, edit_plan)
-
-    return record_id
 
 
 def create_processing_placeholder(job_id: str) -> str:

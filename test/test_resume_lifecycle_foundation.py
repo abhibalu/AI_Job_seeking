@@ -126,5 +126,18 @@ class TestMarkResumeCancelled(unittest.TestCase):
         self.assertFalse(mark_resume_cancelled("r1"))
 
 
+# ─────────────────────────────────────────────────────────────────
+# 4.  save_tailored_resume — must raise after the Cluster A split
+# ─────────────────────────────────────────────────────────────────
+class TestSaveTailoredResumeRemoved(unittest.TestCase):
+
+    def test_save_tailored_resume_raises(self):
+        from agents.database import save_tailored_resume
+        with self.assertRaises(NotImplementedError):
+            save_tailored_resume(
+                job_id="x", version=1, content={}, status="pending", edit_plan=None,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

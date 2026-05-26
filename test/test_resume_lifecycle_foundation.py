@@ -189,6 +189,39 @@ class TestNodeSaveUsesUpdate(unittest.TestCase):
         self.assertFalse(out["save_applied"])
         self.assertEqual(out["status"], "cancelled")
 
+    @patch("agents.tailoring_subgraph.complete_tailored_resume")
+    def test_node_save_strips_underscore_metadata(self, mock_complete):
+        """Regression: _model_used and _agent must be stripped from
+        draft_resume and edit_plan before persisting (per agents/CLAUDE.md)."""
+        from agents.tailoring_subgraph import node_save
+
+        mock_complete.return_value = True
+        state = {
+            "target_resume_id": "r-strip",
+            "draft_resume": {
+                "basics": {"name": "Test"},
+                "_model_used": "claude-sonnet-4-6",
+                "_agent": "ResumeTailorAgent",
+            },
+            "edit_plan": {
+                "edits": [],
+                "_model_used": "claude-sonnet-4-6",
+                "_agent": "ChangePlannerAgent",
+            },
+            "revision_count": 0,
+            "job_id": "j-strip",
+            "critique": [],
+        }
+        node_save(state)
+
+        kwargs = mock_complete.call_args.kwargs
+        self.assertNotIn("_model_used", kwargs["content"])
+        self.assertNotIn("_agent", kwargs["content"])
+        self.assertIn("basics", kwargs["content"])
+        self.assertNotIn("_model_used", kwargs["edit_plan"])
+        self.assertNotIn("_agent", kwargs["edit_plan"])
+        self.assertIn("edits", kwargs["edit_plan"])
+
 
 if __name__ == "__main__":
     unittest.main()

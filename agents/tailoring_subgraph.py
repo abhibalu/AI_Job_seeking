@@ -180,12 +180,21 @@ def node_save(state: TailoringState) -> dict:
     is_force = is_force_save(state)  # existing helper
     status_value = "needs_review" if is_force else "pending"
 
+    # DB cleanup: strip _-prefixed agent metadata (per agents/CLAUDE.md).
+    raw_resume = state["draft_resume"]
+    clean_resume = {k: v for k, v in raw_resume.items() if not k.startswith("_")}
+    raw_plan = state.get("edit_plan")
+    clean_plan = (
+        {k: v for k, v in raw_plan.items() if not k.startswith("_")}
+        if raw_plan else None
+    )
+
     applied = complete_tailored_resume(
         resume_id=target_id,
         version=state.get("revision_count", 0),
-        content=state["draft_resume"],
+        content=clean_resume,
         status=status_value,
-        edit_plan=state.get("edit_plan"),
+        edit_plan=clean_plan,
     )
 
     logger.info(

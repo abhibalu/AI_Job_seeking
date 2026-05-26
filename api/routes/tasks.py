@@ -5,7 +5,11 @@ import json
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
-from agents.database import list_tasks as list_tasks_db, get_task_status as get_task_status_db
+from agents.database import (
+    list_tasks as list_tasks_db,
+    get_task_status as get_task_status_db,
+    mark_resume_cancelled,
+)
 from api.schemas import TaskStatus
 
 router = APIRouter()
@@ -58,4 +62,12 @@ def cancel_task(task_id: str):
         return {"status": task["status"], "message": "Task already terminated"}
 
     save_task_status(task_id, "cancelled", task.get("progress"))
+
+    # Phase 1 Cluster A: also mark the in-flight resume row so UI flips
+    # immediately without waiting for the worker's next boundary check.
+    progress = task.get("progress") or {}
+    resume_id = progress.get("resume_id")
+    if resume_id:
+        mark_resume_cancelled(resume_id)  # CAS — no-op if already terminal
+
     return {"status": "cancelled"}

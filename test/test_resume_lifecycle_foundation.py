@@ -308,5 +308,42 @@ class TestRunTailoringWorker(unittest.TestCase):
         self.assertNotIn("completed", statuses)
 
 
+# ─────────────────────────────────────────────────────────────────
+# 7.  Cancel endpoint marks in-flight resume row
+# ─────────────────────────────────────────────────────────────────
+class TestCancelEndpoint(unittest.TestCase):
+
+    @patch("api.routes.tasks.mark_resume_cancelled")
+    @patch("agents.database.save_task_status")
+    @patch("api.routes.tasks.get_task_status_db")
+    def test_cancel_marks_resume_when_resume_id_in_progress(
+        self, mock_get_task, mock_save_task, mock_mark_cancelled,
+    ):
+        from api.routes.tasks import cancel_task
+
+        # task has progress.resume_id set (because worker writes it now).
+        mock_get_task.return_value = {
+            "status": "running",
+            "progress": {"resume_id": "r-7", "job_id": "j-7"},
+        }
+
+        cancel_task(task_id="t-7")
+
+        mock_mark_cancelled.assert_called_once_with("r-7")
+
+    @patch("api.routes.tasks.mark_resume_cancelled")
+    @patch("agents.database.save_task_status")
+    @patch("api.routes.tasks.get_task_status_db")
+    def test_cancel_no_op_when_progress_missing_resume_id(
+        self, mock_get_task, mock_save_task, mock_mark_cancelled,
+    ):
+        from api.routes.tasks import cancel_task
+
+        mock_get_task.return_value = {"status": "running", "progress": {}}
+        cancel_task(task_id="t-8")
+
+        mock_mark_cancelled.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

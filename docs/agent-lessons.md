@@ -565,6 +565,21 @@ App-level `tailoringJob` guard. Dashboard buttons disabled during active tailori
 
 ---
 
+## 25. Few-shot anchor internal consistency — header must match JSON
+
+**Source**: 2026-03-20
+
+**Mistake**: JobEvaluator's Anchor 1 header said `score: 85` but the JSON inside had `"job_match_score": 80`. The model saw both signals during calibration and received a contradictory reference point at the Strong Match anchor. Additionally, the verdict mapping had a gap at 41–49 (Weak ≤ 40, Moderate 50–70) with no anchor covering that range, and all anchors had `"approved_reference": ""` — teaching the model that empty references are acceptable.
+
+**Correct pattern**: Three rules for few-shot calibration anchors:
+1. **Internal consistency**: Header score must exactly match the JSON `job_match_score` value.
+2. **Full range coverage**: Every scoring band (skip/borderline-weak/tailor/apply) needs at least one anchor. Gaps in the 40–50 zone cause the most inconsistent drift.
+3. **Non-empty grounding fields**: If a field exists to ground suggestions in approved content (`approved_reference`), populate it in anchors — otherwise the model learns to leave it blank.
+
+**Propagated to**: `agents/CLAUDE.md` (no structural change needed), `agent_prompts/CLAUDE.md`, `docs/features/job_evaluation.md`
+
+---
+
 ## 18. GDoc export silent failures — always verify and report per-field
 
 **Source**: 2026-03-19

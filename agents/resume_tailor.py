@@ -1,7 +1,10 @@
 import json
+import logging
 from pathlib import Path
 from agents.base import BaseAgent
 from agents.database import get_evaluation, get_jd_parsed
+
+logger = logging.getLogger(__name__)
 
 class ResumeTailorAgent(BaseAgent):
     """
@@ -21,33 +24,80 @@ class ResumeTailorAgent(BaseAgent):
 
     def build_user_prompt(self, base_resume: dict, edit_plan: dict, approved_skills: str, critique: str = None, **kwargs) -> str:
         prompt = f"""
-        ### BASE RESUME (JSON):
-        {json.dumps(base_resume, indent=2)}
+### BASE RESUME (JSON):
+{json.dumps(base_resume, indent=2)}
 
-        ### EDIT PLAN (Structured):
-        {json.dumps(edit_plan, indent=2)}
+### EDIT PLAN (Structured):
+{json.dumps(edit_plan, indent=2)}
 
-        ### APPROVED SKILLS (Source of Truth):
-        {approved_skills}
+### APPROVED SKILLS (Source of Truth):
+{approved_skills}
 
-        ### INSTRUCTION:
-        Apply the edit plan to the base resume.
-        1. Only modify locations specified in the edit plan.
-        2. Copy all other content exactly verbatim.
-        3. Preserve bullet counts, IDs, and section structure.
-        """
+### INSTRUCTION:
+Apply the edit plan to the base resume.
+1. Only modify locations specified in the edit plan.
+2. Copy all other content exactly verbatim.
+3. Preserve bullet counts, IDs, and section structure.
+
+### EXAMPLE:
+
+Base Resume (excerpt):
+{{
+  "experience": [
+    {{
+      "id": "acme",
+      "company": "Acme Corp",
+      "bullets": [
+        {{"id": "acme_1", "text": "Built internal tooling for the ops team using Python."}},
+        {{"id": "acme_2", "text": "Managed deployments to AWS using Jenkins pipelines."}}
+      ]
+    }}
+  ]
+}}
+
+Edit Plan (excerpt):
+{{
+  "edits": [
+    {{
+      "location": "experience.acme.bullets.acme_1",
+      "action": "rephrase",
+      "target_text": "Developed Python automation tools for operations, reducing manual work by 30%.",
+      "reason": "Add impact metric aligned with JD focus on automation"
+    }}
+  ],
+  "preserve": ["acme_2"]
+}}
+
+Expected Output (excerpt):
+{{
+  "experience": [
+    {{
+      "id": "acme",
+      "company": "Acme Corp",
+      "bullets": [
+        {{"id": "acme_1", "text": "Developed Python automation tools for the ops team, cutting manual deployment steps by 30%."}},
+        {{"id": "acme_2", "text": "Managed deployments to AWS using Jenkins pipelines."}}
+      ]
+    }}
+  ]
+}}
+
+Note: acme_2 is copied exactly verbatim. acme_1 preserves the core action and metric from target_text with minor voice adjustment.
+"""
 
         if critique:
             prompt += f"""
+### CRITIQUE TO ADDRESS (URGENT):
+The reviewer found the following issues with your previous draft:
+{critique}
 
-        ### CRITIQUE TO ADDRESS (URGENT):
-        The reviewer found the following issues with your previous draft:
-        {critique}
+Revision workflow:
+1. Identify the specific bullets named in the critique above.
+2. Revise only those bullets to fix the reported issues.
+3. All other sections and bullets must remain exactly as in your previous draft — do not touch them.
+"""
 
-        You MUST revise the resume to fix these specific issues. Do not ignore this feedback.
-        """
-
-        prompt += "\n        Return VALID JSON only."
+        prompt += "\nReturn VALID JSON only."
         return prompt
 
     def run_tailoring(self, job_id: str, base_resume: dict, approved_skills: str) -> dict:
@@ -64,7 +114,7 @@ class ResumeTailorAgent(BaseAgent):
 
         jd_parsed = get_jd_parsed(job_id)
         if not jd_parsed:
-            print(f"Warning: JD Parser signals missing for {job_id}. Tailoring might lack precision.")
+            logger.warning("JD Parser signals missing — tailoring may lack precision", extra={"job_id": job_id})
             jd_parsed = {}
 
         jd_context = {

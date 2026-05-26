@@ -7,25 +7,25 @@ interface MatchBriefProps {
   evaluation: Evaluation;
 }
 
-function getStrengths(evaluation: Evaluation): Array<{ text: string; chip: string; chipColor: string }> {
-  const strengths: Array<{ text: string; chip: string; chipColor: string }> = [];
+function getStrengths(evaluation: Evaluation): Array<{ text: string; chip: string; chipColor: string; borderColor: string }> {
+  const strengths: Array<{ text: string; chip: string; chipColor: string; borderColor: string }> = [];
 
   if (evaluation.matched_keywords?.length) {
     evaluation.matched_keywords.slice(0, 3).forEach(kw => {
-      strengths.push({ text: kw, chip: 'req met', chipColor: 'bg-semantic-green/10 text-semantic-green' });
+      strengths.push({ text: kw, chip: 'req met', chipColor: 'bg-semantic-green/10 text-semantic-green', borderColor: 'border-semantic-green/35' });
     });
   }
 
   if (evaluation.improvement_suggestions?.your_strengths_to_highlight) {
     (evaluation.improvement_suggestions as any).your_strengths_to_highlight?.slice(0, 2).forEach((s: string) => {
-      strengths.push({ text: s, chip: 'evidence', chipColor: 'bg-teal-500/10 text-teal-400' });
+      strengths.push({ text: s, chip: 'evidence', chipColor: 'bg-teal-500/10 text-teal-400', borderColor: 'border-teal-400/35' });
     });
   }
 
   if (evaluation.interview_tips?.your_strengths_to_highlight?.length) {
     evaluation.interview_tips.your_strengths_to_highlight.slice(0, 2).forEach(s => {
       if (!strengths.find(x => x.text === s)) {
-        strengths.push({ text: s, chip: 'signal', chipColor: 'bg-semantic-slate/10 text-semantic-slate' });
+        strengths.push({ text: s, chip: 'signal', chipColor: 'bg-semantic-slate/10 text-semantic-slate', borderColor: 'border-teal-400/35' });
       }
     });
   }
@@ -84,7 +84,7 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.08, duration: 0.3 }}
-                className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-base/50 border-l-2 border-semantic-green/35"
+                className={cn('flex items-start gap-3 px-3 py-2.5 rounded-lg bg-base/50 border-l-2', s.borderColor)}
               >
                 <span className={cn(
                   'text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 flex-shrink-0 mt-0.5',
@@ -113,20 +113,25 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: (visibleStrengths.length + i) * 0.08, duration: 0.3 }}
               >
-                <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-base/50 border-l-2 border-semantic-amber/35">
+                <div className={cn(
+                  'flex items-start gap-3 px-3 py-2.5 rounded-lg bg-base/50',
+                  g.severity === 'notable' ? 'border-l-[3px] border-orange-400/50' : 'border-l-2 border-semantic-amber/25',
+                )}>
                   <span className={cn(
                     'text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 flex-shrink-0 mt-0.5',
                     severityChip[g.severity] || severityChip.minor
                   )}>
                     {g.severity}
                   </span>
-                  <span className="text-[11px] font-sans text-gray-400 leading-relaxed">{g.text}</span>
-                </div>
-                {g.strategy && (
-                  <div className="text-[9px] font-mono text-gray-600 mt-0.5 pl-0.5">
-                    <span className="text-accent">→</span> {g.strategy}
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-sans text-gray-400 leading-relaxed">{g.text}</span>
+                    {g.strategy && (
+                      <div className="text-[10px] font-mono text-gray-400 mt-1">
+                        <span className="text-accent">→</span> {g.strategy}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </motion.div>
             ))}
           </div>
@@ -134,20 +139,27 @@ export const MatchBrief: React.FC<MatchBriefProps> = ({ evaluation }) => {
       )}
 
       {/* Expand toggle */}
-      {hiddenCount > 0 && !expanded && (
-        <motion.button
-          onClick={() => setExpanded(true)}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="group flex items-center gap-1.5 text-[9px] font-mono text-gray-500 mt-2 px-3 py-1.5 rounded-md border border-dashed border-white/8 hover:border-accent/30 hover:text-accent transition-colors duration-200 cursor-pointer"
-        >
-          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/5 group-hover:bg-accent/10 text-[8px] font-bold transition-colors duration-200">
-            +{hiddenCount}
-          </span>
-          more insights
-        </motion.button>
-      )}
+      {hiddenCount > 0 && !expanded && (() => {
+        const hiddenStrengths = Math.max(0, strengths.length - DEFAULT_VISIBLE);
+        const hiddenGaps = Math.max(0, gapItems.length - DEFAULT_VISIBLE);
+        const parts: string[] = [];
+        if (hiddenStrengths > 0) parts.push(`${hiddenStrengths} strength${hiddenStrengths > 1 ? 's' : ''}`);
+        if (hiddenGaps > 0) parts.push(`${hiddenGaps} gap${hiddenGaps > 1 ? 's' : ''}`);
+        return (
+          <motion.button
+            onClick={() => setExpanded(true)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="group flex items-center gap-1.5 text-[9px] font-mono text-gray-500 mt-2 px-3 py-1.5 rounded-md border border-dashed border-white/8 hover:border-accent/30 hover:text-accent transition-colors duration-200 cursor-pointer"
+          >
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/5 group-hover:bg-accent/10 text-[8px] font-bold transition-colors duration-200">
+              +{hiddenCount}
+            </span>
+            {parts.join(', ')}
+          </motion.button>
+        );
+      })()}
     </div>
   );
 };

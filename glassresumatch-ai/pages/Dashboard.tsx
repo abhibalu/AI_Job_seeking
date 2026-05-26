@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Terminal, ArrowRight, MoreHorizontal } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -287,7 +287,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => obs.disconnect();
   }, [hasMore]);
 
-  const { actionRequired, skip } = groupJobs(activeJobs);
+  // Stable sort: only re-sort when jobs are added/removed, not when a single
+  // job's evaluation updates in-place (which would shuffle the list and lose
+  // the user's scroll position).
+  const prevArIdsRef = useRef<string>('');
+  const sortedOrderRef = useRef<Map<string, number>>(new Map());
+
+  const { actionRequired, skip } = useMemo(() => {
+    const ar: JobWithEvaluation[] = [];
+    const sk: JobWithEvaluation[] = [];
+
+    for (const job of activeJobs) {
+      if (getVerdictType(job) === 'skip') sk.push(job);
+      else ar.push(job);
+    }
+
+    // Build a sorted-stable key from current actionRequired IDs
+    const arIdsKey = ar.map(j => j.id).sort().join(',');
+
+    if (arIdsKey !== prevArIdsRef.current) {
+      // Job set changed (new page loaded, verdict changed, job removed) — full re-sort
+      ar.sort(
+        (a, b) => (b.evaluation?.job_match_score ?? 0) - (a.evaluation?.job_match_score ?? 0)
+      );
+      const order = new Map<string, number>();
+      ar.forEach((j, i) => order.set(j.id, i));
+      sortedOrderRef.current = order;
+      prevArIdsRef.current = arIdsKey;
+    } else {
+      // Same set of jobs — preserve existing sort order
+      const order = sortedOrderRef.current;
+      ar.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    }
+
+    return { actionRequired: ar, skip: sk };
+  }, [activeJobs]);
 
   // Apply verdict filter
   const filteredActionRequired = verdictFilter.length === 0 ? actionRequired
@@ -439,11 +473,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </>
             )}
 
-            {/* Infinite scroll sentinel */}
+            {/* Infinite scroll sentinel + fallback load-more */}
             {hasMore && (
-              <div ref={sentinelRef} className="py-4 flex justify-center">
-                {loadingMore && (
+              <div ref={sentinelRef} className="py-4 flex flex-col items-center gap-2">
+                {loadingMore ? (
                   <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                ) : (
+                  <button
+                    onClick={loadMore}
+                    className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 hover:border-white/[0.12] transition-colors cursor-pointer"
+                  >
+                    Load more
+                  </button>
                 )}
               </div>
             )}

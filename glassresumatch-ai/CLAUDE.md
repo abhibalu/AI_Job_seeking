@@ -94,7 +94,11 @@ to record which CV version the user applied with (called from JobCard quick acti
 `tailorResume(jobId)` — now returns `{ task_id: string; message: string }` (background task, not
 the full tailored resume). Frontend tracks progress via SSE using the returned `task_id`.
 
-`cancelTask(taskId)` — `POST /api/tasks/{taskId}/cancel`. Stops a running tailoring pipeline at
+`evaluateJobAsync(jobId, force?)` — `POST /api/evaluations/{jobId}/async`. Starts async re-evaluation
+with per-stage SSE progress. Returns `{ task_id, message, job_id }`. Use `evaluateJob()` only for
+sync/batch contexts; prefer `evaluateJobAsync()` for user-initiated re-evaluation (ADR-0020).
+
+`cancelTask(taskId)` — `POST /api/tasks/{taskId}/cancel`. Stops a running tailoring or re-eval pipeline at
 the next node boundary.
 
 `getSchedulerStatus()` — `GET /api/scheduler`, returns `SchedulerStatus` with `scheduler_running: bool`,
@@ -135,15 +139,21 @@ them produces empty verdict blocks and misleading grouping.
 Within equal `matchScore`, APPLY DIRECT (`recommended_action === 'apply'`) sorts before TAILOR.
 Implemented in `utils/sort.ts` smart sort tier. Less friction = more urgent.
 
+**Stable sort**: `Dashboard.tsx` uses a `sortedOrderRef` + `useMemo` to preserve sort order when a
+single job's evaluation updates in-place (e.g., after re-eval). Without this, an in-place evaluation
+update would reshuffle the entire feed and lose the user's scroll position. The sort only re-runs when
+the set of job IDs in `actionRequired` changes (jobs added/removed), not when their scores update.
+
 ## Dashboard card quick actions (OotoCV rebuild)
 
 `Dashboard.tsx` renders four card formats. `TailorCard` and `ApplyDirectCard` both have hover-reveal
 quick action buttons.
 
 **TailorCard** (verdict: tailor) — two distinct props:
-- `onTailorStart()` — primary button ("Tailor CV" / "Review & Send"). Wired
-  to `handleTailorStart` in App.tsx, which checks `tailoring_status` first:
-  - `'ready'` → `getTailoredVersions(jobId)` then `navigate('/tailoring/:id')` (existing review)
+- `onTailorStart(jobId, opts?)` — primary button ("Tailor CV" / "Review & Send"). Wired
+  to `handleTailorStart` in App.tsx, which accepts `opts?: { force?: boolean }`:
+  - `'ready'` and `!opts?.force` → `getTailoredVersions(jobId)` then `navigate('/tailoring/:id')` (existing review)
+  - `'ready'` and `opts?.force` → starts fresh tailoring run (bypasses "already ready" guard; used by post-reeval CTA)
   - `'processing'` → toast "Already tailoring this job" (no duplicate run)
   - otherwise → `tailorResume(jobId)` returns `task_id` → sets `tailoringJob` + `tailoringTaskId` → TailoringStrip appears with SSE tracking
 - `onSkip()` — ghost "Skip" button. Wired to `handleSkip` (marks actioned, no API call).
@@ -197,39 +207,41 @@ catch { unmarkActioned(id); showToast({ onRetry: () => handleApply(id, cv) }); }
 - Handler refs are stable (`useRef`) — changing handlers never restarts the `EventSource`.
 - `useEffect` depends only on `taskId`; cleans up (`es.close()`) on unmount or `taskId` change.
 
+**Typed progress payload** (`SSEProgress`): `completed`, `total`, `failed?`, `stage?`, `path?`,
+`evaluation_snapshot?`, `resume_id?`. Exported from `useSSE.ts`. Also exports `EvaluationSnapshot`
+type (recommended_action, job_match_score, wit_line, verdict). Use these types — do not cast via `as any`.
+
 ## TailoringStrip (floating process card + SSE tracking)
 
 `TailoringStrip.tsx` is a floating process card that displays real pipeline progress via SSE and allows cancellation.
+
+**Props**: `job`, `taskId`, `onComplete`, `onCancel`. The `mode` prop was removed — TailoringStrip
+is now tailoring-only (re-evaluation no longer uses TailoringStrip; ADR-0021).
 
 **Layout**: Fixed positioned `bottom-6 left-1/2 -translate-x-1/2 z-50 w-[420px]` — floats centered above all content, no layout disruption.
 
 **Visual design**:
 - Top accent border: `border-t-2 border-accent` — draws the eye immediately.
 - Container: `bg-surface border border-white/10` — matches surface styling, no shadows/blur.
-- Job context line (top): `job.title · job.company_name` in `text-xs gray-500`, with "Stop Tailoring" button in top-right.
-- Pipeline stage track (middle): 6 dots (`queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`):
-  - Past stages: small filled accent dot
-  - Current stage: larger pulsing accent dot (`animate-pulse`)
-  - Future stages: dim `bg-white/15` dot
-- Stage message (bottom): Uses `TypewriterWaitState` with `key={stage}` to reset animation on each stage advance.
-  After animation completes within a stage, displays static text until next stage transition.
-  Maps `progress.stage` to user-facing messages:
-  `queued` → "Starting up…", `planning` → "Analyzing job requirements…",
-  `drafting` → "Tailoring your CV…", `critiquing` → "Reviewing changes…",
-  `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
+- Job context line (top): `job.title · job.company_name` in `text-xs gray-500`, with stop button in top-right.
+- Pipeline stage track (middle): `queued` → `planning` → `drafting` → `critiquing` → `revising` → `saving`
+  - Past stages: small filled accent dot, current: larger pulsing, future: dim `bg-white/15`
+- Stage message (bottom): TypewriterWaitState with `key={stage}` for animation reset.
+  Message map: `planning` → "Planning changes…", `drafting` → "Tailoring your CV…",
+  `critiquing` → "Reviewing changes…", `revising` → "Refining edits…", `saving` → "Saving your tailored CV…"
 
 **Behavior**:
 - Reads `progress.stage` from SSE `onProgress` events; updates dot track and resets typewriter.
 - On `run_complete` with `status !== 'cancelled'`: extracts `progress.resume_id` and calls
   `onComplete(jobId, resumeId)` for direct navigation to review page.
-- "Stop Tailoring" button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
-  Shows "Stopping…" while cancel is in-flight.
+- Stop button calls `onCancel()` (which calls `apiClient.cancelTask(taskId)` in App.tsx).
+  Shows "Stopping…" while cancel is in-flight. Stop button label: "Stop Tailoring".
 
 ## Toast rollback pattern
 
-`Toast` accepts optional `onRetry?: () => void`. When set, renders an underlined "Retry" button
-beside the dismiss `✕`. Use for any optimistic-update failure where the user should be able to
-retry the action in-place.
+`Toast` accepts optional `onRetry?: () => void` and `onUndo?: () => void`. When set, renders
+underlined "Retry" / "Undo" buttons beside the dismiss `✕`. Use `onRetry` for optimistic-update
+failures, `onUndo` for reversible destructive actions (e.g., Skip).
 
 **Error detail in toasts**: Never show generic "X failed" — always extract `err.message` (or
 `err.detail`) and include it so the user knows *why*. See agent-lessons #20.
@@ -401,11 +413,16 @@ Horizontal metadata row between tags and verdict block displays:
 
 Uses `job.posted_at` (via `formatTimeAgo()`), `job.applicants_count`, `job.salary_info`, `eval_.recruiter_email`.
 All fields null-safe with gap-3 separators. Metadata row only renders if at least one field is truthy.
+Salary uses `text-gray-300 font-semibold` for elevated scanning weight. Recruiter email is a `mailto:` link
+with accent color + hover underline for explicit link affordance.
 
 ### MatchBrief Progressive Disclosure (Theme C)
 
 - Default: shows first 3 strengths + 3 gaps (was 5+5 = 10 items)
-- If more items exist: shows "+N more" toggle to expand to full list (up to 5 each)
+- If more items exist: shows "+2 strengths, +1 gap" toggle (split counts, not aggregated)
+- Keyword matches (`req met`) use `border-semantic-green/35`, narrative strengths (`evidence`/`signal`) use `border-teal-400/35`
+- Notable gaps use `border-l-[3px] border-orange-400/50`, minor gaps use `border-l-2 border-semantic-amber/25`
+- Gap strategy text elevated to `text-[10px] text-gray-400` (matches description weight)
 - Removed signal dots section from MatchBrief (hero verdict block is the canonical signal; ADR-0007 already settled this)
 - Saves ~200px on average detail view, recovery button visible if expansion needed
 
@@ -424,14 +441,14 @@ Gains ~400px of high-IU content; matches TAILOR layout schema.
 Collapsible component (inline in JobDetail.tsx) provides progressive disclosure for lower-priority details.
 Shows only for non-SKIP verdicts. Sections:
 
-1. **Interview Prep** — `high_priority_topics` (topic + why + prep) and `questions_to_ask` from `eval_.interview_tips`
-   - Topics rendered in bordered boxes; questions as bullet list
-2. **ATS Keywords** — `ats_keywords` from parsed JD as inline pill badges
+1. **Interview Prep (N topics, M questions)** — `high_priority_topics` and `questions_to_ask` from `eval_.interview_tips`
+   - Topics rendered in bordered boxes; questions as bullet list; count shown in label
+2. **ATS Keywords (N)** — `ats_keywords` from parsed JD as inline pill badges; count in label
    - Tailor only (Apply Direct skips ATS signal)
-3. **Company** — Shows `applicants_count` when > 0
-   - Future: company_employees_count, company_description (needs JobDetail fetch per ADR-0015)
+3. **Competition (N applicants)** — Shows `applicants_count` when > 0; renamed from "Company" to match actual content
 
-Each collapsible is a lightweight header line (no rounded bg, no border, just a divider line) with ChevronDown icon for rotation animation.
+Each collapsible accepts optional `count` prop for information scent in closed state.
+Lightweight header line (no rounded bg, no border, just a divider line) with ChevronDown icon for rotation animation.
 
 ### Tag Redundancy Cleanup (Theme F)
 
@@ -445,9 +462,9 @@ All CTAs show loading text ("Tailoring…", "Applying…") and disable when in-f
 For `handleTailor` (async): set before call, clear in finally.
 For `handleApplyDirect`: set, call handler (opens tab), clear after ~1.5s timeout (parent is fire-and-forget).
 
-**CVDiff loading/error**: CVDiff component accepts optional `loading` and `error` props. Shows
-"Loading changes…" with animate-pulse when loading. Shows "Couldn't load changes" in red if error.
-Prevents silent failures from swallowed `.catch(() => {})` error handlers.
+**CVDiff loading/error**: CVDiff component accepts optional `loading`, `error`, and `onRetry` props. Shows
+"Loading changes…" with animate-pulse when loading. Shows "Couldn't load changes" in red with Retry button if error.
+Retry wired to `fetchChanges` callback extracted from the data-fetching effect.
 
 **Section headings**: "How to strengthen your CV" (formerly "What you'd actually do") aligns with actual
 data source: `resume_edits` from evaluation, not job requirements. See agent-lessons #1.
@@ -458,7 +475,25 @@ data source: `resume_edits` from evaluation, not job requirements. See agent-les
 **Removed CompanyIntel**: Deleted component and all usages. Company/location/posted-at data was
 duplicated from hero section. Added `eval_.summary` inline in verdict block (guarded against duplication with reason).
 
-**Skip button**: Always visible in footer for all verdicts.
+**Skip button**: Always visible in footer for all verdicts. Positioned left side of footer (separated from
+primary CTAs by flex-1 spacer). Shows success Toast with Undo action via `onUndoSkip` prop (calls
+`unmarkActioned` in App.tsx).
+
+**Verdict block badges**: `job.tailoring_status === 'ready'` shows "CV tailored ✓" (accent) in the
+verdict header. After a re-eval completes, "Retouch?" (amber) replaces it to signal staleness, with
+`title="Your tailored CV was based on the previous assessment"` tooltip.
+
+**Re-eval verdict block lifecycle** (ADR-0021):
+- `isReEvaling` → stage-aware overlay ("Analyzing job fit…" / "Determining path…" / "Re-parsing requirements…") using `reEvalStageMessage` map keyed by `reEvalProgress.stage`
+- `reEvalDone` (2s) → overlay shows "Assessment updated ✓"
+- After pulse: `reEvalFresh = true` → inline CTA strip appears below wit_line:
+  - **"Re-tailor →"** calls `handleVerdictClick()` which triggers `onTailorStart(jobId, { force: true })`
+  - **"Later"** sets `reEvalCtaDismissed = true` — hides CTA but preserves `reEvalFresh` badge and force-tailor click behavior
+- `reEvalCtaDismissed` resets to `false` on re-eval completion and on job change
+- Verdict block is clickable (`verdictClickable`) and shows `verdictHint` on hover; when `reEvalFresh && tailoring_status === 'ready'`, hint is always visible (opacity-100)
+
+**llmDisabled buttons**: When OpenRouter is disabled, Tailor CV / Re-evaluate / Override & Tailor buttons
+are truly `disabled` with a `title` tooltip explaining why — no opacity-40-but-clickable pattern.
 
 **Apply Direct button**: Removed flex-1 width. Added subtitle span: "Opens posting in new tab" in smaller text.
 

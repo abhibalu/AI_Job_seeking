@@ -50,6 +50,20 @@ Rationale: system prompt bloat inflates cost on every call with static content. 
 user prompt gives the model fidelity guidance exactly when it has the real input to compare against.
 See ADR-0006.
 
+## One-shot / few-shot example quality
+
+When embedding examples (one-shot or calibration anchors):
+1. **Internal consistency**: If an example has a header/comment stating a value (e.g., `score: 85`),
+   the JSON body must contain that exact value. Contradictory signals confuse calibration.
+2. **Full range coverage**: Calibration anchors should cover every scoring band — gaps in boundary
+   zones (e.g., 40–50) cause the most drift.
+3. **Non-empty grounding fields**: If a field exists to ground suggestions in approved content
+   (e.g., `approved_reference`), populate it in examples — otherwise the model learns to leave it blank.
+4. **No ambiguous overlap**: Example outputs should not place the same item in mutually exclusive
+   fields (e.g., a term in both `must_haves` and `nice_to_haves`, or a job title in `ats_keywords`).
+
+See lesson #25 in `docs/agent-lessons.md`.
+
 ## DO NOT rules
 
 Include explicit `DO NOT` rules when extraction fidelity matters. Examples:

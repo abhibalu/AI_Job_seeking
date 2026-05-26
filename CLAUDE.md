@@ -57,7 +57,7 @@ docker-compose -f docker-compose.langfuse.yml up -d  # Langfuse observability
 See `docs/agent-lessons.md` for recurring mistake patterns and fixes.
 
 ## Architecture decisions
-Recorded in `docs/decisions/`. ADR-0001 through ADR-0019 cover all major architectural shifts.
+Recorded in `docs/decisions/`. ADR-0001 through ADR-0021 cover all major architectural shifts.
 - ADR-0013: Application tracker uses `status_history JSONB` over a separate events table (single-user, bounded history, no join needed).
 - ADR-0014: Tailoring endpoint converted from sync to background task + SSE + cancel (reuses existing infra from ADR-0009).
 - ADR-0015: Google Docs export uses copy-and-fill path (copy base GDoc + replaceAllText) when `GOOGLE_BASE_RESUME_DOC_ID` is set, preserving formatting.
@@ -65,3 +65,5 @@ Recorded in `docs/decisions/`. ADR-0001 through ADR-0019 cover all major archite
 - ADR-0017: Structured logging with stdlib only (structlog removed); correlation IDs via `ContextVar` in `backend/log_context.py`; set at HTTP middleware + APScheduler worker entry points.
 - ADR-0018: GDoc export extended with `insertText` for additions (new skills/bullets); safety guards for apostrophe escaping and skills format mismatch.
 - ADR-0019: Service kill switches in `system_config` (OpenRouter, Apify, Google Docs toggles); `require_service()` guard on routes, `is_service_enabled()` check in workers.
+- ADR-0020: Async re-evaluation with per-stage SSE progress; `reeval_worker.py` wrapper steps through pipeline nodes emitting `save_task_status()` at each boundary.
+- ADR-0021: Re-evaluation is read-only (stops after JD parsing, total=3 stages); frontend shows CTA ("Re-tailor →" / "Later") rather than silently re-tailoring.

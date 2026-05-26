@@ -15,7 +15,7 @@ const STAGES = ['queued', 'planning', 'drafting', 'critiquing', 'revising', 'sav
 
 const stageMessages: Record<string, string> = {
   queued: 'Starting up…',
-  planning: 'Analyzing job requirements…',
+  planning: 'Planning changes…',
   drafting: 'Tailoring your CV…',
   critiquing: 'Reviewing changes…',
   revising: 'Refining edits…',
@@ -25,7 +25,7 @@ const stageMessages: Record<string, string> = {
 export const TailoringStrip: React.FC<TailoringStripProps> = ({
   job, taskId, onComplete, onCancel,
 }) => {
-  const [stage, setStage] = useState('queued');
+  const [stage, setStage] = useState<string>('queued');
   const [stopping, setStopping] = useState(false);
   const [typewriterDone, setTypewriterDone] = useState(false);
 
@@ -36,17 +36,17 @@ export const TailoringStrip: React.FC<TailoringStripProps> = ({
 
   useSSE(taskId, {
     onProgress: useCallback((event) => {
-      const s = (event as any).progress?.stage;
+      const s = event.progress?.stage;
       if (s) setStage(s);
     }, []),
     onRunComplete: useCallback((event) => {
       if (event.status === 'cancelled') return;
-      const resumeId = (event as any).progress?.resume_id;
+      const resumeId = event.progress?.resume_id;
       onComplete(job.id, resumeId);
     }, [job.id, onComplete]),
   });
 
-  const currentStageIndex = STAGES.indexOf(stage as typeof STAGES[number]);
+  const currentStageIndex = (STAGES as readonly string[]).indexOf(stage);
   const message = stageMessages[stage] || 'Processing…';
 
   const handleStop = () => {

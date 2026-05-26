@@ -18,6 +18,29 @@
   --animate-pulse-slow: pulse-slow 2.4s ease-in-out infinite;
   --animate-pulse-slow-delay-1: pulse-slow 2.4s ease-in-out 0.4s infinite;
   --animate-pulse-slow-delay-2: pulse-slow 2.4s ease-in-out 0.8s infinite;
+  --animate-verdict-pulse: verdict-pulse 0.7s ease-in-out 3;
+  --animate-fade-out: fade-out 2s ease-out forwards;
+}
+
+@keyframes verdict-pulse {
+  0%, 100% {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    border-color: var(--color-accent);
+  }
+}
+
+@keyframes fade-out {
+  0% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes pulse-slow {

@@ -223,5 +223,90 @@ class TestNodeSaveUsesUpdate(unittest.TestCase):
         self.assertIn("edits", kwargs["edit_plan"])
 
 
+# ─────────────────────────────────────────────────────────────────
+# 6.  run_tailoring_worker — placeholder + cancel + reaper-race
+# ─────────────────────────────────────────────────────────────────
+class TestRunTailoringWorker(unittest.TestCase):
+
+    # NOTE on patch paths: run_tailoring_worker does its imports inside the
+    # function body (existing pattern, not changed by this plan), so patches
+    # must target the source modules (agents.database / agents.tailoring_subgraph),
+    # not the api.routes.resumes namespace.
+    @patch("agents.database.mark_resume_cancelled")
+    @patch("agents.database.get_task_status")
+    @patch("agents.database.save_task_status")
+    @patch("agents.database.create_processing_placeholder")
+    @patch("agents.tailoring_subgraph.node_plan")
+    def test_worker_finally_marks_cancelled_on_user_cancel(
+        self, mock_plan, mock_create, mock_save_task, mock_get_task, mock_mark_cancelled,
+    ):
+        """T6: When the task is cancelled mid-pipeline, the finally block
+        calls mark_resume_cancelled on the placeholder resume row."""
+        from api.routes.resumes import run_tailoring_worker
+
+        mock_create.return_value = "r-placeholder"
+        # First get_task_status (in is_cancelled) returns 'cancelled' so
+        # the worker bails out after the very first stage_status write.
+        mock_get_task.return_value = {"status": "cancelled"}
+        mock_plan.return_value = {}  # never reached
+
+        run_tailoring_worker(
+            task_id="t-1",
+            job_id="j-1",
+            initial_state={"job_id": "j-1", "base_resume": {}, "approved_skills": ""},
+        )
+
+        mock_mark_cancelled.assert_called_once_with("r-placeholder")
+
+    @patch("agents.database.mark_resume_cancelled")
+    @patch("agents.database.get_task_status")
+    @patch("agents.database.save_task_status")
+    @patch("agents.database.create_processing_placeholder")
+    @patch("agents.tailoring_subgraph.node_save")
+    @patch("agents.tailoring_subgraph.node_critique")
+    @patch("agents.tailoring_subgraph.route_critique")
+    @patch("agents.tailoring_subgraph.node_validate")
+    @patch("agents.tailoring_subgraph.route_validate")
+    @patch("agents.tailoring_subgraph.node_draft")
+    @patch("agents.tailoring_subgraph.node_plan")
+    def test_worker_reflects_reaper_race_in_task_status(
+        self,
+        mock_plan, mock_draft, mock_route_validate, mock_validate,
+        mock_route_critique, mock_critique, mock_save_node,
+        mock_create, mock_save_task, mock_get_task, mock_mark_cancelled,
+    ):
+        """T10: If complete_tailored_resume returned False (signalled via
+        node_save returning save_applied=False), the worker writes task
+        status='cancelled', NOT 'completed'.
+        """
+        from api.routes.resumes import run_tailoring_worker
+
+        mock_create.return_value = "r-placeholder"
+        mock_get_task.return_value = {"status": "running"}  # never cancelled
+        mock_plan.return_value = {}
+        mock_draft.return_value = {}
+        mock_validate.return_value = {}
+        mock_route_validate.return_value = "ok"
+        mock_critique.return_value = {}
+        mock_route_critique.return_value = "ok"
+        # node_save reports the CAS no-op:
+        mock_save_node.return_value = {
+            "final_resume_id": "r-placeholder",
+            "save_applied": False,
+            "status": "cancelled",
+        }
+
+        run_tailoring_worker(
+            task_id="t-2",
+            job_id="j-2",
+            initial_state={"job_id": "j-2", "base_resume": {}, "approved_skills": ""},
+        )
+
+        # Last save_task_status call must be 'cancelled', not 'completed'.
+        statuses = [c.args[1] for c in mock_save_task.call_args_list]
+        self.assertIn("cancelled", statuses)
+        self.assertNotIn("completed", statuses)
+
+
 if __name__ == "__main__":
     unittest.main()

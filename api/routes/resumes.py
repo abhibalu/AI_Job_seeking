@@ -22,7 +22,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 from agents.database import (
     get_master_resume as get_db_master_resume,
     save_resume,
-    save_tailored_resume,
     get_tailored_resume,
     get_tailored_resumes,
     update_tailored_resume_status,
@@ -292,115 +291,176 @@ async def import_from_google_doc(request: GDocImportRequest, background_tasks: B
 
 
 def run_tailoring_worker(task_id: str, job_id: str, initial_state: dict):
-    """Background worker that runs tailoring pipeline with per-stage progress and cancellation."""
-    from agents.database import save_task_status, get_task_status
+    """Background worker that runs tailoring pipeline with per-stage
+    progress, cancellation, and placeholder-row lifecycle.
+
+    Creates a placeholder resumes row at entry (so v_jobs_enriched shows
+    'processing' immediately). On user cancel (tasks.status='cancelled'),
+    the finally block marks the resume row cancelled via CAS, so the UI
+    flips to 'cancelled' at zero latency rather than waiting for the
+    next worker boundary (or up to 15m for the reaper)."""
+    from agents.database import (
+        save_task_status, get_task_status,
+        create_processing_placeholder, mark_resume_cancelled,
+    )
     from agents.tailoring_subgraph import (
         node_plan, node_draft, node_validate, node_critique, node_save,
         route_validate, route_critique,
     )
 
-    def is_cancelled():
-        task = get_task_status(task_id)
-        return task and task.get("status") == "cancelled"
-
+    resume_id = create_processing_placeholder(job_id)
     state = dict(initial_state)
-    # Ensure required fields
+    state["target_resume_id"] = resume_id
     state.setdefault("errors", [])
     state.setdefault("status", "queued")
     state.setdefault("draft_resume", {})
     state.setdefault("final_resume_id", "")
+    state.setdefault("save_applied", False)
+
+    def progress(completed: int, stage: str, **extra) -> dict:
+        """Threads job_id + resume_id into every progress payload so the
+        cancel endpoint can route back to the in-flight resume row."""
+        return {
+            "completed": completed,
+            "total": 4,
+            "stage": stage,
+            "job_id": job_id,
+            "resume_id": resume_id,
+            **extra,
+        }
+
+    def is_cancelled():
+        task = get_task_status(task_id)
+        return task and task.get("status") == "cancelled"
 
     try:
         # --- Stage 1: Planning ---
-        save_task_status(task_id, "running", {"completed": 0, "total": 4, "stage": "planning"})
+        save_task_status(task_id, "running", progress(0, "planning"))
         if is_cancelled(): return
 
         result = node_plan(state)
         state.update(result)
         if state.get("errors"):
-            save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "planning"}, error="; ".join(state["errors"]))
+            save_task_status(task_id, "failed", progress(0, "planning"),
+                             error="; ".join(state["errors"]))
             return
 
         # --- Stage 2: Drafting + Validation (may loop) ---
-        save_task_status(task_id, "running", {"completed": 1, "total": 4, "stage": "drafting"})
+        save_task_status(task_id, "running", progress(1, "drafting"))
         if is_cancelled(): return
 
         result = node_draft(state)
         state.update(result)
         if state.get("errors"):
-            save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state["errors"]))
+            save_task_status(task_id, "failed", progress(1, "drafting"),
+                             error="; ".join(state["errors"]))
             return
 
-        # Validate
         result = node_validate(state)
         state.update(result)
 
-        # Route after validation — may loop back to draft
         route = route_validate(state)
         while route == "revise":
             if is_cancelled(): return
             result = node_draft(state)
             state.update(result)
             if state.get("errors"):
-                save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state["errors"]))
+                save_task_status(task_id, "failed", progress(1, "drafting"),
+                                 error="; ".join(state["errors"]))
                 return
             result = node_validate(state)
             state.update(result)
             route = route_validate(state)
 
         if route == "error":
-            save_task_status(task_id, "failed", {"completed": 1, "total": 4, "stage": "drafting"}, error="; ".join(state.get("errors", ["Unknown error"])))
+            save_task_status(task_id, "failed", progress(1, "drafting"),
+                             error="; ".join(state.get("errors", ["Unknown error"])))
             return
 
         # --- Stage 3: Critiquing (may loop back to draft) ---
-        save_task_status(task_id, "running", {"completed": 2, "total": 4, "stage": "critiquing"})
+        save_task_status(task_id, "running", progress(2, "critiquing"))
         if is_cancelled(): return
 
         result = node_critique(state)
         state.update(result)
         if state.get("errors"):
-            save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state["errors"]))
+            save_task_status(task_id, "failed", progress(2, "critiquing"),
+                             error="; ".join(state["errors"]))
             return
 
-        # Route after critique — may loop back
         route = route_critique(state)
         while route == "revise":
             if is_cancelled(): return
-            save_task_status(task_id, "running", {"completed": 2, "total": 4, "stage": "revising"})
+            save_task_status(task_id, "running", progress(2, "revising"))
             result = node_draft(state)
             state.update(result)
             if state.get("errors"):
-                save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "revising"}, error="; ".join(state["errors"]))
+                save_task_status(task_id, "failed", progress(2, "revising"),
+                                 error="; ".join(state["errors"]))
                 return
             result = node_validate(state)
             state.update(result)
             result = node_critique(state)
             state.update(result)
             if state.get("errors"):
-                save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state["errors"]))
+                save_task_status(task_id, "failed", progress(2, "critiquing"),
+                                 error="; ".join(state["errors"]))
                 return
             route = route_critique(state)
 
         if route == "error":
-            save_task_status(task_id, "failed", {"completed": 2, "total": 4, "stage": "critiquing"}, error="; ".join(state.get("errors", ["Unknown error"])))
+            save_task_status(task_id, "failed", progress(2, "critiquing"),
+                             error="; ".join(state.get("errors", ["Unknown error"])))
             return
 
         # --- Stage 4: Saving ---
-        save_task_status(task_id, "running", {"completed": 3, "total": 4, "stage": "saving"})
+        save_task_status(task_id, "running", progress(3, "saving"))
         if is_cancelled(): return
 
         result = node_save(state)
         state.update(result)
         if state.get("errors"):
-            save_task_status(task_id, "failed", {"completed": 3, "total": 4, "stage": "saving"}, error="; ".join(state["errors"]))
+            save_task_status(task_id, "failed", progress(3, "saving"),
+                             error="; ".join(state["errors"]))
+            return
+
+        # T10: reaper-race or user-cancel race during save → not 'completed'
+        if not state.get("save_applied", False):
+            save_task_status(
+                task_id, "cancelled",
+                progress(3, "saving"),
+                error="row reaped or cancelled mid-save",
+            )
             return
 
         record_id = state.get("final_resume_id", "")
-        save_task_status(task_id, "completed", {"completed": 4, "total": 4, "stage": "done", "resume_id": record_id})
+        save_task_status(task_id, "completed",
+                         progress(4, "done", resume_id=record_id))
 
     except Exception as e:
-        logger.exception("Tailoring worker unhandled exception", extra={"task_id": task_id, "job_id": job_id})
-        save_task_status(task_id, "failed", {"completed": 0, "total": 4, "stage": "error"}, error=str(e))
+        logger.exception("Tailoring worker unhandled exception",
+                         extra={"task_id": task_id, "job_id": job_id, "resume_id": resume_id})
+        save_task_status(task_id, "failed",
+                         progress(0, "error"), error=str(e))
+        # Do NOT mark resume cancelled on exception — exceptions are
+        # involuntary; reaper handles the row after the timeout.
+    finally:
+        # T6: user cancel → immediately flip resume row to cancelled.
+        if is_cancelled():
+            try:
+                if mark_resume_cancelled(resume_id):
+                    logger.info(
+                        "tailoring.cancelled_by_user",
+                        extra={
+                            "task_id": task_id, "job_id": job_id,
+                            "resume_id": resume_id,
+                        },
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to mark resume cancelled in finally",
+                    extra={"resume_id": resume_id},
+                )
 
 
 @router.post("/tailor/{job_id}")

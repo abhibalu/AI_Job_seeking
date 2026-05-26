@@ -98,5 +98,33 @@ class TestCreateProcessingPlaceholder(unittest.TestCase):
         self.assertIsNotNone(inserted["processing_started_at"])
 
 
+# ─────────────────────────────────────────────────────────────────
+# 3.  mark_resume_cancelled — CAS UPDATE behavior
+# ─────────────────────────────────────────────────────────────────
+class TestMarkResumeCancelled(unittest.TestCase):
+
+    @patch("agents.database._get_supabase")
+    def test_returns_true_when_row_was_processing(self, mock_get_supabase):
+        from agents.database import mark_resume_cancelled
+
+        chain = _mock_supabase_chain(return_data=[{"id": "r1"}])
+        mock_get_supabase.return_value.table.return_value = chain
+
+        self.assertTrue(mark_resume_cancelled("r1"))
+
+        update_kwargs = chain.update.call_args[0][0]
+        self.assertEqual(update_kwargs["tailoring_status"], "cancelled")
+        self.assertIn("updated_at", update_kwargs)
+
+    @patch("agents.database._get_supabase")
+    def test_returns_false_on_no_op(self, mock_get_supabase):
+        from agents.database import mark_resume_cancelled
+
+        chain = _mock_supabase_chain(return_data=[])
+        mock_get_supabase.return_value.table.return_value = chain
+
+        self.assertFalse(mark_resume_cancelled("r1"))
+
+
 if __name__ == "__main__":
     unittest.main()

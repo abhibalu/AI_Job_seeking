@@ -471,6 +471,30 @@ def complete_tailored_resume(
     return True
 
 
+def mark_resume_cancelled(resume_id: str) -> bool:
+    """CAS UPDATE: transition a processing resumes row to cancelled.
+
+    Idempotent — concurrent callers (worker `finally`, cancel endpoint,
+    reaper) safely no-op once one wins.
+
+    Returns:
+        True if THIS call won the CAS; False if the row was already
+        terminal (cancelled / ready / needs_review).
+    """
+    client = _get_supabase()
+    result = (
+        client.table("resumes")
+        .update({
+            "tailoring_status": "cancelled",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", resume_id)
+        .eq("tailoring_status", "processing")
+        .execute()
+    )
+    return bool(result.data)
+
+
 def _save_resume_changes(resume_id: str, job_id: str, edit_plan: dict) -> None:
     """Write per-change rows to resume_changes table from edit_plan edits.
 

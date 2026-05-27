@@ -18,6 +18,13 @@ entirely (e.g. in CI).
 
 Cron format: 5-field `'minute hour day month day_of_week'` (standard cron, not extended).
 
+**Phase 1 Cluster A job (ADR-0022):** `reap_stale_tailoring_runs`
+sweeps `resumes` rows stuck in `tailoring_status='processing'` past
+`system_config['tailoring_processing_timeout_minutes']` (default 15).
+Interval 5 minutes; `coalesce=True`, `max_instances=1`. Per ADR-0017
+the APScheduler thread doesn't inherit contextvars, so the reaper sets
+`set_correlation_id("reaper")` at entry and clears it in `finally`.
+
 ## Worker pattern
 
 All workers check the relevant service kill switch before starting work:

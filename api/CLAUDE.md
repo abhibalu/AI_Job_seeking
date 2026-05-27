@@ -50,6 +50,12 @@ LLM call is wasted.
 rather than polling. `GET /api/tasks/{task_id}` remains for non-SSE callers but is no longer used
 by the main UI.
 
+**Progress payload convention (ADR-0022):** the tailoring worker writes
+`job_id` and `resume_id` into every `save_task_status(task_id, status, progress)`
+call's `progress` dict. The cancel endpoint reads `progress.resume_id` to
+mark the in-flight resume row cancelled at zero UI latency. New workers
+that own a resumes row should follow the same convention.
+
 ## SSE endpoint (`api/routes/events.py`)
 
 `GET /api/events/stream?task_id=<id>` — `StreamingResponse` with `text/event-stream`.

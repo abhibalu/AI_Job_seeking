@@ -120,6 +120,25 @@ Pass `gdoc_url` when saving a master resume sourced from Google Docs — it is s
 `gdoc_url` column on that row. For tailored resumes, `gdoc_url` holds the *export* URL (set
 separately by `update_gdoc_url(resume_id, url)`). See ADR-0016 for dual-use details.
 
+## Tailoring lifecycle helpers (ADR-0022)
+
+`save_tailored_resume` is REMOVED — calling it raises `NotImplementedError`.
+The tailoring lifecycle is now three helpers:
+
+| Helper | When | Returns |
+|--------|------|---------|
+| `create_processing_placeholder(job_id) -> resume_id` | Worker entry (before subgraph) | Placeholder row id |
+| `complete_tailored_resume(resume_id, version, content, status, edit_plan) -> bool` | `node_save` at end-of-pipeline | True on CAS apply, False on no-op (reaper/cancel race) |
+| `mark_resume_cancelled(resume_id) -> bool` | Cancel endpoint, worker `finally`, reaper | True if THIS call won the CAS |
+
+All three use CAS predicate `WHERE tailoring_status = 'processing'` so the
+three writers (worker save, user cancel, reaper sweep) interleave safely.
+
+`TailoringState` has two required new fields: `target_resume_id` (set by the
+worker at entry) and `save_applied` (set by `node_save` from the CAS UPDATE
+return value). The worker reads `state["save_applied"]` to decide whether
+the task ended in `completed` or `cancelled`.
+
 ## `gdoc_url` column — dual use by row type
 
 | Row type (`status`) | `gdoc_url` meaning |

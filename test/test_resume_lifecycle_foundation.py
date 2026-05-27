@@ -419,5 +419,72 @@ class TestTailoringReaper(unittest.TestCase):
         reap_stale_tailoring_runs()
 
 
+# ─────────────────────────────────────────────────────────────────
+# 9.  Integration tests (real Supabase) — skipped when env unset
+# ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+    os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_KEY"),
+    "Supabase env vars not set — skipping integration tests",
+)
+class TestPhase1Integration(unittest.TestCase):
+    """T7, T8, T9: real-DB checks. Requires migrations 016-020 applied
+    against the target Supabase project."""
+
+    def setUp(self):
+        from agents.database import _get_supabase
+        self.client = _get_supabase()
+
+    def test_status_check_rejects_invalid_value(self):
+        """T7: DB CHECK rejects status outside the allowed vocabulary."""
+        from postgrest.exceptions import APIError
+        import uuid
+
+        bad = {
+            "id": str(uuid.uuid4()),
+            "name": "T7 bad status",
+            "content": {},
+            "status": "definitely-not-a-real-status",
+        }
+        with self.assertRaises(APIError):
+            self.client.table("resumes").insert(bad).execute()
+
+    def test_master_coupling_check_rejects(self):
+        """T8: cannot set job_id on a master row, nor status='master' on
+        a row with a non-null job_id."""
+        from postgrest.exceptions import APIError
+        import uuid
+
+        bad = {
+            "id": str(uuid.uuid4()),
+            "name": "T8 master with job_id",
+            "content": {},
+            "status": "master",
+            "job_id": "some-job",
+            "tailoring_status": "not_started",
+        }
+        with self.assertRaises(APIError):
+            self.client.table("resumes").insert(bad).execute()
+
+    def test_preflight_audit_query_succeeds(self):
+        """T9: queries in 016_phase1_preflight_audit.sql parse and run.
+
+        We execute the equivalent SELECTs through the Supabase client and
+        confirm both return rows (or empty results) without raising.
+        """
+        r1 = self.client.table("resumes").select("status").execute()
+        self.assertIsNotNone(r1.data)
+
+        r2 = (
+            self.client.table("resumes")
+            .select("id, status, tailoring_status, job_id")
+            .eq("status", "master")
+            .execute()
+        )
+        # Any master row must already satisfy the coupling invariant.
+        for row in r2.data or []:
+            self.assertEqual(row.get("tailoring_status"), "not_started")
+            self.assertIsNone(row.get("job_id"))
+
+
 if __name__ == "__main__":
     unittest.main()

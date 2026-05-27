@@ -345,5 +345,79 @@ class TestCancelEndpoint(unittest.TestCase):
         mock_mark_cancelled.assert_not_called()
 
 
+# ─────────────────────────────────────────────────────────────────
+# 8.  reap_stale_tailoring_runs — sweep behavior
+# ─────────────────────────────────────────────────────────────────
+class TestTailoringReaper(unittest.TestCase):
+
+    @patch("services.scheduler.set_correlation_id")
+    @patch("services.scheduler.get_system_config")
+    @patch("services.scheduler._get_supabase")
+    def test_reaper_sweeps_stale_rows(self, mock_get_supabase, mock_cfg, _mock_corr):
+        """T3: WHEN processing_started_at < now() - timeout, row is
+        updated to tailoring_status='cancelled'."""
+        from services.scheduler import reap_stale_tailoring_runs
+
+        mock_cfg.return_value = "15"
+        chain = _mock_supabase_chain(return_data=[{"id": "r1"}, {"id": "r2"}])
+        mock_get_supabase.return_value.table.return_value = chain
+
+        reap_stale_tailoring_runs()
+
+        update_kwargs = chain.update.call_args[0][0]
+        self.assertEqual(update_kwargs["tailoring_status"], "cancelled")
+        chain.eq.assert_any_call("tailoring_status", "processing")
+        # Verify a .lt() filter is applied on processing_started_at.
+        lt_calls = [c.args for c in chain.lt.call_args_list]
+        self.assertTrue(
+            any(c[0] == "processing_started_at" for c in lt_calls),
+            "Expected .lt('processing_started_at', threshold) in builder chain",
+        )
+
+    @patch("services.scheduler.set_correlation_id")
+    @patch("services.scheduler.get_system_config")
+    @patch("services.scheduler._get_supabase")
+    def test_reaper_default_timeout_when_config_missing(
+        self, mock_get_supabase, mock_cfg, _mock_corr,
+    ):
+        """T4 part 1: When system_config is empty, reaper falls back to
+        15 minutes — verified by checking the .lt() threshold is roughly
+        15m ago (within tolerance)."""
+        from services.scheduler import reap_stale_tailoring_runs
+
+        mock_cfg.return_value = None
+        chain = _mock_supabase_chain(return_data=[])
+        mock_get_supabase.return_value.table.return_value = chain
+
+        reap_stale_tailoring_runs()
+
+        # Pull the threshold passed to .lt() and check it is ~15m in past.
+        lt_args = chain.lt.call_args[0]
+        self.assertEqual(lt_args[0], "processing_started_at")
+        threshold_iso = lt_args[1]
+        threshold = datetime.fromisoformat(threshold_iso)
+        now = datetime.now(timezone.utc)
+        delta = now - threshold
+        self.assertGreater(delta.total_seconds(), 14 * 60)
+        self.assertLess(delta.total_seconds(), 16 * 60)
+
+    @patch("services.scheduler.set_correlation_id")
+    @patch("services.scheduler.get_system_config")
+    @patch("services.scheduler._get_supabase")
+    def test_reaper_invalid_config_falls_back_to_default(
+        self, mock_get_supabase, mock_cfg, _mock_corr,
+    ):
+        """T4 part 2: Garbage in system_config doesn't crash the reaper —
+        it warns and uses the 15-minute default."""
+        from services.scheduler import reap_stale_tailoring_runs
+
+        mock_cfg.return_value = "not-a-number"
+        chain = _mock_supabase_chain(return_data=[])
+        mock_get_supabase.return_value.table.return_value = chain
+
+        # Should not raise.
+        reap_stale_tailoring_runs()
+
+
 if __name__ == "__main__":
     unittest.main()

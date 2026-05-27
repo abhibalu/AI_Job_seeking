@@ -21,6 +21,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from agents.database import get_system_config, _get_supabase
+from backend.log_context import set_correlation_id
 from backend.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,53 @@ def _build_trigger(cron_expr: str, interval_hours: int, label: str):
     return IntervalTrigger(hours=interval_hours)
 
 
+def reap_stale_tailoring_runs():
+    """Sweep resumes rows stuck in tailoring_status='processing'.
+
+    Timeout is operator-tunable via system_config[
+    'tailoring_processing_timeout_minutes'] (default 15). Job runs every
+    5 minutes (configured in start_scheduler()). Worst-case wasted-LLM
+    window: 19m59s (timeout + interval).
+
+    Per ADR-0017 the APScheduler thread does not inherit contextvars,
+    so we set correlation_id explicitly at entry."""
+    from datetime import datetime, timedelta, timezone
+
+    set_correlation_id("reaper")
+    try:
+        timeout_min = 15
+        raw = get_system_config("tailoring_processing_timeout_minutes")
+        if raw:
+            try:
+                timeout_min = int(raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "reaper.invalid_timeout_config",
+                    extra={"raw_value": raw, "default_used": timeout_min},
+                )
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=timeout_min)
+
+        client = _get_supabase()
+        result = (
+            client.table("resumes")
+            .update({
+                "tailoring_status": "cancelled",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("tailoring_status", "processing")
+            .lt("processing_started_at", threshold.isoformat())
+            .execute()
+        )
+        reaped = len(result.data or [])
+        if reaped:
+            logger.warning(
+                "reaper.cancelled_stale_processing",
+                extra={"count": reaped, "timeout_minutes": timeout_min},
+            )
+    finally:
+        set_correlation_id(None)
+
+
 def start_scheduler() -> None:
     """Start the background scheduler and register jobs. Called from FastAPI startup."""
     if not settings.SCHEDULER_ENABLED:
@@ -94,6 +143,16 @@ def start_scheduler() -> None:
         trigger=_build_trigger(settings.EVAL_CRON, settings.EVAL_INTERVAL_HOURS, "EvalWorker"),
         id="eval_worker",
         name="Job Evaluator",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        reap_stale_tailoring_runs,
+        trigger=IntervalTrigger(minutes=5),
+        id="reap_stale_tailoring_runs",
+        name="Tailoring Reaper",
+        coalesce=True,
+        max_instances=1,
         replace_existing=True,
     )
 

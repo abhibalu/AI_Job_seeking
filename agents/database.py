@@ -5,7 +5,7 @@ Uses Supabase (PostgreSQL) as the backend.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.settings import settings
@@ -348,13 +348,68 @@ def get_master_resume() -> dict | None:
 # TAILORED RESUME FUNCTIONS
 # ============================================
 
-def save_tailored_resume(job_id: str, version: int, content: dict, status: str = "pending", edit_plan: dict = None) -> str:
-    """Save a tailored resume (wrapper around save_resume), optionally with edit plan.
+def save_tailored_resume(*args, **kwargs):
+    """REMOVED in Phase 1 Cluster A (ADR-0022).
 
-    Also writes normalised resume_changes rows (ADR-0010) so the OotoCV review UI
-    can show per-change Accept / Reject / Keep original controls.
+    The old INSERT-at-end model has been replaced by:
+      create_processing_placeholder(job_id) -> resume_id      (at worker entry)
+      complete_tailored_resume(resume_id, ...)                (at node_save)
+      mark_resume_cancelled(resume_id)                        (cancel/reaper)
+
+    This shim raises NotImplementedError so any straggling call site is
+    caught at runtime instead of silently double-INSERTing a tailored row.
     """
-    # Map resume status to tailoring_status
+    raise NotImplementedError(
+        "save_tailored_resume was split into create_processing_placeholder + "
+        "complete_tailored_resume in Phase 1 Cluster A (ADR-0022). "
+        "Call sites must thread target_resume_id through TailoringState."
+    )
+
+
+def create_processing_placeholder(job_id: str) -> str:
+    """INSERT a placeholder resumes row at tailoring worker entry.
+
+    The row is created with tailoring_status='processing',
+    processing_started_at=now(), and an empty content={} which
+    complete_tailored_resume() fills in at end-of-pipeline.
+
+    Returns:
+        resume_id (UUID string) of the newly-created placeholder row.
+    """
+    import uuid
+    record_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    client = _get_supabase()
+    client.table("resumes").insert({
+        "id": record_id,
+        "name": "Tailored Resume (in progress)",
+        "content": {},
+        "status": "pending",
+        "job_id": job_id,
+        "tailoring_status": "processing",
+        "processing_started_at": now_iso,
+        "updated_at": now_iso,
+    }).execute()
+    return record_id
+
+
+def complete_tailored_resume(
+    resume_id: str,
+    version: int,
+    content: dict,
+    status: str = "pending",
+    edit_plan: dict | None = None,
+) -> bool:
+    """CAS UPDATE a placeholder resumes row to its final tailored content.
+
+    Predicate: WHERE id = resume_id AND tailoring_status = 'processing'.
+    On zero rows updated, returns False and does NOT insert resume_changes
+    (avoids orphans against a row already cancelled by the reaper or user).
+
+    Returns:
+        True if the UPDATE applied; False on CAS no-op.
+    """
     tailoring_status_map = {
         "pending": "ready",
         "needs_review": "needs_review",
@@ -362,30 +417,60 @@ def save_tailored_resume(job_id: str, version: int, content: dict, status: str =
         "rejected": "ready",
     }
 
-    record_id = save_resume(
-        content=content,
-        name=f"Tailored Resume V{version}",
-        is_master=False,
-        status=status,
-        job_id=job_id,
-        version=version
+    update = {
+        "name": f"Tailored Resume V{version}",
+        "content": content,
+        "status": status,
+        "version": version,
+        "tailoring_status": tailoring_status_map.get(status, "ready"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if edit_plan is not None:
+        update["edit_plan"] = edit_plan
+
+    client = _get_supabase()
+    result = (
+        client.table("resumes")
+        .update(update)
+        .eq("id", resume_id)
+        .eq("tailoring_status", "processing")
+        .execute()
     )
+    if not result.data:
+        logger.warning(
+            "complete_tailored_resume.no_op",
+            extra={"resume_id": resume_id, "reason": "row not in processing state"},
+        )
+        return False
 
-    # Store edit plan + derived tailoring_status
     if edit_plan:
-        try:
-            client = _get_supabase()
-            client.table("resumes").update({
-                "edit_plan": edit_plan,
-                "tailoring_status": tailoring_status_map.get(status, "ready"),
-            }).eq("id", record_id).execute()
-        except Exception as e:
-            logger.warning("Failed to save edit_plan for resume %s: %s", record_id, e, exc_info=True)
+        job_id = result.data[0].get("job_id")
+        _save_resume_changes(resume_id, job_id, edit_plan)
+    return True
 
-        # Write normalised resume_changes rows (ADR-0010)
-        _save_resume_changes(record_id, job_id, edit_plan)
 
-    return record_id
+def mark_resume_cancelled(resume_id: str) -> bool:
+    """CAS UPDATE: transition a processing resumes row to cancelled.
+
+    Idempotent — concurrent callers (worker `finally`, cancel endpoint,
+    reaper) safely no-op once one wins.
+
+    Returns:
+        True if THIS call won the CAS; False if the row was already
+        terminal (cancelled / ready / needs_review).
+    """
+    client = _get_supabase()
+    result = (
+        client.table("resumes")
+        .update({
+            "tailoring_status": "cancelled",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", resume_id)
+        .eq("tailoring_status", "processing")
+        .execute()
+    )
+    return bool(result.data)
 
 
 def _save_resume_changes(resume_id: str, job_id: str, edit_plan: dict) -> None:

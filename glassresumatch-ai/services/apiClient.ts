@@ -330,6 +330,80 @@ class ApiClient {
     async getSchedulerStatus() {
         return this.request<SchedulerStatus>('/api/scheduler');
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // OotoCV phase 6 — runs, pipeline config, system status, roast,
+    // change feedback (ADRs 0023–0025)
+    // ─────────────────────────────────────────────────────────────
+
+    /** Recent runs with per-verdict aggregated counts. */
+    async getRuns(limit: number = 50) {
+        return this.request<Run[]>(`/api/runs?limit=${limit}`);
+    }
+
+    /** Single pipeline_runs row by id. */
+    async getRun(runId: string) {
+        return this.request<{
+            id: string;
+            run_type: string;
+            status: string;
+            started_at: string;
+            finished_at: string | null;
+            jobs_found: number;
+            jobs_processed: number;
+            jobs_skipped: number;
+            error_detail: string | null;
+            metadata: Record<string, unknown> | null;
+        }>(`/api/runs/${runId}`);
+    }
+
+    /** Per-stage pipeline mode (auto/manual) + auto_send_threshold. */
+    async getPipelineConfig() {
+        return this.request<PipelineConfig>('/api/pipeline/config');
+    }
+
+    /** Partial update; pass only the keys you want to change. */
+    async updatePipelineConfig(update: Partial<PipelineConfig>) {
+        return this.request<PipelineConfig>('/api/pipeline/config', {
+            method: 'PATCH',
+            body: JSON.stringify(update),
+        });
+    }
+
+    /** Cron sidebar pulse feed (cron_state + next_run_at + last_error). */
+    async getSystemStatus() {
+        return this.request<SystemStatus>('/api/system/status');
+    }
+
+    /**
+     * Record a reject feedback chip on a change and trigger regeneration.
+     * Backend caps regeneration_count at 2 (R8); returns 409 at the cap so
+     * the caller can fall back to "edit manually". 422 on an unknown chip.
+     */
+    async submitChangeFeedback(
+        resumeId: string,
+        changeId: string,
+        feedbackType: FeedbackChip,
+    ) {
+        return this.request<ResumeChange>(
+            `/api/resumes/${resumeId}/changes/${changeId}/feedback`,
+            {
+                method: 'POST',
+                body: JSON.stringify({ feedback_type: feedbackType }),
+            },
+        );
+    }
+
+    /**
+     * Transient resume roast — LLM-only, no DB writes. Backend defaults to
+     * the master resume; `resumeId` is accepted for forward-compat.
+     */
+    async roastResume(resumeId?: string) {
+        return this.request<RoastResponse>('/api/resumes/roast', {
+            method: 'POST',
+            body: JSON.stringify({ resume_id: resumeId ?? null }),
+        });
+    }
 }
 
 // Types matching backend schemas
@@ -348,6 +422,10 @@ export interface Job {
     description_html?: string | null;
     // OotoCV: tailoring pipeline state (drives button copy and card verdict)
     tailoring_status?: 'not_started' | 'processing' | 'ready' | 'cancelled' | 'needs_review' | null;
+    // OotoCV phase 6: pipeline_runs.id this job belongs to. NULL for legacy
+    // jobs imported before run-linking (ADR-0025); UI groups those under a
+    // "Pre-runs" bucket in the feed.
+    run_id?: string | null;
 }
 
 export interface JobDetail extends Job {
@@ -387,6 +465,16 @@ export interface InterviewTips {
     questions_to_ask: string[];
 }
 
+// 4-way OotoCV verdict (ADR-0023). The legacy 'apply' value is retained so
+// historical evaluation rows render correctly until they're re-evaluated;
+// new evals emit one of the OotoCV-vocab values below.
+export type RecommendedAction =
+    | 'apply'         // legacy — historical rows only
+    | 'apply_direct'  // strong match, no tailoring required
+    | 'tailor'        // solid fit but needs targeted edits
+    | 'borderline'    // on the fence; deciding_factor explains why
+    | 'skip';         // not a fit
+
 export interface Evaluation {
     job_id: string;
     job_url: string | null;
@@ -397,7 +485,7 @@ export interface Evaluation {
     job_match_score: number | null;
     summary: string | null;
     required_exp: string | null;
-    recommended_action: 'apply' | 'tailor' | 'skip' | null;
+    recommended_action: RecommendedAction | null;
     gaps: Gaps | null;
     improvement_suggestions: ImprovementSuggestions | null;
     interview_tips: InterviewTips | null;
@@ -407,6 +495,14 @@ export interface Evaluation {
     evaluated_at: string | null;
     recruiter_email?: string | null;
     wit_line?: string | null;
+    // OotoCV phase 6 (ADR-0023): pre-computed feed-card lines. Populate
+    // exactly one matching the verdict; the others stay NULL.
+    top_strength?: string | null;       // TAILOR cards
+    deciding_factor?: string | null;    // BORDERLINE cards + detail page hero
+    kill_shot?: string | null;          // SKIP cards + detail page red banner
+    // Array of "Label — explanation" strings for the SKIP layout. Em-dash
+    // separator is load-bearing — splitter is " — " (R6).
+    red_flags?: string[] | null;
 }
 
 export interface EvaluationStats {
@@ -440,6 +536,8 @@ export interface TailoredResume {
 }
 
 // OotoCV: per-change review record (ADR-0010)
+export type FeedbackChip = 'too_formal' | 'not_accurate' | 'other';
+
 export interface ResumeChange {
     id: string;
     resume_id: string;
@@ -455,6 +553,10 @@ export interface ResumeChange {
     approved_source: string | null;
     created_at: string;
     updated_at: string;
+    // OotoCV phase 6: reject-flow feedback (migration 024).
+    feedback_type?: FeedbackChip | null;
+    regenerated_at?: string | null;
+    regeneration_count?: number;     // capped at 2 by the backend (R8)
 }
 
 export interface TaskStatus {
@@ -477,7 +579,15 @@ export interface MessageResponse {
     task_id?: string;
 }
 
-// OotoCV: Application tracker (phase 5)
+// OotoCV: Application tracker (phase 5 + 6 — offer + ghost commentary)
+export type ApplicationStatus =
+    | 'applied'
+    | 'replied'
+    | 'interview'
+    | 'rejected'
+    | 'ghosting'
+    | 'offer';   // OotoCV phase 6 celebration state (migration 023)
+
 export interface Application {
     id: string;
     job_id: string;
@@ -485,9 +595,14 @@ export interface Application {
     company_name: string | null;
     resume_id: string | null;
     cv_version: 'base' | 'tailored';
-    status: 'applied' | 'replied' | 'interview' | 'rejected' | 'ghosting';
+    status: ApplicationStatus;
     status_history: Array<{ status: string; timestamp: string }>;
     applied_at: string;
+    // OotoCV phase 6: computed server-side on every read, never stored.
+    // Backend recomputes from days_since_update so commentary ages with the row.
+    // Response carries Cache-Control: no-store (R5).
+    ghost_commentary?: string | null;
+    days_since_update?: number | null;
 }
 
 // Scheduler types
@@ -508,6 +623,53 @@ export interface SchedulerStatus {
     scheduler_running: boolean;
     last_runs: Record<string, PipelineRun>;
     jobs: Array<{ name: string; next_run_utc: string | null }>;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// OotoCV phase 6 — runs feed, pipeline config, system status, roast
+// (Migrations 021–025, ADRs 0023–0025)
+// ─────────────────────────────────────────────────────────────────
+
+/** One row from /api/runs (RPC `runs_with_counts`). */
+export interface Run {
+    id: string;
+    started_at: string;
+    finished_at: string | null;
+    status: 'running' | 'completed' | 'failed' | 'skipped';
+    jobs_found: number;
+    tailor_count: number;
+    borderline_count: number;
+    apply_direct_count: number;
+    skip_count: number;
+}
+
+export type PipelineMode = 'auto' | 'manual';
+
+/** Per-stage pipeline mode + auto_send_threshold (ADR-0024). */
+export interface PipelineConfig {
+    scrape_mode: PipelineMode;
+    evaluate_mode: PipelineMode;
+    tailor_mode: PipelineMode;
+    auto_send_threshold: number;   // 0..4, see ADR-0012
+}
+
+/** Cron sidebar pulse feed (replaces SchedulerStatus polling for the pulse). */
+export interface SystemStatus {
+    cron_state: 'active' | 'sleeping' | 'error';
+    next_run_at: string | null;     // ISO timestamp, or null if all stages manual
+    last_error: string | null;
+}
+
+/** One entry in the transient resume roast response. */
+export interface RoastItem {
+    section: string;
+    quote: string;
+    verdict: string;
+    fixed?: string | null;
+}
+
+export interface RoastResponse {
+    items: RoastItem[];
 }
 
 // Export singleton instance

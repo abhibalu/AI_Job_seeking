@@ -3,14 +3,18 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
+from agents.database import compute_ghost_commentary
 from agents.supabase_client import get_supabase_client
 
 router = APIRouter()
 
-VALID_STATUSES = ('applied', 'replied', 'interview', 'rejected', 'ghosting')
+# 'offer' added 2026-06-11 (migration 023, ADR-0023-adjacent).
+VALID_STATUSES = (
+    'applied', 'replied', 'interview', 'rejected', 'ghosting', 'offer',
+)
 
 
 class ApplicationCreate(BaseModel):
@@ -25,9 +29,58 @@ class ApplicationStatusUpdate(BaseModel):
     status: str  # one of VALID_STATUSES
 
 
+def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp; tolerate trailing Z and naive input.
+
+    Returns None if `ts` is falsy or unparseable. Naive datetimes are coerced
+    to UTC so subsequent (aware - aware) subtraction works.
+    """
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _enrich_application(row: dict) -> dict:
+    """Add `days_since_update` and `ghost_commentary` to a tracker row.
+
+    `days_since_update` is `now - latest(status_history[].timestamp, applied_at)`
+    in whole days. `ghost_commentary` is the OotoCV-voice line bracketed by
+    that count. Both are computed on every read so the agent's "awareness"
+    naturally ages with the row — never cache (R5; Cache-Control: no-store on
+    the response). See ADR-0023-adjacent risk register and ADR-0013 for the
+    status_history audit log.
+    """
+    history = row.get("status_history") or []
+    last_ts: Optional[str] = None
+    if history:
+        last_ts = history[-1].get("timestamp")
+    last_dt = _parse_iso(last_ts) or _parse_iso(row.get("applied_at"))
+    if last_dt is None:
+        days = 0
+    else:
+        delta = datetime.now(timezone.utc) - last_dt
+        days = max(0, delta.days)
+    return {
+        **row,
+        "days_since_update": days,
+        "ghost_commentary": compute_ghost_commentary(days),
+    }
+
+
 @router.get("")
-def list_applications():
-    """List all applications, newest first."""
+def list_applications(response: Response):
+    """List all applications, newest first.
+
+    Adds `ghost_commentary` and `days_since_update` per row (computed from
+    `status_history`, never stored). The response is marked no-store so the
+    commentary cannot go stale via shared caches.
+    """
     client = get_supabase_client()
     result = (
         client.table("applications")
@@ -35,7 +88,8 @@ def list_applications():
         .order("applied_at", desc=True)
         .execute()
     )
-    return result.data
+    response.headers["Cache-Control"] = "no-store"
+    return [_enrich_application(r) for r in (result.data or [])]
 
 
 @router.post("", status_code=201)

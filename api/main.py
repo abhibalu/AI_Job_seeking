@@ -64,6 +64,28 @@ app.include_router(applications.router, prefix="/api/applications", tags=["Appli
 from .routes import settings
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 
+# OotoCV adaptation (ADRs 0023–0025) ------------------------------------------
+from .routes import runs
+app.include_router(runs.router, prefix="/api/runs", tags=["Runs"])
+
+from .routes import pipeline_config
+app.include_router(pipeline_config.router, prefix="/api/pipeline", tags=["Pipeline Config"])
+
+# Sibling router on /api/resumes — additive endpoints that don't touch the
+# Phase 1 placeholder-row WIP in resumes.py.
+from .routes import resume_change_feedback
+app.include_router(
+    resume_change_feedback.router, prefix="/api/resumes", tags=["Resumes (Feedback)"],
+)
+
+from .routes import resume_roast
+app.include_router(
+    resume_roast.router, prefix="/api/resumes", tags=["Resumes (Roast)"],
+)
+
+from .routes import system
+app.include_router(system.router, prefix="/api/system", tags=["System Status"])
+
 
 @app.on_event("shutdown")
 def on_shutdown():

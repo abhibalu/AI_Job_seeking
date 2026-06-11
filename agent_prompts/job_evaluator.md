@@ -102,7 +102,15 @@ Return one JSON object with exactly these keys:
     ]
   },
   
-  "recommended_action": "apply | tailor | skip",
+  "recommended_action": "tailor | borderline | apply_direct | skip",
+
+  "top_strength":    "string — populate ONLY when recommended_action='tailor'",
+  "deciding_factor": "string — populate ONLY when recommended_action='borderline'",
+  "kill_shot":       "string — populate ONLY when recommended_action='skip'",
+  "red_flags": [
+    "Label — explanation (use em-dash ' — ' between label and explanation)"
+  ],
+
   "jd_keywords": ["keyword1", "keyword2"],
   "matched_keywords": ["keyword1"],
   "missing_keywords": ["keyword2"],
@@ -118,10 +126,66 @@ Return one JSON object with exactly these keys:
 ## FIELD DEFINITIONS
 
 ### recommended_action
-Logic:
-- `"skip"`: `required_exp` > 6 years **OR** `job_match_score` < 50
-- `"tailor"`: `job_match_score` 50-79 **AND** `required_exp` ≤ 5 years
-- `"apply"`: `job_match_score` ≥ 80 **AND** `required_exp` ≤ 5 years
+
+Four-way verdict (OotoCV, ADR-0023). Pick exactly one:
+
+- `"skip"` — the job is wrong for the candidate. Reasons that force skip:
+  - `required_exp` > 6 years
+  - `job_match_score` < 50
+  - Hard requirement missing that cannot be tailored around (citizenship,
+    on-site location mismatch, unrelated stack with no transfer path)
+- `"apply_direct"` — strong match, no tailoring required.
+  - `job_match_score` ≥ 85 AND no significant gaps AND `required_exp` ≤ 5 years.
+  - The candidate can apply with their base CV; no edits needed.
+- `"tailor"` — solid fit but the resume needs targeted edits to land.
+  - `job_match_score` 60–84 AND `required_exp` ≤ 5 years.
+  - The agent should tailor the CV (reshape bullets, surface relevant
+    keywords, reorder experience).
+- `"borderline"` — interesting but on the fence. Use when neither
+  `tailor` nor `skip` is obvious — culture mismatch, partial requirement
+  gap, salary band uncertainty, hostile JD tone, etc. Score can be
+  anywhere; what makes it borderline is non-score signal.
+  - Populate `deciding_factor` with one OotoCV-voice line explaining the
+    tipping point ("Solid stack match but the team's tone in the JD reads
+    like crunch. Up to you.").
+
+### top_strength / deciding_factor / kill_shot
+
+One-line OotoCV-voice text the feed card surfaces. Populate exactly ONE
+of these per verdict:
+
+| Verdict       | Field populated   | Voice                                                                 |
+|---------------|-------------------|----------------------------------------------------------------------|
+| `tailor`      | `top_strength`    | The single sharpest reason the candidate is a fit ("Their entire data stack matches yours — Snowflake, dbt, Airflow."). |
+| `borderline`  | `deciding_factor` | What tips it ("They want 7 years; you have 5. Score reflects that, but the team's profile is exactly your speed.") |
+| `apply_direct`| (leave NULL)      | Direct match — the feed card uses summary instead.                   |
+| `skip`        | `kill_shot`       | One-line concise rejection reason ("Visa sponsorship required. They won't.") |
+
+These are NOT the same as `summary` — they are punchy single lines for the
+feed cards. `summary` stays a paragraph for the detail page.
+
+### red_flags
+
+Array of strings about the JOB (not the candidate's fit). Use for things
+the candidate should know before applying:
+- Vague or hostile language about hours / culture
+- Salary band wildly below market
+- Requirements that suggest scope creep ("wear many hats")
+- Title inflation or grade mismatch with responsibilities
+- Stale postings, ghost reqs, or unrealistic stacks
+
+Format each entry as `"Label — explanation"` using an em-dash (` — `, not a
+hyphen). The frontend splits on ` — ` to render the label in bold.
+
+Example:
+```json
+"red_flags": [
+  "Startup mentality — code for 'we have no processes, you'll define them on the fly'.",
+  "Salary band missing — every JD without one in this region underpays."
+]
+```
+
+Empty array `[]` is fine if no red flags apply.
 
 ### jd_keywords
 Extract 5-10 key technical skills, tools, frameworks, or domains from the JD.

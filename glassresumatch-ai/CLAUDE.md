@@ -2,33 +2,90 @@
 
 Load me when: task touches frontend components, hooks, types, or apiClient.
 
+> **ADR-0026** adopted the OotoCV reference shell (`references/ootocv_src 2/`)
+> verbatim and superseded the prior two-pane Linear layout (ADR-0007).
+> The notes below reflect that shell. The dense-sidebar `useJobs` plumbing,
+> the `SetupPage.tsx` dual-purpose page, the duplicate
+> `components/ApplicationTracker.tsx`, and the per-change accept/reject UI
+> in TailoringReview are gone. The backend still writes per-change
+> `resume_changes` rows — a power-user UI can be reintroduced later.
+
 ---
 
 ## Directory layout
 
 ```
 glassresumatch-ai/
-  App.tsx             — shell: Sidebar + Routes + TailoringStrip
+  App.tsx             — shell: Sidebar + Routes + floating TailoringStrip
   index.tsx           — React entry point (BrowserRouter)
-  index.css           — @tailwindcss import + @theme tokens + base styles
-  types.ts            — ALL shared TypeScript types
+  index.css           — DM Sans/Mono fonts + @tailwindcss import + @theme tokens
+  types.ts            — Re-exports from services/apiClient + ResumeData scaffolding
   pages/              — full-page route components
-    Dashboard.tsx     — feed pane (3 card formats: TailorCard, ApplyDirectCard, SkipCard)
-    JobDetail.tsx     — detail pane (verdict-conditional layout, typewriter, MatchBrief, CVDiff)
-    TailoringReview.tsx — change-level review (Accept/Reject, cover letter, approve footer). Sticky footer: progress bar (reviewed/total fraction, replaces colored stat counters) + "Accept all remaining →" + "Skip" + "GDoc ▾" dropdown (groups Open + Re-export) + "Approve & Send →" primary CTA. GDoc dropdown has click-outside-to-close via mousedown listener.
-    ApplicationTracker.tsx — tracker cards with status chips and timeline dots
-    SetupPage.tsx     — onboarding (isOnboarding=true) and settings (isOnboarding=false); two-tile flow for PDF/DOCX upload and Google Doc import. Settings mode fetches `getMasterResume()` on mount to show a "current resume" indicator (✓ name · updated timestamp · open doc ↗). `sourceGdocUrl` link only appears when resume was imported from Google Docs. Settings also renders the External Services kill-switch panel (openrouter/apify/google_docs toggles) when `toggles` are loaded. `onTogglesChanged?: () => void` prop triggers `refreshToggles` in App.tsx so service guards re-apply app-wide after a toggle change. GDoc import tile and button are disabled (opacity-40) when `google_docs` toggle is off.
+    Dashboard.tsx     — OotoCV single-column fat-card feed. Sections: Primary
+                        (TAILOR + APPLY DIRECT) → Borderline → collapsed Skip.
+                        Reads getJobs (is_evaluated=true) → toReferenceJob.
+                        Reports actionable count up via onActionableCountChange.
+    JobDetail.tsx     — Verdict-conditional layout on its own /job/:id route.
+                        Reads getJob + getEvaluation → toReferenceJob.
+    TailoringReview.tsx — 2-pane Base/Tailored diff driven by the lowest-
+                        confidence ResumeChange. Cover letter autosaves on
+                        blur via updateCoverLetter. Approve & Send calls
+                        updateTailoredStatus('approved') → exportToGoogleDocs;
+                        Request Changes runs a re-tailor with the user note
+                        appended to the cover letter (no new endpoint).
+    ApplicationTracker.tsx — Reference card list. Server-computed
+                        ghost_commentary (with client fallback for old responses).
+                        Interview + Ghosting rows expand with reference copy.
+                        Write-off uses updateApplicationStatus('rejected').
+    Onboarding.tsx    — 5-step wizard (Intro → OpenRouter → Apify → Gmail →
+                        Resume upload). Saves onboarding_step on advance so
+                        a refresh resumes where left off. Resume step calls
+                        uploadResume(file); other key inputs are display-only
+                        because the live keys live in backend .env.
+    Settings.tsx      — Reference layout + folded service kill switches
+                        (ADR-0019, optimistic with rollback) + current resume
+                        indicator (getMasterResume) + link to /roast.
+    ResumeRoast.tsx   — 3-state (upload → roasting → results) wired to
+                        roastResume(). LLM call runs in parallel with the
+                        typewriter — results show once both complete.
   components/         — shared/reusable components only
-    Sidebar.tsx       — nav + logo + cron status indicator
-    TailoringStrip.tsx — floating process card during active tailoring (6-stage pipeline track + typewriter + stop)
-    TypewriterWaitState.tsx — animated wait state with sessionStorage skip
-    MatchBrief.tsx    — strengths/gaps signal display in JobDetail
-    Toast.tsx         — floating notification (error/success)
-  hooks/              — custom React hooks (useJobs, useSSE, useResumeState, useJobSelection)
+    Sidebar.tsx       — Reference wordmark + 3 nav items + rotating cron
+                        messages every 5s when cron_state=='active'. Polls
+                        getSystemStatus every 30s.
+    TailoringStrip.tsx — Bottom floating strip; reference visual + real SSE
+                        via useSSE. Live stage map overrides the typewriter
+                        once progress events arrive. Cancel calls cancelTask.
+    TypewriterWaitState.tsx — Reference verbatim with the three memory-leak
+                        fixes (pauseTimer cleanup, onComplete ref, messages
+                        snapshot ref). Use key={...} to swap message sets.
+    JobCard.tsx       — Reference fat 2-column card. Typed against
+                        ReferenceJob; left column has role + verdict reason
+                        terminal block + red_flags (em-dash split, Skull icon).
+                        Right column has verdict badge + strength/gap counts +
+                        Skip/Tailor/Apply Direct buttons.
+    MatchBrief.tsx    — Reference port. Consumes ReferenceStrength +
+                        ReferenceGap (req met/evidence/signal; minor/notable/
+                        significant). Gap.strategy is the load-bearing line.
+    Toast.tsx         — Preserved from prior shell. Still used by AutoSendModal
+                        consumers; not used by the reference TailoringReview
+                        (which surfaces export status inline).
+  hooks/
+    useSSE.ts         — Preserved. Used by TailoringStrip and (formerly) the
+                        reeval flow.
   lib/
     utils.ts          — cn() helper (clsx + tailwind-merge)
   services/
-    apiClient.ts      — singleton API client
+    apiClient.ts      — singleton API client. Phase-6 additions: list_runs,
+                        pipeline_config, system_status, change feedback,
+                        roastResume. Types Application/Evaluation/ResumeChange
+                        extended for OotoCV phase 6.
+    jobAdapter.ts     — backend Job + Evaluation + ParseResult → ReferenceJob.
+                        Owns the verdict mapping (apply/apply_direct → 'APPLY
+                        DIRECT', borderline/skip/tailor preserved with case
+                        flip). Builds strengths from matched_keywords +
+                        interview tips; gaps from gaps.{technical,domain,
+                        soft_skills} bucketed by match_score band.
+    jobService.ts     — fetchJobsWithEvaluations; Dashboard reuses this.
   utils/              — format helpers (formatTimeAgo, etc.)
 ```
 

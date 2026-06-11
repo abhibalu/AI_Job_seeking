@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
 @import 'tailwindcss';
 
 @theme {
@@ -9,7 +10,7 @@
   --color-accent-hover: #fcd34d;
   --color-semantic-red: #f87171;
   --color-semantic-green: #4ade80;
-  --color-semantic-amber: #fbbf24;
+  --color-semantic-amber: #fcd34d;
   --color-semantic-slate: #94a3b8;
 
   --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;

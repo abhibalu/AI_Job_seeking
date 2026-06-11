@@ -653,3 +653,170 @@ def get_jd_parsed(job_id: str) -> dict | None:
     if result.data:
         return result.data[0]
     return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# OotoCV adaptation — runs feed, pipeline config, ghost commentary
+# (Migrations 021–025, ADRs 0023–0025)
+# ─────────────────────────────────────────────────────────────────
+
+
+def list_runs(limit: int = 50) -> list[dict]:
+    """Return recent pipeline runs with per-verdict aggregated counts.
+
+    Backed by the `runs_with_counts(limit_n)` SQL function defined in
+    migration `021b_runs_with_counts_rpc.sql`. Each row carries:
+      id, started_at, finished_at, status, jobs_found,
+      tailor_count, borderline_count, apply_direct_count, skip_count.
+
+    If the RPC is not installed (e.g. partial migration apply), returns []
+    and logs a warning rather than raising — the caller (GET /api/runs) can
+    still respond 200 with an empty list while the operator applies 021b.
+    """
+    try:
+        client = _get_supabase()
+        resp = client.rpc("runs_with_counts", {"limit_n": limit}).execute()
+        return resp.data or []
+    except Exception:  # noqa: BLE001 — RPC missing or DB down
+        logger.warning("list_runs failed", exc_info=True)
+        return []
+
+
+def get_run(run_id: str) -> dict | None:
+    """Return a single pipeline_runs row, or None."""
+    try:
+        client = _get_supabase()
+        resp = (
+            client.table("pipeline_runs")
+            .select("*")
+            .eq("id", run_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0] if rows else None
+    except Exception:  # noqa: BLE001
+        logger.warning("get_run failed", exc_info=True, extra={"run_id": run_id})
+        return None
+
+
+_PIPELINE_MODE_KEYS: dict[str, str] = {
+    "scrape_mode":   "pipeline_scrape_mode",
+    "evaluate_mode": "pipeline_evaluate_mode",
+    "tailor_mode":   "pipeline_tailor_mode",
+}
+_VALID_MODES: frozenset[str] = frozenset({"auto", "manual"})
+
+
+def get_pipeline_config() -> dict:
+    """Return current pipeline modes + auto_send_threshold as a flat dict.
+
+    Defaults match migration 025 seeds (auto/auto/manual, threshold 0) so
+    a fresh install without the seed still gets sane behaviour.
+    """
+    client = _get_supabase()
+    keys = list(_PIPELINE_MODE_KEYS.values()) + ["auto_send_threshold"]
+    resp = (
+        client.table("system_config")
+        .select("key,value")
+        .in_("key", keys)
+        .execute()
+    )
+    rows = {r["key"]: r["value"] for r in (resp.data or [])}
+    return {
+        "scrape_mode":         rows.get("pipeline_scrape_mode",   "auto"),
+        "evaluate_mode":       rows.get("pipeline_evaluate_mode", "auto"),
+        "tailor_mode":         rows.get("pipeline_tailor_mode",   "manual"),
+        "auto_send_threshold": int(rows.get("auto_send_threshold", "0")),
+    }
+
+
+def set_pipeline_config(updates: dict) -> dict:
+    """Validate + upsert pipeline config rows. Returns the new full config.
+
+    Accepts any subset of {scrape_mode, evaluate_mode, tailor_mode,
+    auto_send_threshold}. Reuses set_system_config() so we don't duplicate
+    the upsert primitive.
+    """
+    for short_key, value in updates.items():
+        if short_key == "auto_send_threshold":
+            ival = int(value)
+            if not 0 <= ival <= 4:
+                raise ValueError("auto_send_threshold must be 0..4")
+            set_system_config("auto_send_threshold", str(ival))
+            continue
+        if short_key not in _PIPELINE_MODE_KEYS:
+            raise ValueError(f"Unknown pipeline config key: {short_key}")
+        if value not in _VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{value}' for {short_key}; "
+                f"must be one of {sorted(_VALID_MODES)}"
+            )
+        set_system_config(_PIPELINE_MODE_KEYS[short_key], value)
+    return get_pipeline_config()
+
+
+def compute_ghost_commentary(days_since_update: int) -> str:
+    """OotoCV-voice ghosting commentary, bracketed by days_since_update.
+
+    Recompute on every read — never store. The agent's "awareness" depends
+    on commentary aging with the row (Cache-Control: no-store on the
+    response, R5 mitigation).
+    """
+    if days_since_update <= 3:
+        return "Probably just busy."
+    if days_since_update <= 7:
+        return "Still nothing. Rude, but fine."
+    if days_since_update <= 14:
+        return "At this point we're assuming they lost it."
+    return "They don't deserve you."
+
+
+class RegenerationCapReached(Exception):
+    """Raised when a rejected change has already hit the regeneration cap."""
+
+
+REGENERATION_CAP = 2
+
+
+def record_change_feedback(change_id: str, feedback_type: str) -> dict:
+    """Mark a change as rejected with a feedback chip and bump regeneration_count.
+
+    Returns the updated row. Raises RegenerationCapReached if the count is
+    already at REGENERATION_CAP — the route layer maps that to HTTP 409 and
+    the UI falls back to "edit manually" (R8 mitigation).
+
+    The actual regeneration LLM call is wired by the route layer; this
+    helper only stamps the audit fields and increments the counter.
+    """
+    if feedback_type not in ("too_formal", "not_accurate", "other"):
+        raise ValueError(f"invalid feedback_type: {feedback_type}")
+
+    client = _get_supabase()
+    current = (
+        client.table("resume_changes")
+        .select("regeneration_count")
+        .eq("id", change_id)
+        .limit(1)
+        .execute()
+    )
+    rows = current.data or []
+    prev_count = (rows[0].get("regeneration_count") if rows else 0) or 0
+    if prev_count >= REGENERATION_CAP:
+        raise RegenerationCapReached(
+            f"regeneration_count >= {REGENERATION_CAP} for change {change_id}"
+        )
+
+    resp = (
+        client.table("resume_changes")
+        .update({
+            "review_action":      "reject",
+            "feedback_type":      feedback_type,
+            "regenerated_at":     datetime.now(timezone.utc).isoformat(),
+            "regeneration_count": prev_count + 1,
+        })
+        .eq("id", change_id)
+        .execute()
+    )
+    updated = (resp.data or [{}])[0]
+    return updated

@@ -1,496 +1,270 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion } from 'motion/react';
-import { Terminal, ArrowRight, MoreHorizontal } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { JobWithEvaluation } from '../services/jobService';
-import { EvaluationStats } from '../services/apiClient';
-import type { ServiceToggles } from '../services/apiClient';
-import { formatTimeAgo } from '../utils/format';
+/**
+ * Dashboard.tsx — OotoCV reference layout, wired to the live backend.
+ *
+ * Single-column fat-card feed grouped by verdict:
+ *   Primary    : TAILOR + APPLY DIRECT       (action band — top of feed)
+ *   Borderline : BORDERLINE                  (secondary group, smaller header)
+ *   SKIP       : SKIP                        (collapsed by default)
+ *
+ * Data: fetches `apiClient.getJobs({is_evaluated: true})` so cards always
+ * have a verdict. Each backend Job + Evaluation is mapped through
+ * `toReferenceJob` before render. Run grouping (per ADR-0025) is handled
+ * by the feed header copy ("Last run today at 5:00 PM — N jobs found").
+ *
+ * Skip and Apply-Direct overrides are local-only (optimistic) — the
+ * backend tracks Apply via /api/applications which the JobDetail page
+ * fires; the Dashboard just removes the card from view immediately.
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+
+import { JobCard } from '../components/JobCard';
+import { TypewriterWaitState } from '../components/TypewriterWaitState';
+import { fetchJobsWithEvaluations } from '../services/jobService';
+import type { JobWithEvaluation } from '../services/jobService';
+import { toReferenceJob } from '../services/jobAdapter';
+import type { ReferenceJob } from '../services/jobAdapter';
+import { apiClient } from '../services/apiClient';
+
+type Override = 'SKIP' | 'APPLIED';
 
 interface DashboardProps {
-  jobs: JobWithEvaluation[];
-  activeJobs: JobWithEvaluation[];
-  actionedJobs: JobWithEvaluation[];
-  stats: EvaluationStats | null;
-  loading: boolean;
-  loadingMore: boolean;
-  hasMore: boolean;
-  loadMore: () => void;
-  selectedJobId: string | null;
-  onJobClick: (job: JobWithEvaluation) => void;
-  onTailorStart: (jobId: string) => void;
-  onAction: (jobId: string, cvVersion: 'base' | 'tailored') => void;
-  onSkip: (jobId: string) => void;
-  verdictFilter: string[];
-  onVerdictFilterChange: (verdicts: string[]) => void;
-  isTailoring?: boolean;
-  serviceToggles?: ServiceToggles | null;
+  /** Called when the user clicks Tailor on a JobCard. Receives the
+   * reference-shape job plus a backend task_id from `tailorResume`. */
+  onTailor?: (job: ReferenceJob, taskId: string) => void;
+  onActionableCountChange?: (count: number) => void;
 }
 
-type VerdictType = 'tailor' | 'apply' | 'skip';
+const FEED_LOADED_KEY = 'feed_loaded';
 
-function getVerdictType(job: JobWithEvaluation): VerdictType {
-  const action = job.evaluation?.recommended_action;
-  if (action === 'apply') return 'apply';
-  if (action === 'skip') return 'skip';
-  return 'tailor';
-}
+export const Dashboard: React.FC<DashboardProps> = ({ onTailor, onActionableCountChange }) => {
+  // Loading typewriter — first visit per session only.
+  const [showLoadingTypewriter] = useState(() => !sessionStorage.getItem(FEED_LOADED_KEY));
+  const [loadingTypewriterDone, setLoadingTypewriterDone] = useState(!showLoadingTypewriter);
 
-function groupJobs(jobs: JobWithEvaluation[]) {
-  const actionRequired: JobWithEvaluation[] = [];
-  const skip: JobWithEvaluation[] = [];
+  const [refJobs, setRefJobs] = useState<ReferenceJob[]>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [feedLoaded, setFeedLoaded] = useState(false);
 
-  for (const job of jobs) {
-    const v = getVerdictType(job);
-    if (v === 'skip') skip.push(job);
-    else actionRequired.push(job);
-  }
+  // Optimistic overrides: SKIP removes the card from primary, APPLIED
+  // hides it entirely (treated as logged in tracker).
+  const [overrides, setOverrides] = useState<Record<string, Override>>({});
 
-  // Sort by score descending
-  actionRequired.sort(
-    (a, b) => (b.evaluation?.job_match_score ?? 0) - (a.evaluation?.job_match_score ?? 0)
+  // Skip toggle for the collapsed Skip section.
+  const [showSkipped, setShowSkipped] = useState(false);
+
+  // Load jobs once on mount. Page 1 with a high limit — the OotoCV feed
+  // is a flat scroll, not paginated; users go to the tracker for old jobs.
+  useEffect(() => {
+    let cancelled = false;
+    fetchJobsWithEvaluations(1, 100, undefined, true)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const mapped = data
+          .filter((j: JobWithEvaluation) => j.isEvaluated && j.evaluation)
+          .map(j => toReferenceJob(j));
+        setRefJobs(mapped);
+        setFeedLoaded(true);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setFetchError(err?.message ?? 'Failed to load jobs.');
+        setFeedLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleLoadComplete = useCallback(() => {
+    sessionStorage.setItem(FEED_LOADED_KEY, 'true');
+    setLoadingTypewriterDone(true);
+  }, []);
+
+  const effectiveVerdict = useCallback((job: ReferenceJob): ReferenceJob['verdict'] | 'APPLIED' => {
+    return (overrides[job.id] as Override) || job.verdict;
+  }, [overrides]);
+
+  const primary = useMemo(() => refJobs.filter(j => {
+    const v = effectiveVerdict(j);
+    return v === 'TAILOR' || v === 'APPLY DIRECT';
+  }), [refJobs, effectiveVerdict]);
+
+  const borderline = useMemo(
+    () => refJobs.filter(j => effectiveVerdict(j) === 'BORDERLINE'),
+    [refJobs, effectiveVerdict],
   );
 
-  return { actionRequired, skip };
-}
+  const skipped = useMemo(
+    () => refJobs.filter(j => effectiveVerdict(j) === 'SKIP'),
+    [refJobs, effectiveVerdict],
+  );
 
-// --- Card Components ---
+  // Bubble the actionable count to App.tsx for the sidebar badge.
+  useEffect(() => {
+    onActionableCountChange?.(primary.length);
+  }, [primary.length, onActionableCountChange]);
 
-const TailorCard: React.FC<{
-  job: JobWithEvaluation;
-  selected: boolean;
-  onClick: () => void;
-  onTailorStart: () => void;
-  onSkip: () => void;
-  isTailoring?: boolean;
-  serviceToggles?: ServiceToggles | null;
-}> = ({ job, selected, onClick, onTailorStart, onSkip, isTailoring, serviceToggles }) => {
-  const eval_ = job.evaluation;
-  const score = eval_?.job_match_score ?? 0;
-  const filled = Math.round((score / 100) * 4);
-  const isTailor = getVerdictType(job) === 'tailor';
-  const reason = eval_?.wit_line || eval_?.summary || '';
-  const topStrength = eval_?.interview_tips?.your_strengths_to_highlight?.[0]
-    || eval_?.matched_keywords?.[0] || '';
+  const handleSkip = useCallback((id: string) => {
+    setOverrides(prev => ({ ...prev, [id]: 'SKIP' }));
+  }, []);
+
+  const handleApplyDirect = useCallback(async (job: ReferenceJob) => {
+    // Open the original posting in a new tab.
+    if (job.originalUrl) {
+      window.open(job.originalUrl, '_blank', 'noopener,noreferrer');
+    }
+    // Optimistically log the application — fire-and-forget; if it fails
+    // the user can still re-record it from the JobDetail page.
+    try {
+      await apiClient.createApplication(job.id, 'base', {
+        jobTitle: job.role,
+        companyName: job.company,
+      });
+    } catch {
+      /* swallow — optimistic UI is what matters here */
+    }
+    setOverrides(prev => ({ ...prev, [job.id]: 'APPLIED' }));
+  }, []);
+
+  const handleTailor = useCallback(async (job: ReferenceJob) => {
+    // Kick off the background tailoring pipeline; App.tsx mounts the
+    // TailoringStrip with the returned task_id so SSE drives progress.
+    try {
+      const resp = await apiClient.tailorResume(job.id);
+      onTailor?.(job, resp.task_id);
+    } catch (err) {
+      // Failure is non-fatal — keep the card on screen so the user can retry.
+      console.warn('tailorResume failed:', err);
+    }
+  }, [onTailor]);
+
+  // First-load typewriter
+  if (showLoadingTypewriter && !loadingTypewriterDone) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <TypewriterWaitState
+          messages={[
+            'Waking up the cron job...',
+            'Scraping job boards...',
+            'Filtering out "entry-level" roles requiring 5 years experience...',
+            "Judging Glassdoor reviews so you don't have to...",
+            'Compiling your feed...',
+          ]}
+          onComplete={handleLoadComplete}
+        />
+      </div>
+    );
+  }
+
+  // Network spinner while the real fetch resolves (typewriter already finished)
+  if (!feedLoaded) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-6 h-6 rounded-full border-2 border-accent/40 border-t-accent animate-spin" />
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <p className="text-semantic-red font-mono text-sm">{fetchError}</p>
+      </div>
+    );
+  }
+
+  const visibleTotal = refJobs.length - Object.values(overrides).filter(v => v === 'APPLIED').length;
+  const headerTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        'group relative flex flex-col gap-2 p-[13px_15px] rounded-[9px] border cursor-pointer transition-colors',
-        selected
-          ? 'border-accent border-l-accent bg-[#141414]'
-          : 'border-transparent hover:border-white/[0.12] hover:bg-[#141414]'
+    <div className="flex-1 p-8 overflow-y-auto max-w-3xl w-full">
+      <header className="mb-8">
+        <h1 className="text-3xl font-sans font-bold tracking-tight text-white mb-2">Feed</h1>
+        <p className="text-gray-400 font-mono text-sm">
+          Last run today at {headerTime} — {visibleTotal} job{visibleTotal !== 1 ? 's' : ''} found.
+        </p>
+      </header>
+
+      {/* Primary: TAILOR + APPLY DIRECT */}
+      {primary.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          {primary.map(job => (
+            <JobCard
+              key={job.id}
+              job={job}
+              onSkip={handleSkip}
+              onTailor={handleTailor}
+              onApplyDirect={handleApplyDirect}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="py-12 text-center">
+          <p className="text-gray-500 font-mono text-sm">
+            Nothing actionable left. You're either very decisive or very tired. Check back at 5pm.
+          </p>
+        </div>
       )}
-      onClick={onClick}
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <div className="text-[12px] font-sans font-semibold text-gray-200 truncate">
-            {job.title || 'Untitled Role'}
-          </div>
-          <div className="text-[10px] font-mono text-gray-600 truncate">
-            {job.company_name} {job.location && `· ${job.location}`}{formatTimeAgo(job.posted_at) && ` · ${formatTimeAgo(job.posted_at)}`}
-          </div>
-        </div>
-        <MoreHorizontal className="w-3.5 h-3.5 text-gray-600 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-      </div>
 
-      {/* Verdict block */}
-      <div className={cn(
-        'bg-base/80 rounded-[5px] p-[9px_10px] border-l-2',
-        isTailor ? 'border-semantic-green/50' : 'border-semantic-amber/50'
-      )}>
-        <div className="flex items-start gap-2">
-          <Terminal className="w-3 h-3 text-gray-600 mt-0.5 flex-shrink-0" />
-          <span className="text-[9px] font-mono text-gray-500 leading-relaxed line-clamp-2">
-            {reason}
-          </span>
-        </div>
-      </div>
-
-      {/* Signal row (TAILOR only) */}
-      {isTailor && (
-        <div className="flex items-center gap-2">
-          <div className="flex gap-0.5">
-            {[0, 1, 2, 3].map(i => (
-              <div
-                key={i}
-                className={cn(
-                  'w-1.5 h-1.5 rounded-full',
-                  i < filled ? 'bg-semantic-green' : 'bg-white/[0.08]'
-                )}
+      {/* Secondary: BORDERLINE */}
+      {borderline.length > 0 && (
+        <div className="mt-10">
+          <div className="flex items-center gap-3 mb-4">
+            <h2 className="text-sm font-mono text-gray-500 uppercase tracking-wider">Borderline</h2>
+            <div className="h-px flex-1 bg-white/5" />
+            <span className="text-xs font-mono text-gray-600">{borderline.length} job{borderline.length !== 1 ? 's' : ''}</span>
+          </div>
+          <p className="text-xs font-mono text-gray-600 mb-4">
+            Not obvious wins. Might be worth a shot if the week is slow.
+          </p>
+          <div className="flex flex-col gap-3">
+            {borderline.map(job => (
+              <JobCard
+                key={job.id}
+                job={job}
+                onSkip={handleSkip}
+                onTailor={handleTailor}
+                onApplyDirect={handleApplyDirect}
               />
             ))}
           </div>
-          {topStrength && (
-            <span className="text-[9px] font-mono text-gray-600 truncate">
-              Lead with <span className="text-accent">→</span> {topStrength}
-            </span>
+        </div>
+      )}
+
+      {/* Collapsed: SKIP */}
+      {skipped.length > 0 && (
+        <div className="mt-8">
+          <button
+            onClick={() => setShowSkipped(!showSkipped)}
+            className="w-full py-3 px-4 flex items-center justify-center gap-2 rounded-lg border border-white/5 bg-surface hover:bg-surface-hover text-sm font-mono text-gray-400 transition-colors"
+          >
+            {showSkipped ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            {skipped.length} hard pass{skipped.length !== 1 ? 'es' : ''} hidden — {showSkipped ? 'hide them' : 'show them?'}
+          </button>
+
+          {showSkipped && (
+            <div className="flex flex-col gap-3 mt-4">
+              {skipped.map(job => (
+                <JobCard
+                  key={job.id}
+                  job={job}
+                  dimmed
+                  onSkip={handleSkip}
+                  onTailor={handleTailor}
+                  onApplyDirect={handleApplyDirect}
+                />
+              ))}
+            </div>
           )}
         </div>
       )}
 
-      {/* Borderline: deciding factor */}
-      {!isTailor && (
-        <div className="flex items-center gap-2">
-          <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-semantic-amber/10 text-semantic-amber">
-            deciding factor
-          </span>
-          <span className="text-[9px] font-mono text-gray-600 truncate">
-            {eval_?.gaps?.technical?.[0] || eval_?.gaps?.domain?.[0] || 'Review required'}
-          </span>
+      {refJobs.length === 0 && (
+        <div className="mt-12 text-center">
+          <p className="text-gray-500 font-mono italic">
+            Nothing today. The job market is tired. Check back at 5pm.
+          </p>
         </div>
       )}
-
-      {/* Quick actions */}
-      <div className="absolute bottom-3 right-3 flex gap-3 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
-        <button
-          onClick={(e) => { e.stopPropagation(); onSkip(); }}
-          className="text-[9px] font-mono text-gray-600 px-2 py-1 rounded-[5px] border border-white/[0.08] hover:text-gray-400 hover:border-white/15 transition-colors"
-        >
-          Skip
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onTailorStart(); }}
-          disabled={isTailoring}
-          className={cn(
-            "text-[9px] font-bold px-2 py-1 rounded-[5px] bg-accent text-[#0d0d0d] hover:bg-accent-hover transition-colors",
-            isTailoring ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-            (serviceToggles !== null && !serviceToggles?.openrouter) && 'opacity-40',
-          )}
-        >
-          {job.tailoring_status === 'ready' ? 'Review & Send' : 'Tailor CV'}
-        </button>
-      </div>
-    </motion.div>
-  );
-};
-
-const ApplyDirectCard: React.FC<{
-  job: JobWithEvaluation;
-  selected: boolean;
-  onClick: () => void;
-  onAction: () => void;
-}> = ({ job, selected, onClick, onAction }) => {
-  const take = job.evaluation?.wit_line || job.evaluation?.summary || '';
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        'flex items-center gap-3 p-[10px_15px] rounded-[9px] border cursor-pointer transition-colors',
-        selected
-          ? 'border-accent bg-[#141414]'
-          : 'border-transparent hover:border-white/[0.12] hover:bg-[#141414]'
-      )}
-      onClick={onClick}
-    >
-      <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-sans font-semibold text-gray-200 truncate">{job.title || 'Untitled'}</div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[9px] font-mono text-gray-600 truncate">{job.company_name}{formatTimeAgo(job.posted_at) && ` · ${formatTimeAgo(job.posted_at)}`}</span>
-          {take && (
-            <span className="text-[9px] font-mono text-gray-600 italic truncate">· {take}</span>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <span className="text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-semantic-slate/10 text-semantic-slate">
-          direct
-        </span>
-        <button
-          onClick={(e) => { e.stopPropagation(); onAction(); }}
-          className="text-[9px] font-bold px-2.5 py-1 rounded-[5px] bg-accent text-[#0d0d0d] hover:bg-accent-hover transition-colors whitespace-nowrap"
-        >
-          Apply <span className="text-[#0d0d0d]">→</span>
-        </button>
-      </div>
-    </motion.div>
-  );
-};
-
-const SkipCard: React.FC<{
-  job: JobWithEvaluation;
-  selected: boolean;
-  onClick: () => void;
-}> = ({ job, selected, onClick }) => {
-  const killShot = job.evaluation?.wit_line || job.evaluation?.summary || '';
-
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-2 p-[8px_13px] rounded-[7px] border cursor-pointer transition-all',
-        'opacity-[0.38] hover:opacity-[0.65]',
-        selected ? 'border-accent' : 'border-transparent'
-      )}
-      onClick={onClick}
-    >
-      <div className="w-0.5 h-[14px] bg-semantic-red/40 rounded-full flex-shrink-0" />
-      <span className="text-[11px] font-sans text-gray-400 truncate">{job.title || 'Untitled'}</span>
-      {killShot && (
-        <span className="text-[9px] font-mono text-gray-600 truncate">· {killShot}</span>
-      )}
-      <span className="ml-auto text-[8px] font-bold uppercase rounded-[2px] px-1.5 py-0.5 bg-semantic-red/10 text-semantic-red flex-shrink-0">
-        skip
-      </span>
-    </div>
-  );
-};
-
-// --- Section Header ---
-
-const SectionHeader: React.FC<{ label: string; count: number }> = ({ label, count }) => (
-  <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] px-3 pt-4 pb-1.5">
-    {label} · {count}
-  </div>
-);
-
-// --- Main Dashboard ---
-
-export const Dashboard: React.FC<DashboardProps> = ({
-  activeJobs,
-  actionedJobs,
-  stats,
-  loading,
-  loadingMore,
-  hasMore,
-  loadMore,
-  selectedJobId,
-  onJobClick,
-  onTailorStart,
-  onAction,
-  onSkip,
-  verdictFilter,
-  onVerdictFilterChange,
-  isTailoring,
-  serviceToggles,
-}) => {
-  const [showSkips, setShowSkips] = useState(false);
-  const feedRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  // Infinite scroll with ref pattern (per CLAUDE.md)
-  const loadMoreRef = useRef(loadMore);
-  useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
-
-  useEffect(() => {
-    if (!sentinelRef.current || !hasMore) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) loadMoreRef.current(); },
-      { root: feedRef.current, threshold: 0.1 }
-    );
-    obs.observe(sentinelRef.current);
-    return () => obs.disconnect();
-  }, [hasMore]);
-
-  // Stable sort: only re-sort when jobs are added/removed, not when a single
-  // job's evaluation updates in-place (which would shuffle the list and lose
-  // the user's scroll position).
-  const prevArIdsRef = useRef<string>('');
-  const sortedOrderRef = useRef<Map<string, number>>(new Map());
-
-  const { actionRequired, skip } = useMemo(() => {
-    const ar: JobWithEvaluation[] = [];
-    const sk: JobWithEvaluation[] = [];
-
-    for (const job of activeJobs) {
-      if (getVerdictType(job) === 'skip') sk.push(job);
-      else ar.push(job);
-    }
-
-    // Build a sorted-stable key from current actionRequired IDs
-    const arIdsKey = ar.map(j => j.id).sort().join(',');
-
-    if (arIdsKey !== prevArIdsRef.current) {
-      // Job set changed (new page loaded, verdict changed, job removed) — full re-sort
-      ar.sort(
-        (a, b) => (b.evaluation?.job_match_score ?? 0) - (a.evaluation?.job_match_score ?? 0)
-      );
-      const order = new Map<string, number>();
-      ar.forEach((j, i) => order.set(j.id, i));
-      sortedOrderRef.current = order;
-      prevArIdsRef.current = arIdsKey;
-    } else {
-      // Same set of jobs — preserve existing sort order
-      const order = sortedOrderRef.current;
-      ar.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-    }
-
-    return { actionRequired: ar, skip: sk };
-  }, [activeJobs]);
-
-  // Apply verdict filter
-  const filteredActionRequired = verdictFilter.length === 0 ? actionRequired
-    : actionRequired.filter(j => {
-        const v = getVerdictType(j);
-        return verdictFilter.includes(v === 'tailor' ? 'TAILOR' : 'APPLY DIRECT');
-      });
-  const filteredSkip = verdictFilter.length === 0 || verdictFilter.includes('SKIP') ? skip : [];
-
-  const verdictPills: Array<{ label: string; key: string; count: number; color: string }> = [
-    { label: 'TAILOR', key: 'TAILOR', count: stats?.by_action?.tailor ?? 0, color: 'text-semantic-green bg-semantic-green/10 border-semantic-green/20' },
-    { label: 'APPLY DIRECT', key: 'APPLY DIRECT', count: stats?.by_action?.apply ?? 0, color: 'text-semantic-slate bg-semantic-slate/10 border-semantic-slate/20' },
-    { label: 'SKIP', key: 'SKIP', count: stats?.by_action?.skip ?? 0, color: 'text-semantic-red bg-semantic-red/10 border-semantic-red/20' },
-  ];
-
-  const toggleVerdict = (key: string) => {
-    if (verdictFilter.includes(key)) {
-      onVerdictFilterChange(verdictFilter.filter(v => v !== key));
-    } else {
-      onVerdictFilterChange([...verdictFilter, key]);
-    }
-  };
-
-  const renderCard = useCallback((job: JobWithEvaluation, dimmed = false) => {
-    const v = getVerdictType(job);
-    const wrapper = (children: React.ReactNode) => (
-      <div key={job.id} className={cn(dimmed && 'opacity-30')}>
-        {children}
-      </div>
-    );
-
-    if (v === 'apply') {
-      return wrapper(
-        <ApplyDirectCard
-          job={job}
-          selected={selectedJobId === job.id}
-          onClick={() => onJobClick(job)}
-          onAction={() => onAction(job.id, job.tailoring_status === 'ready' ? 'tailored' : 'base')}
-        />
-      );
-    }
-
-    if (v === 'skip') {
-      return wrapper(
-        <SkipCard
-          job={job}
-          selected={selectedJobId === job.id}
-          onClick={() => onJobClick(job)}
-        />
-      );
-    }
-
-    // tailor
-    return wrapper(
-      <TailorCard
-        job={job}
-        selected={selectedJobId === job.id}
-        onClick={() => onJobClick(job)}
-        onTailorStart={() => onTailorStart(job.id)}
-        onSkip={() => onSkip(job.id)}
-        isTailoring={isTailoring}
-        serviceToggles={serviceToggles}
-      />
-    );
-  }, [selectedJobId, onJobClick, onTailorStart, onAction, onSkip, isTailoring, serviceToggles]);
-
-  return (
-    <div className="w-80 flex-shrink-0 border-r border-white/5 flex flex-col h-full bg-base">
-      {/* Feed Header */}
-      <div className="sticky top-0 z-10 bg-base border-b border-white/5 px-4 py-3">
-        {/* Top row */}
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-2 h-2 rounded-full bg-semantic-green animate-pulse" />
-          <span className="text-[10px] font-mono text-gray-500">Today's run</span>
-        </div>
-
-        {/* Verdict filter pills */}
-        <div className="flex flex-wrap gap-1.5">
-          {verdictPills.map(pill => {
-            const active = verdictFilter.includes(pill.key);
-            return (
-              <button
-                key={pill.key}
-                onClick={() => toggleVerdict(pill.key)}
-                className={cn(
-                  'text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border transition-colors cursor-pointer',
-                  active ? pill.color : 'text-gray-600 bg-transparent border-white/[0.06] hover:border-white/10'
-                )}
-              >
-                {pill.label} {pill.count > 0 && pill.count}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Feed body */}
-      <div ref={feedRef} className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-          </div>
-        ) : activeJobs.length === 0 ? (
-          <div className="text-center py-16 px-4">
-            <p className="text-[11px] font-mono text-gray-600">
-              No jobs yet. That changes today.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Action Required */}
-            {filteredActionRequired.length > 0 && (
-              <>
-                <SectionHeader label="Action required" count={filteredActionRequired.length} />
-                <div className="space-y-0.5">
-                  {filteredActionRequired.map(job => renderCard(job))}
-                </div>
-              </>
-            )}
-
-            {/* Skip - collapsed */}
-            {filteredSkip.length > 0 && (
-              <>
-                {!showSkips ? (
-                  <button
-                    onClick={() => setShowSkips(true)}
-                    className="w-full text-center py-2 text-[9px] font-mono text-gray-600 hover:text-gray-400 transition-colors cursor-pointer"
-                  >
-                    {filteredSkip.length} hard passes hidden — show them?
-                  </button>
-                ) : (
-                  <>
-                    <SectionHeader label="Hard passes" count={filteredSkip.length} />
-                    <div className="space-y-0.5">
-                      {filteredSkip.map(job => renderCard(job))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-
-            {/* Actioned - dimmed */}
-            {actionedJobs.length > 0 && (
-              <>
-                <SectionHeader label="Done" count={actionedJobs.length} />
-                <div className="space-y-0.5">
-                  {actionedJobs.map(job => renderCard(job, true))}
-                </div>
-              </>
-            )}
-
-            {/* Infinite scroll sentinel + fallback load-more */}
-            {hasMore && (
-              <div ref={sentinelRef} className="py-4 flex flex-col items-center gap-2">
-                {loadingMore ? (
-                  <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                ) : (
-                  <button
-                    onClick={loadMore}
-                    className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 hover:border-white/[0.12] transition-colors cursor-pointer"
-                  >
-                    Load more
-                  </button>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
     </div>
   );
 };

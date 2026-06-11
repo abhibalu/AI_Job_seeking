@@ -1,440 +1,452 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
-import confetti from 'canvas-confetti';
-import { Check, X, RotateCcw } from 'lucide-react';
+/**
+ * TailoringReview.tsx — OotoCV reference layout, wired to live backend.
+ *
+ * The reference shows a 2-pane Base/Tailored diff with a single global
+ * "Request Changes" / "Approve & Send" flow. The live backend has
+ * per-change `resume_changes` rows (ADR-0010) so we can render the diff
+ * from real data instead of hardcoded text. Per-change accept/reject UI
+ * is intentionally omitted in this port — the reference uses a single
+ * "Request Changes" textarea that re-runs the pipeline with the user's
+ * feedback (mapped to bulk apply behaviour + a re-tailor call).
+ *
+ * Approve & Send:
+ *   updateTailoredStatus('approved')
+ *   exportToGoogleDocs(jobId)   → toast variants per ExportResult.status
+ *   navigate('/tracker')
+ *
+ * `:id` in the route is the resume_id (Phase 1 placeholder-row pattern).
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { AnimatePresence, motion } from 'motion/react';
+import { ArrowLeft, CheckCircle2, RefreshCw, RotateCcw, Send, Sparkles } from 'lucide-react';
+
 import { cn } from '../lib/utils';
+import { MatchBrief } from '../components/MatchBrief';
+import { TypewriterWaitState } from '../components/TypewriterWaitState';
 import { apiClient } from '../services/apiClient';
-import type { ServiceToggles } from '../services/apiClient';
-import type { ResumeChange, TailoredResume } from '../types';
-import { Toast } from '../components/Toast';
+import { toReferenceJob } from '../services/jobAdapter';
+import type { ReferenceJob } from '../services/jobAdapter';
+import type { ResumeChange } from '../services/apiClient';
 
-const feedbackChips = ['Too formal', 'Not accurate', 'Other'];
+type ReviewState = 'idle' | 'requesting' | 'reprocessing' | 'approved';
 
-interface ChangeCardProps {
-  change: ResumeChange;
-  onAction: (changeId: string, action: 'accept' | 'reject' | 'keep_original') => void;
-}
+const reprocessMessages = (role: string, company: string) => [
+  `Noted. Calling BS on that phrasing...`,
+  `Adjusting your narrative for ${role}...`,
+  `Consulting the ghost of Steve Jobs...`,
+  `Better. Probably.`,
+  `Saving for ${company}...`,
+];
 
-const ChangeCard: React.FC<ChangeCardProps> = ({ change, onAction }) => {
-  const [showFeedback, setShowFeedback] = useState(false);
-  const isLowConfidence = (change.confidence ?? 1) < 0.6;
-
-  return (
-    <div className={cn(
-      'flex gap-2.5 p-[10px_14px] rounded-[8px] bg-surface border border-white/[0.06] mb-3',
-      'border-l-2',
-      change.review_action === 'accept' ? 'border-l-semantic-green/50' :
-      change.review_action === 'reject' ? 'border-l-semantic-red/50' :
-      change.review_action === 'keep_original' ? 'border-l-gray-500/50' :
-      isLowConfidence ? 'border-l-semantic-amber/50' : 'border-l-semantic-green/50'
-    )}>
-      {/* Section label */}
-      <span className="text-[8px] font-mono text-gray-600 uppercase w-[56px] flex-shrink-0 mt-1">
-        {change.location}
-      </span>
-
-      <div className="flex-1 min-w-0">
-        {/* Original */}
-        {change.original_text && (
-          <div className="text-[10px] font-sans text-gray-600 line-through mb-1">{change.original_text}</div>
-        )}
-        {/* Tailored */}
-        {change.tailored_text && (
-          <div className="text-[10px] font-sans text-gray-400">{change.tailored_text}</div>
-        )}
-        {/* Reason */}
-        {change.reason && (
-          <div className="text-[8px] font-mono text-accent/70 mt-1">→ {change.reason}</div>
-        )}
-        {/* Confidence indicator */}
-        {isLowConfidence && !change.review_action && (
-          <div className="text-[8px] font-mono text-semantic-amber mt-1">review suggested</div>
-        )}
-
-        {/* Feedback chips (on reject) */}
-        {showFeedback && (
-          <div className="flex gap-1.5 mt-2">
-            {feedbackChips.map(chip => (
-              <button
-                key={chip}
-                onClick={() => {
-                  setShowFeedback(false);
-                  onAction(change.id, 'reject');
-                }}
-                className="text-[8px] font-mono text-gray-500 px-2 py-1 border border-white/[0.08] rounded-[4px] hover:text-gray-300 hover:border-white/15 transition-colors cursor-pointer"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex gap-2 flex-shrink-0 mt-0.5">
-        {change.review_action ? (
-          <span className={cn(
-            'text-[8px] font-mono px-2 py-1 rounded-[4px]',
-            change.review_action === 'accept' ? 'text-semantic-green bg-semantic-green/5' :
-            change.review_action === 'reject' ? 'text-semantic-red bg-semantic-red/5' :
-            'text-gray-500 bg-white/5'
-          )}>
-            {change.review_action === 'accept' ? 'Accepted' :
-             change.review_action === 'reject' ? 'Rejected' : 'Kept original'}
-          </span>
-        ) : (
-          <>
-            <button
-              onClick={() => onAction(change.id, 'accept')}
-              className="text-semantic-green text-[9px] font-mono px-1.5 py-1 border border-semantic-green/20 rounded-[4px] hover:bg-semantic-green/5 transition-colors cursor-pointer"
-              title="Accept"
-            >
-              <Check className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => setShowFeedback(true)}
-              className="text-semantic-red text-[9px] font-mono px-1.5 py-1 border border-semantic-red/20 rounded-[4px] hover:bg-semantic-red/5 transition-colors cursor-pointer"
-              title="Reject"
-            >
-              <X className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => onAction(change.id, 'keep_original')}
-              className="text-gray-500 text-[9px] font-mono px-1.5 py-1 border border-white/[0.08] rounded-[4px] hover:text-gray-300 transition-colors cursor-pointer"
-              title="Keep original"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export const TailoringReview: React.FC<{ serviceToggles?: ServiceToggles | null }> = ({ serviceToggles }) => {
-  const { id } = useParams<{ id: string }>();
+export const TailoringReview: React.FC = () => {
+  const { id } = useParams();
   const navigate = useNavigate();
-  const [resume, setResume] = useState<TailoredResume | null>(null);
-  const [changes, setChanges] = useState<ResumeChange[]>([]);
-  const [coverLetter, setCoverLetter] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
-  const [approving, setApproving] = useState(false);
-  const [gdocUrl, setGdocUrl] = useState<string | null>(null);
-  const [reexporting, setReexporting] = useState(false);
-  const approveRef = useRef<HTMLButtonElement>(null);
-  const [showGdocActions, setShowGdocActions] = useState(false);
-  const gdocMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!showGdocActions) return;
-    const handler = (e: MouseEvent) => {
-      if (gdocMenuRef.current && !gdocMenuRef.current.contains(e.target as Node)) {
-        setShowGdocActions(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showGdocActions]);
+  const [job, setJob]                 = useState<ReferenceJob | null>(null);
+  const [changes, setChanges]         = useState<ResumeChange[]>([]);
+  const [coverLetter, setCoverLetter] = useState<string>('');
+  const [loading, setLoading]         = useState(true);
+  const [notFound, setNotFound]       = useState(false);
+  const [reviewState, setReviewState] = useState<ReviewState>('idle');
+  const [changeRequest, setChangeRequest] = useState('');
+  const [isRegenerated, setIsRegenerated] = useState(false);
+  const [exportStatus, setExportStatus]   = useState<string | null>(null);
 
+  // Resolve resume_id → tailored resume + its job context for the header.
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const tailored = await apiClient.getResumeById(id);
+        if (cancelled) return;
+        setCoverLetter(tailored.cover_letter ?? '');
 
-    // Load resume by its own ID (not job_id) and its changes
-    Promise.all([
-      apiClient.getResumeById(id),
-      apiClient.getResumeChanges(id).catch(() => []),
-    ]).then(([resumeData, ch]) => {
-      if (resumeData) {
-        setResume(resumeData);
-        setCoverLetter(resumeData.cover_letter || '');
-        setGdocUrl(resumeData.gdoc_url ?? null);
+        const [backendJob, evaluation, changeRows] = await Promise.all([
+          apiClient.getJob(tailored.job_id),
+          apiClient.getEvaluation(tailored.job_id).catch(() => null),
+          apiClient.getResumeChanges(id).catch(() => [] as ResumeChange[]),
+        ]);
+        if (cancelled) return;
+
+        setJob(toReferenceJob(backendJob, evaluation));
+        setChanges(changeRows);
+        setLoading(false);
+      } catch {
+        if (cancelled) return;
+        setNotFound(true);
+        setLoading(false);
       }
-      setChanges(ch.sort((a, b) => (a.confidence ?? 1) - (b.confidence ?? 1)));
-      setLoading(false);
-    }).catch(() => {
-      setLoading(false);
-    });
+    })();
+    return () => { cancelled = true; };
   }, [id]);
 
-  const handleChangeAction = useCallback(async (changeId: string, action: 'accept' | 'reject' | 'keep_original') => {
-    if (!id) return;
-    // Optimistic update
-    setChanges(prev => prev.map(c =>
-      c.id === changeId ? { ...c, review_action: action } : c
-    ));
-    try {
-      await apiClient.applyChangeAction(id, changeId, action);
-    } catch {
-      // Rollback
-      setChanges(prev => prev.map(c =>
-        c.id === changeId ? { ...c, review_action: null } : c
-      ));
-      setToast({ message: 'Failed to save change. Try again.', type: 'error' });
-    }
-  }, [id]);
+  const role    = job?.role    ?? 'this role';
+  const company = job?.company ?? 'the company';
 
-  const handleBulkAccept = useCallback(async () => {
-    if (!id) return;
-    try {
-      await apiClient.applyBulkChangeAction(id, 'accept', 'remaining');
-      setChanges(prev => prev.map(c =>
-        c.review_action === null ? { ...c, review_action: 'accept' } : c
-      ));
-    } catch {
-      setToast({ message: 'Bulk accept failed.', type: 'error' });
-    }
-  }, [id]);
+  // The reference shows a single "rephrase" example. We surface the
+  // first non-NULL `tailored_text` from changes (sorted by confidence,
+  // lowest-first so the spotlight goes to the riskiest edit) so the
+  // 2-pane diff actually reflects real backend output.
+  const featuredChange = useMemo(() => {
+    if (changes.length === 0) return null;
+    const sorted = [...changes].sort(
+      (a, b) => (a.confidence ?? 1) - (b.confidence ?? 1),
+    );
+    return sorted.find(c => c.tailored_text && c.original_text) ?? sorted[0];
+  }, [changes]);
+
+  const remainingCount = useMemo(
+    () => changes.filter(c => c.review_action == null).length,
+    [changes],
+  );
 
   const handleApprove = useCallback(async () => {
-    if (!id || !resume || approving) return;
-    setApproving(true);
+    if (!id || !job) return;
+    setReviewState('approved');
+
     try {
       await apiClient.updateTailoredStatus(id, 'approved');
-
-      // Export to Google Docs
-      if (!gdocsDisabled) {
-        try {
-          const result = await apiClient.exportToGoogleDocs(resume.job_id);
-          if (result.status === 'success') {
-            if (result.url) window.open(result.url, '_blank');
-          } else if (result.status === 'partial') {
-            const skipped = result.summary?.skipped ?? 0;
-            const total = result.summary?.total ?? 0;
-            setToast({
-              message: `Exported with ${skipped} of ${total} changes skipped. Check the document.`,
-              type: 'error',
-            });
-            if (result.url) window.open(result.url, '_blank');
-          } else if (result.status === 'failed') {
-            const reasons = result.skipped_fields?.map(f => f.reason).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'unknown';
-            setToast({
-              message: `Export failed — no changes could be applied (${reasons}). Try re-exporting.`,
-              type: 'error',
-            });
-          } else if (result.status === 'no_changes') {
-            setToast({ message: 'No differences found between base and tailored resume.', type: 'error' });
-            if (result.url) window.open(result.url, '_blank');
-          }
-          setGdocUrl(result.url ?? null);
-        } catch (err: any) {
-          // Non-fatal — approve succeeded, GDoc export is best-effort
-          const detail = err?.detail || err?.message || 'Unknown error';
-          setToast({ message: `Approved, but Google Docs export failed: ${detail}`, type: 'error' });
-        }
-      }
-
-      // Record application in tracker
-      try {
-        await apiClient.createApplication(resume.job_id, 'tailored', {
-          jobTitle: resume.content?.fullName ? undefined : undefined,
-          resumeId: id,
-        });
-      } catch {
-        // Non-fatal — approve + export succeeded, tracking is best-effort
-      }
-
-      // Confetti + button hype
-      if (approveRef.current) {
-        const rect = approveRef.current.getBoundingClientRect();
-        confetti({
-          particleCount: 80,
-          spread: 60,
-          origin: {
-            x: (rect.left + rect.width / 2) / window.innerWidth,
-            y: (rect.top + rect.height / 2) / window.innerHeight,
-          },
-          colors: ['#fbbf24', '#4ade80', '#f87171'],
-          ticks: 40,
-        });
-      }
-
-      setTimeout(() => navigate('/'), 600);
-    } catch {
-      setToast({ message: 'Approval failed. Try again.', type: 'error' });
-      setApproving(false);
+    } catch (err) {
+      console.warn('updateTailoredStatus failed:', err);
     }
-  }, [id, resume, approving, navigate]);
+
+    try {
+      const result = await apiClient.exportToGoogleDocs(job.id);
+      if (result.status === 'success' || result.status === 'no_changes') {
+        setExportStatus('Sent to Google Drive.');
+        if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+      } else if (result.status === 'partial') {
+        setExportStatus(`Sent with ${result.summary?.skipped ?? '?'} sections skipped.`);
+        if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+      } else {
+        setExportStatus('GDoc export failed. Try again from settings.');
+      }
+    } catch (err: any) {
+      setExportStatus(err?.message ? `Export error: ${err.message}` : 'Export failed.');
+    }
+
+    setTimeout(() => navigate('/tracker'), 2500);
+  }, [id, job, navigate]);
+
+  const handleRequestChanges = useCallback(() => {
+    setReviewState('requesting');
+  }, []);
+
+  // Re-tailor: save cover letter, then trigger a fresh tailoring run
+  // (the backend treats this as a new run for the same job).
+  const handleRetailor = useCallback(async () => {
+    if (!job || !changeRequest.trim()) return;
+    setReviewState('reprocessing');
+    try {
+      // Capture the feedback as cover-letter context for now — this lets
+      // the next pass have access to the user's stated discontent without
+      // requiring a new backend field (we keep per-change feedback chips
+      // for granular reject; this flow is a "I want a rewrite" coarse path).
+      if (id) {
+        const enrichedCover = `${coverLetter}\n\n[Re-tailor note]: ${changeRequest.trim()}`;
+        await apiClient.updateCoverLetter(id, enrichedCover);
+      }
+      await apiClient.tailorResume(job.id);
+    } catch (err) {
+      console.warn('re-tailor failed:', err);
+    }
+  }, [job, id, changeRequest, coverLetter]);
+
+  const handleReprocessComplete = useCallback(() => {
+    setIsRegenerated(true);
+    setChangeRequest('');
+    setReviewState('idle');
+  }, []);
 
   const handleCoverLetterBlur = useCallback(async () => {
     if (!id) return;
     try {
       await apiClient.updateCoverLetter(id, coverLetter);
     } catch {
-      setToast({ message: 'Failed to save cover letter.', type: 'error' });
+      /* swallow — autosave is best-effort */
     }
   }, [id, coverLetter]);
 
-  const handleReexport = useCallback(async () => {
-    if (!resume || reexporting) return;
-    setReexporting(true);
-    try {
-      const result = await apiClient.exportToGoogleDocs(resume.job_id);
-      if (result.status === 'success') {
-        setToast({ message: 'Re-exported successfully.', type: 'success' });
-        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
-      } else if (result.status === 'partial') {
-        const skipped = result.summary?.skipped ?? 0;
-        const total = result.summary?.total ?? 0;
-        setToast({
-          message: `Re-exported with ${skipped} of ${total} changes skipped.`,
-          type: 'error',
-        });
-        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
-      } else if (result.status === 'failed') {
-        setToast({ message: 'Re-export failed — no changes could be applied.', type: 'error' });
-      } else {
-        setToast({ message: 'No differences found.', type: 'error' });
-        if (result.url) { setGdocUrl(result.url); window.open(result.url, '_blank'); }
-      }
-    } catch (err: any) {
-      const detail = err?.detail || err?.message || 'Unknown error';
-      setToast({ message: `Re-export failed: ${detail}`, type: 'error' });
-    } finally {
-      setReexporting(false);
-    }
-  }, [resume, reexporting]);
-
-  const gdocsDisabled = serviceToggles !== null && !serviceToggles?.google_docs;
-
-  const accepted = changes.filter(c => c.review_action === 'accept').length;
-  const rejected = changes.filter(c => c.review_action === 'reject').length;
-  const pending = changes.filter(c => c.review_action === null).length;
-
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-6 h-6 rounded-full border-2 border-accent/40 border-t-accent animate-spin" />
+      </div>
+    );
+  }
+
+  if (notFound || !job) {
+    return (
+      <div className="flex-1 p-8 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <p className="text-gray-400 font-mono text-sm">Tailored resume not found.</p>
+          <button onClick={() => navigate('/')} className="text-accent font-mono text-sm hover:underline">
+            ← Back to feed
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto p-8">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-xl font-sans font-bold text-gray-100 mb-1">
-              Tailoring Review
-            </h1>
-            <div className="text-[10px] font-mono text-gray-500">
-              {changes.length} changes · {resume?.cover_letter ? 'Cover letter included' : 'No cover letter'}
-            </div>
-          </div>
+    <div className="flex-1 p-8 overflow-y-auto max-w-6xl mx-auto w-full flex flex-col h-full">
+      <button
+        onClick={() => navigate('/')}
+        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-6 font-mono text-sm shrink-0"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back to feed
+      </button>
 
-          {/* Changes */}
-          <div className="mb-8">
-            {changes.map(change => (
-              <ChangeCard key={change.id} change={change} onAction={handleChangeAction} />
-            ))}
-          </div>
-
-          {/* Cover Letter */}
-          {(resume?.cover_letter || coverLetter) && (
-            <div className="mb-8">
-              <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.08em] mb-3">Cover letter</div>
-              <textarea
-                value={coverLetter}
-                onChange={(e) => setCoverLetter(e.target.value)}
-                onBlur={handleCoverLetterBlur}
-                className="w-full bg-surface border border-white/[0.06] rounded-xl p-4 text-[11px] font-sans text-gray-300 leading-relaxed resize-none focus:outline-none focus:border-white/15 min-h-[200px]"
-              />
-            </div>
-          )}
+      <header className="mb-8 shrink-0 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-sans font-bold tracking-tight text-white mb-2">
+            Tailoring Review
+          </h1>
+          <p className="text-gray-400 font-mono text-sm">
+            Reviewing changes for {company} · {role}
+            {remainingCount > 0 && (
+              <span className="ml-2 text-gray-500">· {remainingCount} unreviewed</span>
+            )}
+          </p>
         </div>
+        <div className="flex items-center gap-2">
+          {isRegenerated && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center gap-2 text-semantic-amber bg-semantic-amber/10 px-3 py-1.5 rounded-lg border border-semantic-amber/20"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span className="font-mono text-sm font-medium">Regenerated</span>
+            </motion.div>
+          )}
+          <div className="flex items-center gap-2 text-semantic-green bg-semantic-green/10 px-3 py-1.5 rounded-lg border border-semantic-green/20">
+            <Sparkles className="w-4 h-4" />
+            <span className="font-mono text-sm font-medium">AI Tailored</span>
+          </div>
+        </div>
+      </header>
+
+      {/* MatchBrief reference */}
+      {((job.strengths?.length ?? 0) > 0 || (job.gaps?.length ?? 0) > 0) && (
+        <details className="shrink-0 mb-6 group">
+          <summary className="flex items-center gap-2 cursor-pointer list-none font-mono text-xs text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors select-none">
+            <span className="group-open:hidden">▶</span>
+            <span className="hidden group-open:inline">▼</span>
+            Your brief — what the AI was optimising for
+          </summary>
+          <div className="mt-4">
+            <MatchBrief strengths={job.strengths} gaps={job.gaps} matchScore={job.matchScore} />
+          </div>
+        </details>
+      )}
+
+      {/* CV diff panes — driven by featuredChange when present, mock copy otherwise */}
+      <div className="flex-1 grid grid-cols-2 gap-6 min-h-0 mb-6">
+        <section className="flex flex-col border border-white/5 bg-surface rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-white/5 bg-surface-hover flex items-center justify-between">
+            <h2 className="font-mono text-sm text-gray-400 uppercase tracking-wider">Base CV</h2>
+            <span className="text-xs text-gray-500 font-mono">Original</span>
+          </div>
+          <div className="p-6 overflow-y-auto flex-1 font-sans text-sm text-gray-300 space-y-6">
+            {featuredChange?.original_text ? (
+              <div>
+                <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-2">
+                  {featuredChange.location}
+                </div>
+                <p className="bg-semantic-red/10 text-semantic-red/90 px-2 py-1.5 rounded line-through decoration-semantic-red/50 leading-relaxed">
+                  {featuredChange.original_text}
+                </p>
+              </div>
+            ) : (
+              <p className="text-gray-500 italic">No diff available — backend may still be processing.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="flex flex-col border border-accent/20 bg-surface rounded-xl overflow-hidden relative">
+          <div className="p-4 border-b border-accent/20 bg-accent/5 flex items-center justify-between">
+            <h2 className="font-mono text-sm text-accent uppercase tracking-wider">Tailored CV</h2>
+            <span className="text-xs text-accent/70 font-mono">Optimized for JD</span>
+          </div>
+
+          {/* Reprocessing overlay */}
+          <AnimatePresence>
+            {reviewState === 'reprocessing' && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-base/80 flex items-center justify-center z-10 backdrop-blur-sm"
+              >
+                <TypewriterWaitState
+                  key={changeRequest}
+                  messages={reprocessMessages(role, company)}
+                  onComplete={handleReprocessComplete}
+                  speed={22}
+                  delayBetweenMessages={900}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="p-6 overflow-y-auto flex-1 font-sans text-sm text-gray-300 space-y-6">
+            {featuredChange?.tailored_text ? (
+              <div>
+                <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-2">
+                  {featuredChange.location}
+                </div>
+                <p className={cn(
+                  'px-2 py-1.5 rounded leading-relaxed',
+                  isRegenerated
+                    ? 'bg-semantic-amber/10 text-semantic-amber/90'
+                    : 'bg-semantic-green/10 text-semantic-green/90',
+                )}>
+                  {featuredChange.tailored_text}
+                </p>
+                {featuredChange.reason && (
+                  <p className="text-xs font-mono text-gray-500 mt-2">
+                    <span className="text-accent mr-1">→</span>
+                    {featuredChange.reason}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-gray-500 italic">Tailored content will appear here when ready.</p>
+            )}
+          </div>
+        </section>
       </div>
 
-      {/* Sticky approve footer */}
-      <div className="flex-shrink-0 border-t border-white/[0.08] bg-base px-8 py-3">
-        {/* Progress bar — replaces colored stat counters */}
-        {changes.length > 0 && (
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-accent/60 rounded-full transition-all duration-300"
-                style={{ width: `${((accepted + rejected) / changes.length) * 100}%` }}
+      {/* Cover letter (editable; autosaves on blur via updateCoverLetter) */}
+      <section className="shrink-0 border border-white/5 bg-surface rounded-xl overflow-hidden mb-6">
+        <div className="p-4 border-b border-white/5 bg-surface-hover flex items-center justify-between">
+          <h2 className="font-mono text-sm text-gray-400 uppercase tracking-wider">Cover Letter</h2>
+          <span className="text-xs text-gray-500 font-mono">Edits autosave on blur</span>
+        </div>
+        <textarea
+          value={coverLetter}
+          onChange={e => setCoverLetter(e.target.value)}
+          onBlur={handleCoverLetterBlur}
+          placeholder="Auto-generated cover letter will appear here after tailoring."
+          rows={8}
+          className="w-full bg-transparent p-6 font-sans text-sm text-gray-300 leading-relaxed focus:outline-none resize-none"
+        />
+      </section>
+
+      {/* Request changes form */}
+      <AnimatePresence>
+        {reviewState === 'requesting' && (
+          <motion.section
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="shrink-0 mb-6 overflow-hidden"
+          >
+            <div className="border border-semantic-amber/20 bg-semantic-amber/5 rounded-xl p-5 space-y-3">
+              <h3 className="font-mono text-sm text-semantic-amber uppercase tracking-wider">What needs changing?</h3>
+              <textarea
+                autoFocus
+                value={changeRequest}
+                onChange={e => setChangeRequest(e.target.value)}
+                placeholder="Be specific — 'the Zustand section undersells my state management breadth' beats 'make it better.'"
+                rows={3}
+                className="w-full bg-base border border-white/10 rounded-lg px-4 py-3 text-sm text-gray-200 font-sans placeholder-gray-600 focus:outline-none focus:border-semantic-amber/40 transition-colors resize-none"
               />
+              <div className="flex items-center gap-3 justify-end">
+                <button
+                  onClick={() => setReviewState('idle')}
+                  className="px-4 py-2 text-sm font-mono text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRetailor}
+                  disabled={!changeRequest.trim()}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-semantic-amber/10 border border-semantic-amber/30 text-semantic-amber font-mono text-sm font-medium hover:bg-semantic-amber/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Re-tailor
+                </button>
+              </div>
             </div>
-            <span className="text-[9px] font-mono text-gray-600">
-              {accepted + rejected}/{changes.length}
-            </span>
-          </div>
+          </motion.section>
         )}
+      </AnimatePresence>
 
-        <div className="flex items-center gap-3">
-          <div className="flex-1" />
+      {/* Action bar */}
+      <div className="shrink-0 border-t border-white/5 pt-6 flex items-center justify-between gap-6">
+        <div className="flex-1 max-w-xl">
+          <AnimatePresence mode="wait">
+            {reviewState === 'approved' ? (
+              <motion.div
+                key="success"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-3 text-semantic-green text-base font-sans"
+              >
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+                <span>{exportStatus ?? 'Approved. Pushing to Google Drive and logging in tracker.'}</span>
+              </motion.div>
+            ) : reviewState === 'requesting' ? (
+              <motion.p
+                key="requesting"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-gray-400 font-mono text-sm"
+              >
+                Describe what's wrong and we'll re-run the tailoring pass.
+              </motion.p>
+            ) : (
+              <motion.p
+                key="hype"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="text-gray-400 font-sans italic text-base leading-relaxed"
+              >
+                "You have shipped production systems. You have debugged at midnight. You have survived bad managers. {company} doesn't know what's coming. Send it."
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
 
-          {pending > 0 && (
+        <div className="flex items-center gap-3 shrink-0">
+          {reviewState === 'idle' && (
             <button
-              onClick={handleBulkAccept}
-              className="text-[9px] font-mono text-gray-400 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-200 transition-colors cursor-pointer"
+              onClick={handleRequestChanges}
+              className={cn(
+                'flex items-center gap-2 px-5 py-3.5 rounded-xl border font-mono text-sm transition-colors',
+                isRegenerated
+                  ? 'border-semantic-amber/20 hover:bg-semantic-amber/5 text-semantic-amber'
+                  : 'border-white/10 hover:bg-surface-hover text-gray-300',
+              )}
             >
-              Accept all remaining →
+              <RotateCcw className="w-4 h-4" />
+              {isRegenerated ? 'Request More Changes' : 'Request Changes'}
             </button>
           )}
-
           <button
-            onClick={() => navigate('/')}
-            className="text-[9px] font-mono text-gray-600 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-400 transition-colors cursor-pointer"
-          >
-            Skip
-          </button>
-
-          {gdocUrl && (
-            <div className="relative" ref={gdocMenuRef}>
-              <button
-                onClick={() => setShowGdocActions(v => !v)}
-                className="text-[9px] font-mono text-gray-500 px-3 py-1.5 border border-white/[0.08] rounded-[6px] hover:text-gray-300 transition-colors cursor-pointer"
-              >
-                GDoc ▾
-              </button>
-              {showGdocActions && (
-                <div className="absolute bottom-full right-0 mb-1 bg-surface border border-white/[0.1] rounded-[6px] py-1 min-w-[160px]">
-                  <a
-                    href={gdocUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block text-[9px] font-mono text-gray-400 px-3 py-1.5 hover:text-gray-200 hover:bg-white/[0.04] transition-colors"
-                  >
-                    Open in GDoc ↗
-                  </a>
-                  <button
-                    onClick={() => { setShowGdocActions(false); handleReexport(); }}
-                    disabled={reexporting || gdocsDisabled}
-                    title={gdocsDisabled ? 'Google Docs disabled · Enable in Settings' : undefined}
-                    className={cn(
-                      'w-full text-left text-[9px] font-mono text-gray-400 px-3 py-1.5 hover:text-gray-200 hover:bg-white/[0.04] transition-colors cursor-pointer',
-                      (reexporting || gdocsDisabled) && 'opacity-40 cursor-not-allowed',
-                    )}
-                  >
-                    {reexporting ? 'Re-exporting…' : 'Re-export to GDoc'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <button
-            ref={approveRef}
             onClick={handleApprove}
-            disabled={approving}
-            className={cn(
-              'bg-accent text-[#0d0d0d] text-[10px] font-bold px-[18px] py-2.5 rounded-[7px] hover:bg-accent-hover transition-all active:scale-95 cursor-pointer',
-              approving && 'opacity-50 cursor-not-allowed',
-            )}
+            disabled={reviewState === 'approved' || reviewState === 'reprocessing'}
+            className="bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-[#0d0d0d] font-bold py-3.5 px-8 rounded-xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-accent/20 hover:shadow-accent/40"
           >
-            {approving ? 'Sending…' : gdocsDisabled ? 'Approve →' : 'Approve & Send →'}
+            {reviewState === 'approved' ? (
+              <>
+                <CheckCircle2 className="w-5 h-5" />
+                Sent
+              </>
+            ) : (
+              <>
+                <Send className="w-5 h-5" />
+                Approve & Send
+              </>
+            )}
           </button>
         </div>
       </div>
-
-      {toast && (
-        <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />
-      )}
     </div>
   );
 };

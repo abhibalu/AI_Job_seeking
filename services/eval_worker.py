@@ -12,7 +12,7 @@ import logging
 import time
 
 from backend.settings import settings
-from agents.database import save_evaluation
+from agents.evaluator_writer import save_evaluation_with_card_lines
 from agents.supabase_client import get_supabase_client
 from agents.pipeline_graph import build_pipeline_graph
 from agents.supabase_checkpointer import SupabaseSaver
@@ -76,7 +76,7 @@ def _process_single_job_graph(graph, job: dict) -> tuple[str, str | None]:
         # even if later nodes (parse/tailor) failed. The evaluation itself succeeded.
         if final_state.get("evaluation"):
             try:
-                save_evaluation(final_state["evaluation"])
+                save_evaluation_with_card_lines(final_state["evaluation"])
             except Exception as e:
                 logger.warning(f"[GraphWorker] Failed to save evaluation to DB for {job_id}: {e}")
 

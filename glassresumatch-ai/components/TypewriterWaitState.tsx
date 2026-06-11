@@ -1,97 +1,95 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * TypewriterWaitState.tsx — OotoCV reference verbatim.
+ *
+ * Three memory-leak fixes baked in (per the reference spec):
+ *   - pauseTimer cleared on unmount
+ *   - onComplete ref-stabilised
+ *   - messages snapshotted at mount via ref
+ * Use `key={...}` on the parent to swap message sets.
+ */
+import React, { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
+
+import { cn } from '../lib/utils';
 
 interface TypewriterWaitStateProps {
-    /** Messages to display in sequence, one character at a time. */
-    messages: string[];
-    /** Called once all messages have finished typing. */
-    onComplete: () => void;
-    /**
-     * sessionStorage key to track "already shown this session".
-     * When set: if the key exists in sessionStorage, onComplete fires immediately
-     * (skips animation). Written to sessionStorage when the last message finishes.
-     */
-    sessionKey?: string;
-    /** Characters per second equivalent: ms per character. Default 30. */
-    speed?: number;
-    /** Pause between messages in ms. Default 800. */
-    delayBetweenMessages?: number;
-    /** Loop back to the first message instead of stopping. Default false. */
-    loop?: boolean;
-    /** Optional CSS class override for the container. */
-    className?: string;
+  key?: string | number;
+  messages: string[];
+  onComplete?: () => void;
+  speed?: number;
+  delayBetweenMessages?: number;
+  compact?: boolean;
 }
 
-/**
- * Typewriter animation through an array of messages.
- * Uses sessionStorage to avoid replaying on page refresh (ADR-0009).
- */
 export const TypewriterWaitState: React.FC<TypewriterWaitStateProps> = ({
-    messages,
-    onComplete,
-    sessionKey,
-    speed = 30,
-    delayBetweenMessages = 800,
-    loop = false,
-    className = '',
+  messages,
+  onComplete,
+  speed = 30,
+  delayBetweenMessages = 1500,
+  compact = false,
 }) => {
-    const [displayed, setDisplayed] = useState('');
-    const [msgIdx, setMsgIdx] = useState(0);
-    const [charIdx, setCharIdx] = useState(0);
-    const [done, setDone] = useState(false);
-    const onCompleteRef = useRef(onComplete);
-    useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+  const [displayedText, setDisplayedText] = useState('');
 
-    // Skip if already seen this session
-    useEffect(() => {
-        if (sessionKey && sessionStorage.getItem(`ootocv_tw_${sessionKey}`)) {
-            onCompleteRef.current();
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionKey]);
+  // Ref-stabilise onComplete — prevents handler-recreation from restarting the effect.
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => { onCompleteRef.current = onComplete; });
 
-    useEffect(() => {
-        if (done) return;
+  // Snapshot messages at mount so literal-array prop changes don't restart.
+  // To swap message sets, change the `key` prop on this component.
+  const messagesRef = useRef(messages);
 
-        const msg = messages[msgIdx] ?? '';
+  useEffect(() => {
+    if (currentMessageIndex >= messagesRef.current.length) {
+      onCompleteRef.current?.();
+      return;
+    }
 
-        if (charIdx < msg.length) {
-            const t = setTimeout(() => {
-                setDisplayed(msg.slice(0, charIdx + 1));
-                setCharIdx(c => c + 1);
-            }, speed);
-            return () => clearTimeout(t);
-        }
+    const fullText = messagesRef.current[currentMessageIndex];
+    let currentIndex = 0;
+    let pauseTimer: ReturnType<typeof setTimeout> | undefined;
 
-        // Message fully typed — pause then advance
-        const t = setTimeout(() => {
-            if (msgIdx + 1 < messages.length) {
-                setMsgIdx(m => m + 1);
-                setCharIdx(0);
-                setDisplayed('');
-            } else if (loop) {
-                // Cycle back to the first message
-                setMsgIdx(0);
-                setCharIdx(0);
-                setDisplayed('');
-            } else {
-                setDone(true);
-                if (sessionKey) {
-                    sessionStorage.setItem(`ootocv_tw_${sessionKey}`, 'true');
-                }
-                onCompleteRef.current();
-            }
+    const typingInterval = setInterval(() => {
+      if (currentIndex <= fullText.length) {
+        setDisplayedText(fullText.slice(0, currentIndex));
+        currentIndex++;
+      } else {
+        clearInterval(typingInterval);
+        pauseTimer = setTimeout(() => {
+          setCurrentMessageIndex((prev) => prev + 1);
         }, delayBetweenMessages);
+      }
+    }, speed);
 
-        return () => clearTimeout(t);
-    }, [done, msgIdx, charIdx, messages, speed, delayBetweenMessages, sessionKey]);
+    return () => {
+      clearInterval(typingInterval);
+      if (pauseTimer) clearTimeout(pauseTimer);
+    };
+  }, [currentMessageIndex, speed, delayBetweenMessages]);
 
-    if (done) return null;
-
-    return (
-        <div className={`flex items-center gap-2 font-mono text-sm text-gray-500 ${className}`}>
-            <span>{displayed}</span>
-            {/* Blinking cursor */}
-            <span className="inline-block w-[6px] h-[13px] bg-gray-500 animate-pulse align-middle" />
-        </div>
-    );
+  return (
+    <div className={cn('font-mono text-sm text-gray-400 flex flex-col items-start justify-center h-full', !compact && 'min-h-[200px] max-w-lg mx-auto')}>
+      <div className="space-y-2 w-full">
+        {!compact && messagesRef.current.slice(0, currentMessageIndex).map((msg, idx) => (
+          <div key={idx} className="opacity-50 flex">
+            <span className="text-accent mr-2">→</span>
+            <span>{msg}</span>
+          </div>
+        ))}
+        {currentMessageIndex < messagesRef.current.length && (
+          <div className="flex text-gray-200">
+            <span className="text-accent mr-2">→</span>
+            <span>
+              {displayedText}
+              <motion.span
+                animate={{ opacity: [1, 0] }}
+                transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
+                className="inline-block w-2 h-4 bg-accent ml-1 align-middle"
+              />
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };

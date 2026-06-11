@@ -1,117 +1,127 @@
-import React, { useState, useCallback, useEffect } from 'react';
+/**
+ * TailoringStrip.tsx — OotoCV reference visual + real SSE wiring.
+ *
+ * The reference's TailoringStrip is purely cosmetic (mock messages with a
+ * fake completion timer). The live version drives the same visual from
+ * the existing `useSSE` hook + `cancelTask` so progress is real and
+ * cancellable.
+ *
+ * Behavior:
+ *   - Single-line typewriter over a stage-aware message map.
+ *   - `key={taskId ?? job.id}` on TypewriterWaitState forces a fresh
+ *     instance per job/task so message rotation restarts cleanly.
+ *   - "cancel" button calls apiClient.cancelTask(taskId) and waits.
+ *   - On run_complete with status!='cancelled', forwards resume_id from
+ *     progress payload to onComplete for direct navigation to review.
+ */
+import React, { useCallback, useState } from 'react';
+import { Loader2 } from 'lucide-react';
+
 import { useSSE } from '../hooks/useSSE';
-import { cn } from '../lib/utils';
 import { TypewriterWaitState } from './TypewriterWaitState';
-import type { Job } from '../types';
+import { apiClient } from '../services/apiClient';
+import type { ReferenceJob } from '../services/jobAdapter';
 
 interface TailoringStripProps {
-  job: Job;
+  job: ReferenceJob;
   taskId: string | null;
-  onComplete: (jobId: string, resumeId?: string) => void;
+  onComplete: (resumeId?: string) => void;
   onCancel: () => void;
 }
 
-const STAGES = ['queued', 'planning', 'drafting', 'critiquing', 'revising', 'saving'] as const;
+const tailoringMessages = (role: string, company: string) => [
+  `Reading ${company}'s job description... (already in pain)`,
+  `Counting buzzwords... 17. A new record.`,
+  `Identifying actual requirements vs. founder's wishlist...`,
+  `Quietly judging their Glassdoor reviews...`,
+  `Tailoring your narrative for ${role}... nearly there`,
+  `Sending good vibes... (this part is free)`,
+];
 
 const stageMessages: Record<string, string> = {
-  queued: 'Starting up…',
-  planning: 'Planning changes…',
-  drafting: 'Tailoring your CV…',
+  queued:     'Queued — waiting for an agent slot…',
+  planning:   'Planning changes…',
+  drafting:   'Tailoring your CV…',
   critiquing: 'Reviewing changes…',
-  revising: 'Refining edits…',
-  saving: 'Saving your tailored CV…',
+  revising:   'Refining edits…',
+  saving:     'Saving your tailored CV…',
 };
 
-export const TailoringStrip: React.FC<TailoringStripProps> = ({
-  job, taskId, onComplete, onCancel,
-}) => {
-  const [stage, setStage] = useState<string>('queued');
-  const [stopping, setStopping] = useState(false);
-  const [typewriterDone, setTypewriterDone] = useState(false);
-
-  // Reset typewriter animation whenever stage advances
-  useEffect(() => {
-    setTypewriterDone(false);
-  }, [stage]);
+export const TailoringStrip: React.FC<TailoringStripProps> = ({ job, taskId, onComplete, onCancel }) => {
+  const [stage, setStage] = useState<string | null>(null);
+  const [resumeId, setResumeId] = useState<string | undefined>(undefined);
+  const [cancelling, setCancelling] = useState(false);
 
   useSSE(taskId, {
-    onProgress: useCallback((event) => {
-      const s = event.progress?.stage;
-      if (s) setStage(s);
-    }, []),
-    onRunComplete: useCallback((event) => {
-      if (event.status === 'cancelled') return;
-      const resumeId = event.progress?.resume_id;
-      onComplete(job.id, resumeId);
-    }, [job.id, onComplete]),
+    onProgress: (event) => {
+      const p = event.progress;
+      if (p?.stage) setStage(p.stage);
+      if (p?.resume_id) setResumeId(p.resume_id);
+    },
+    onRunComplete: (event) => {
+      if (event.status === 'cancelled') {
+        onCancel();
+        return;
+      }
+      const rid = event.progress?.resume_id ?? resumeId;
+      onComplete(rid);
+    },
   });
 
-  const currentStageIndex = (STAGES as readonly string[]).indexOf(stage);
-  const message = stageMessages[stage] || 'Processing…';
+  const handleCancel = useCallback(async () => {
+    if (!taskId || cancelling) return;
+    setCancelling(true);
+    try {
+      await apiClient.cancelTask(taskId);
+    } catch {
+      // Even on a network error, surface as cancel — the worker checks
+      // status at node boundaries and will exit either way.
+    } finally {
+      onCancel();
+    }
+  }, [taskId, cancelling, onCancel]);
 
-  const handleStop = () => {
-    setStopping(true);
-    onCancel();
-  };
+  // Live (stage-aware) message overrides the rotating typewriter set.
+  const liveMessage = stage ? stageMessages[stage] : null;
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[420px] border-t-2 border-accent bg-surface border border-white/10 rounded-sm px-5 py-4">
-      {/* Job context + stop button */}
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-mono text-gray-500 truncate max-w-[260px]">
-          {job.title}
-          {job.company_name && (
-            <span className="text-gray-600"> · {job.company_name}</span>
-          )}
-        </span>
-        <button
-          onClick={handleStop}
-          disabled={stopping}
-          className={cn(
-            'text-xs font-mono text-gray-600 hover:text-semantic-red-400 transition-colors cursor-pointer flex-shrink-0 ml-4',
-            stopping && 'opacity-50 cursor-not-allowed',
-          )}
-        >
-          {stopping ? 'Stopping…' : 'Stop Tailoring'}
-        </button>
+    <div className="border-t border-white/5 bg-surface px-6 py-3 flex items-center gap-4">
+      {/* Left: job context */}
+      <div className="shrink-0 text-xs font-mono text-gray-500">
+        <span className="text-accent">{job.role}</span>
+        <span className="mx-1.5">·</span>
+        <span>{job.company}</span>
       </div>
 
-      {/* Pipeline stage dots */}
-      <div className="flex items-center gap-2 mb-3">
-        {STAGES.map((s, i) => {
-          const isPast = i < currentStageIndex;
-          const isCurrent = i === currentStageIndex;
-          return (
-            <div
-              key={s}
-              className={cn(
-                'rounded-full transition-all',
-                isCurrent
-                  ? 'w-2.5 h-2.5 bg-accent animate-pulse'
-                  : isPast
-                    ? 'w-1.5 h-1.5 bg-accent'
-                    : 'w-1.5 h-1.5 bg-white/15',
-              )}
-            />
-          );
-        })}
-      </div>
+      <div className="w-px h-4 bg-white/10 shrink-0" />
 
-      {/* Stage message with typewriter */}
-      <div className="min-h-[24px] flex items-center">
-        {typewriterDone ? (
-          <span className="font-mono text-sm text-gray-300">{message}</span>
+      {/* Typewriter line */}
+      <div className="flex-1 min-w-0">
+        {liveMessage ? (
+          <div className="text-xs font-mono text-gray-300">
+            <span className="text-accent mr-2">→</span>
+            {liveMessage}
+          </div>
         ) : (
           <TypewriterWaitState
-            key={stage}
-            messages={[message]}
-            onComplete={() => setTypewriterDone(true)}
-            speed={20}
-            loop={false}
-            className="text-sm text-gray-300"
+            key={taskId ?? job.id}
+            messages={tailoringMessages(job.role, job.company)}
+            speed={25}
+            delayBetweenMessages={1200}
+            compact
           />
         )}
       </div>
+
+      {/* Cancel */}
+      <button
+        onClick={handleCancel}
+        disabled={cancelling}
+        className="shrink-0 text-xs font-mono text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-wait"
+      >
+        {cancelling && <Loader2 className="w-3 h-3 animate-spin" />}
+        {cancelling ? 'Cancelling…' : 'cancel'}
+      </button>
     </div>
   );
 };

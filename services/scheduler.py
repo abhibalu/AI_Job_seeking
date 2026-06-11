@@ -115,6 +115,36 @@ def reap_stale_tailoring_runs():
         set_correlation_id(None)
 
 
+def _gated_scrape_worker() -> None:
+    """APScheduler entry point for the scrape worker.
+
+    Reads `pipeline_scrape_mode` from system_config; no-ops when 'manual'
+    so the agent only runs when the user has opted into auto scraping.
+    Manual triggers via POST /api/scheduler/trigger/scrape call into
+    run_scrape_worker() directly, bypassing this gate (ADR-0024).
+    """
+    from agents.database import get_pipeline_config
+    from services.scraper_worker import run_scrape_worker
+
+    cfg = get_pipeline_config()
+    if cfg.get("scrape_mode") == "manual":
+        logger.info("[Scheduler] scrape cron skipped: pipeline_scrape_mode=manual")
+        return
+    run_scrape_worker()
+
+
+def _gated_eval_worker() -> None:
+    """APScheduler entry point for the eval worker; gated on pipeline_evaluate_mode."""
+    from agents.database import get_pipeline_config
+    from services.eval_worker import run_eval_worker
+
+    cfg = get_pipeline_config()
+    if cfg.get("evaluate_mode") == "manual":
+        logger.info("[Scheduler] eval cron skipped: pipeline_evaluate_mode=manual")
+        return
+    run_eval_worker()
+
+
 def start_scheduler() -> None:
     """Start the background scheduler and register jobs. Called from FastAPI startup."""
     if not settings.SCHEDULER_ENABLED:
@@ -127,11 +157,11 @@ def start_scheduler() -> None:
         logger.warning("[Scheduler] Already running — skipping start.")
         return
 
-    from services.scraper_worker import run_scrape_worker
-    from services.eval_worker import run_eval_worker
-
+    # Cron jobs are registered with the gated wrappers (ADR-0024). The
+    # underlying worker callables are still importable for the manual
+    # /trigger/* endpoints and for tests.
     scheduler.add_job(
-        run_scrape_worker,
+        _gated_scrape_worker,
         trigger=_build_trigger(settings.SCRAPE_CRON, settings.SCRAPE_INTERVAL_HOURS, "ScrapeWorker"),
         id="scrape_worker",
         name="LinkedIn Scraper",
@@ -139,7 +169,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
-        run_eval_worker,
+        _gated_eval_worker,
         trigger=_build_trigger(settings.EVAL_CRON, settings.EVAL_INTERVAL_HOURS, "EvalWorker"),
         id="eval_worker",
         name="Job Evaluator",

@@ -18,8 +18,8 @@ import logging
 from agents.database import (
     save_task_status,
     get_task_status,
-    save_evaluation,
 )
+from agents.evaluator_writer import save_evaluation_with_card_lines
 from agents.pipeline_graph import (
     node_evaluate,
     node_parse,
@@ -85,7 +85,7 @@ def run_reeval_worker(task_id: str, job_id: str, job_details: dict):
         # Save evaluation to DB immediately (same as sync behavior)
         if state.get("evaluation"):
             try:
-                save_evaluation(state["evaluation"])
+                save_evaluation_with_card_lines(state["evaluation"])
             except Exception as e:
                 logger.warning("[ReEvalWorker] Failed to save evaluation to DB: %s", e, exc_info=True)
 

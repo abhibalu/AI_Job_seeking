@@ -13,11 +13,17 @@ class ScraperService:
     API_HOST = "api.apify.com"
 
     @classmethod
-    def scrape_and_import(cls, url: str) -> Dict[str, Any]:
+    def scrape_and_import(cls, url: str, run_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Scrape a single LinkedIn job URL (or search URL) using Apify.
         Maps and upserts all found jobs to Supabase.
         Returns a summary of the operation.
+
+        If `run_id` is provided, every imported job row is stamped with
+        `run_id` so the OotoCV feed can group jobs under their scrape run
+        (ADR-0025). Manual single-URL imports from the UI omit it; the
+        corresponding `jobs.run_id` stays NULL and the UI buckets it under
+        "Pre-runs".
 
         Raises HTTPException(503) if Apify service is disabled.
         """
@@ -57,6 +63,12 @@ class ScraperService:
                 # Persist raw_json alongside the mapped record (Bronze-layer safety net)
                 # Allows future reprocessing without re-scraping
                 app_record["raw_json"] = job_item
+
+                # Stamp the producing pipeline_runs id for OotoCV feed grouping.
+                # Only set when present so manual imports keep run_id NULL
+                # (and do not violate the FK with a fake id).
+                if run_id:
+                    app_record["run_id"] = run_id
 
                 # Upsert to Supabase
                 client.table("jobs").upsert(app_record, on_conflict="id").execute()

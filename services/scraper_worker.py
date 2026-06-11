@@ -78,7 +78,8 @@ def run_scrape_worker() -> None:
     for url in urls:
         try:
             existing_ids_before = _get_existing_ids()
-            result = ScraperService.scrape_and_import(url)
+            # Pass run_id so every imported job carries jobs.run_id (ADR-0025).
+            result = ScraperService.scrape_and_import(url, run_id=run_id)
             found = result.get("count", 0)
             total_found += found
 
